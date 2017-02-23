@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include <pthread.h>
+#include <netdb.h>
 
 #define check(cond) do {	 \
     int rv = (cond);		 \
@@ -122,8 +123,36 @@ void *thread_receiver(void *data) {
 }
 
 int main(int argc, char *argv[]) {
-  struct sockaddr_in serverAddr;
+  char *hostname = "127.0.0.1";
+  struct sockaddr_in serveraddr;
   socklen_t addr_size;
+
+  argc--;  argv++;
+  while (argc > 0) {
+    if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
+      printf("Usage: client [-h|--help] [-s hostname]\n");
+      exit(0);
+    } else if (strcmp(argv[0], "-s") == 0) {
+      assert(argc >= 2);
+      hostname = argv[1];
+      argc--;  argv++;
+    }
+    argc--;  argv++;
+  }
+
+  char *ip;
+  printf("Resolving %s...\n", hostname);
+  struct hostent *e = gethostbyname(hostname);
+  check(e != NULL);
+
+  /* build the server's Internet address */
+  bzero((char *) &serveraddr, sizeof(serveraddr));
+  serveraddr.sin_family = AF_INET;
+  bcopy((char *)e->h_addr, 
+	(char *)&serveraddr.sin_addr.s_addr, e->h_length);
+  serveraddr.sin_port = htons(7891);
+
+  printf("Host %s resolved to %d bytes: %s\n", hostname, e->h_length, inet_ntoa(serveraddr.sin_addr));
 
   /*---- Create the socket. The three arguments are: ----*/
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
@@ -132,19 +161,9 @@ int main(int argc, char *argv[]) {
   int val = 0;
   setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val));
 
-  /*---- Configure settings of the server address struct ----*/
-  /* Address family = Internet */
-  serverAddr.sin_family = AF_INET;
-  /* Set port number, using htons function to use proper byte order */
-  serverAddr.sin_port = htons(7891);
-  /* Set IP address to localhost */
-  serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
-  /* Set all bits of the padding field to 0 */
-  memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
-
   /*---- Connect the socket to the server using the address struct ----*/
-  addr_size = sizeof serverAddr;
-  check(connect(clientSocket, (struct sockaddr *) &serverAddr, addr_size));
+  addr_size = sizeof(serveraddr);
+  check(connect(clientSocket, (struct sockaddr *) &serveraddr, addr_size));
 
   pthread_t sender;
   pthread_create(&sender, NULL, thread_sender, (void *) 0);
