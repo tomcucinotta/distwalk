@@ -1,5 +1,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 
 #include <stdio.h>
@@ -7,6 +8,11 @@
 #include <assert.h>
 
 #include <stdlib.h>
+#include <time.h>
+
+#include <unistd.h>
+
+#include <pthread.h>
 
 #define check(cond) do {	 \
     int rv = (cond);		 \
@@ -30,6 +36,8 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
     int read;
     check(read = recv(sock, buf, len, 0));
+    if (read == 0)
+      break;
     buf += read;
     len -= read;
     read_tot += len;
@@ -37,17 +45,93 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   return read_tot;
 }
 
-int main(int argc, char *argv[]){
-  int clientSocket;
-  unsigned char req[1024];
-  unsigned char ans[1024];
+static inline struct timespec ts_add(struct timespec a, struct timespec b) {
+  struct timespec c;
+  c.tv_sec = a.tv_sec + b.tv_sec;
+  c.tv_nsec = a.tv_nsec + b.tv_nsec;
+  while (c.tv_nsec >= 1000000000) {
+    c.tv_sec++;
+    c.tv_nsec -= 1000000000;
+  }
+  return c;
+}
+
+static inline struct timespec ts_sub(struct timespec a, struct timespec b) {
+  struct timespec c;
+  c.tv_sec = a.tv_sec - b.tv_sec;
+  c.tv_nsec = a.tv_nsec - b.tv_nsec;
+  while (c.tv_nsec < 0) {
+    c.tv_sec--;
+    c.tv_nsec += 1000000000;
+  }
+  return c;
+}
+
+static inline long ts_sub_us(struct timespec a, struct timespec b) {
+  struct timespec c = ts_sub(a, b);
+  return (c.tv_sec * 1000000) + c.tv_nsec / 1000;
+}
+
+#define MAX_PKTS 10
+
+clockid_t clk_id = CLOCK_REALTIME;
+int clientSocket;
+long usecs_send[MAX_PKTS];
+long usecs_recv[MAX_PKTS];
+// abs start-time of the experiment
+struct timespec ts_start;
+
+void *thread_sender(void *data) {
+  int id = (int)(long) data;
+  unsigned char send_buf[1024];
+
+  struct timespec ts_now;
+  clock_gettime(clk_id, &ts_now);
+  // Remember in ts_start the abs start time of the experiment
+  ts_start = ts_now;
+
+  for (int i = 0; i < MAX_PKTS; i++) {
+    /* remember time of send relative to ts_start */
+    struct timespec ts_send;
+    clock_gettime(clk_id, &ts_send);
+    usecs_send[i] = ts_sub_us(ts_send, ts_start);
+    /*---- Issue a request to the server ---*/
+    send_buf[0] = (unsigned char) i;
+    safe_send(clientSocket, send_buf, 1);
+    struct timespec ts_delta = (struct timespec) { 0, 100000000 };// 100ms
+    ts_now = ts_add(ts_now, ts_delta);
+
+    int rv;
+    check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
+  }
+}
+
+void *thread_receiver(void *data) {
+  unsigned char recv_buf[1024];
+  for (int i = 0; i < MAX_PKTS; i++) {
+    /*---- Read the message from the server into the buffer ----*/
+    safe_recv(clientSocket, recv_buf, 1);
+    int pkt_id = recv_buf[0];
+    struct timespec ts_now;
+    clock_gettime(clk_id, &ts_now);
+    unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
+      + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
+    usecs_recv[pkt_id] = usecs;
+    printf("Data received: %02x (elapsed %ld us)\n", pkt_id, usecs - usecs_send[pkt_id]);
+  }
+}
+
+int main(int argc, char *argv[]) {
   struct sockaddr_in serverAddr;
   socklen_t addr_size;
 
   /*---- Create the socket. The three arguments are: ----*/
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
   clientSocket = socket(PF_INET, SOCK_STREAM, 0);
-  
+
+  int val = 0;
+  setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val));
+
   /*---- Configure settings of the server address struct ----*/
   /* Address family = Internet */
   serverAddr.sin_family = AF_INET;
@@ -60,17 +144,17 @@ int main(int argc, char *argv[]){
 
   /*---- Connect the socket to the server using the address struct ----*/
   addr_size = sizeof serverAddr;
-  assert(connect(clientSocket, (struct sockaddr *) &serverAddr, addr_size) == 0);
+  check(connect(clientSocket, (struct sockaddr *) &serverAddr, addr_size));
 
-  /*---- Issue a request to the server ---*/
-  req[0] = 0xab;
-  safe_send(clientSocket, req, 1);
-  
-  /*---- Read the message from the server into the buffer ----*/
-  int read = safe_recv(clientSocket, ans, 1);
+  pthread_t sender;
+  pthread_create(&sender, NULL, thread_sender, (void *) 0);
 
-  /*---- Print the received message ----*/
-  printf("Data received: %02x\n", ans[0]);   
+  pthread_t receiver;
+  pthread_create(&receiver, NULL, thread_receiver, NULL);
+
+  int rv;
+  pthread_join(sender, (void **) &rv);
+  pthread_join(receiver, (void **) &rv);
 
   return 0;
 }
