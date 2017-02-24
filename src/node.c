@@ -11,6 +11,8 @@
 
 #include <pthread.h>
 
+#include "message.h"
+
 #define check(cond) do {	 \
     int rv = (cond);		 \
     if (rv < 0) {		 \
@@ -33,11 +35,24 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
     int read;
     check(read = recv(sock, buf, len, 0));
+    if (read == 0)
+      return read_tot;
     buf += read;
     len -= read;
-    read_tot += len;
+    read_tot += read;
   }
   return read_tot;
+}
+
+size_t recv_message(int sock, unsigned char *buf, size_t len) {
+  assert(len >= 8);
+  size_t read = safe_recv(sock, buf, 8);
+  if (read == 0)
+    return read;
+  message_t *m = (message_t *) buf;
+  assert(len >= m->req_size - 8);
+  assert(safe_recv(sock, buf + 8, m->req_size - 8) == m->req_size - 8);
+  return m->req_size;
 }
 
 void *receive_thread(void *data) {
@@ -45,11 +60,13 @@ void *receive_thread(void *data) {
   unsigned char buf[1024];
 
   while (1) {
-    int rv = recv(sock, buf, 1, 0);
-    check(rv);
-    if (rv == 0)
+    size_t msg_size = recv_message(sock, buf, sizeof(buf));
+    if (msg_size == 0) {
+      printf("Connection closed by remote end\n");
       break;
-    printf("Echoing: %02x\n", buf[0]);
+    }
+    message_t *m = (message_t *) buf;
+    printf("Received %lu bytes, req_id=%u, req_size=%u, num=%d\n", msg_size, m->req_id, m->req_size, m->num);
     safe_send(sock, buf, 1);
   }
   check(close(sock));
@@ -90,6 +107,7 @@ int main(int argc, char *argv[]) {
     /*---- Accept call creates a new socket for the incoming connection ----*/
     addr_size = sizeof serverStorage;
     newSocket = accept(welcomeSocket, (struct sockaddr *) &serverStorage, &addr_size);
+    printf("Spawning thread for new connection...\n");
     pthread_t child;
     check(pthread_create(&child, NULL, receive_thread, (void *)(long) newSocket));
     check(pthread_detach(child));

@@ -15,6 +15,8 @@
 #include <pthread.h>
 #include <netdb.h>
 
+#include "message.h"
+
 #define check(cond) do {	 \
     int rv = (cond);		 \
     if (rv < 0) {		 \
@@ -41,7 +43,7 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
       break;
     buf += read;
     len -= read;
-    read_tot += len;
+    read_tot += read;
   }
   return read_tot;
 }
@@ -97,8 +99,12 @@ void *thread_sender(void *data) {
     clock_gettime(clk_id, &ts_send);
     usecs_send[i] = ts_sub_us(ts_send, ts_start);
     /*---- Issue a request to the server ---*/
-    send_buf[0] = (unsigned char) i;
-    safe_send(clientSocket, send_buf, 1);
+    message_t *m = (message_t *) send_buf;
+    m->req_id = i;
+    m->req_size = sizeof(send_buf);
+    m->num = 0;
+    printf("Sending %u bytes...\n", m->req_size);
+    safe_send(clientSocket, send_buf, m->req_size);
     struct timespec ts_delta = (struct timespec) { 0, 100000000 };// 100ms
     ts_now = ts_add(ts_now, ts_delta);
 
