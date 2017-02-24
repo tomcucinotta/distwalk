@@ -16,6 +16,8 @@
 #include <netdb.h>
 
 #include "message.h"
+#include "timespec.h"
+#include "cw_debug.h"
 
 #define check(cond) do {	 \
     int rv = (cond);		 \
@@ -48,33 +50,6 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   return read_tot;
 }
 
-static inline struct timespec ts_add(struct timespec a, struct timespec b) {
-  struct timespec c;
-  c.tv_sec = a.tv_sec + b.tv_sec;
-  c.tv_nsec = a.tv_nsec + b.tv_nsec;
-  while (c.tv_nsec >= 1000000000) {
-    c.tv_sec++;
-    c.tv_nsec -= 1000000000;
-  }
-  return c;
-}
-
-static inline struct timespec ts_sub(struct timespec a, struct timespec b) {
-  struct timespec c;
-  c.tv_sec = a.tv_sec - b.tv_sec;
-  c.tv_nsec = a.tv_nsec - b.tv_nsec;
-  while (c.tv_nsec < 0) {
-    c.tv_sec--;
-    c.tv_nsec += 1000000000;
-  }
-  return c;
-}
-
-static inline long ts_sub_us(struct timespec a, struct timespec b) {
-  struct timespec c = ts_sub(a, b);
-  return (c.tv_sec * 1000000) + c.tv_nsec / 1000;
-}
-
 #define MAX_PKTS 10
 
 clockid_t clk_id = CLOCK_REALTIME;
@@ -102,8 +77,10 @@ void *thread_sender(void *data) {
     message_t *m = (message_t *) send_buf;
     m->req_id = i;
     m->req_size = sizeof(send_buf);
-    m->num = 0;
-    printf("Sending %u bytes...\n", m->req_size);
+    m->num = 1;
+    m->cmds[0].cmd = COMPUTE;
+    m->cmds[0].u.comp_time_us = 1000;
+    cw_log("Sending %u bytes...\n", m->req_size);
     safe_send(clientSocket, send_buf, m->req_size);
     struct timespec ts_delta = (struct timespec) { 0, 100000000 };// 100ms
     ts_now = ts_add(ts_now, ts_delta);
@@ -124,7 +101,7 @@ void *thread_receiver(void *data) {
     unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
       + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
     usecs_recv[pkt_id] = usecs;
-    printf("Data received: %02x (elapsed %ld us)\n", pkt_id, usecs - usecs_send[pkt_id]);
+    cw_log("Data received: %02x (elapsed %ld us)\n", pkt_id, usecs - usecs_send[pkt_id]);
   }
 }
 
@@ -136,7 +113,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-s hostname]\n");
+      cw_log("Usage: client [-h|--help] [-s hostname]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -147,7 +124,7 @@ int main(int argc, char *argv[]) {
   }
 
   char *ip;
-  printf("Resolving %s...\n", hostname);
+  cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
   check(e != NULL);
 
@@ -158,7 +135,7 @@ int main(int argc, char *argv[]) {
 	(char *)&serveraddr.sin_addr.s_addr, e->h_length);
   serveraddr.sin_port = htons(7891);
 
-  printf("Host %s resolved to %d bytes: %s\n", hostname, e->h_length, inet_ntoa(serveraddr.sin_addr));
+  cw_log("Host %s resolved to %d bytes: %s\n", hostname, e->h_length, inet_ntoa(serveraddr.sin_addr));
 
   /*---- Create the socket. The three arguments are: ----*/
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */

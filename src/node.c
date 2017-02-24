@@ -12,6 +12,8 @@
 #include <pthread.h>
 
 #include "message.h"
+#include "timespec.h"
+#include "cw_debug.h"
 
 #define check(cond) do {	 \
     int rv = (cond);		 \
@@ -55,6 +57,15 @@ size_t recv_message(int sock, unsigned char *buf, size_t len) {
   return m->req_size;
 }
 
+void compute_for(unsigned long usecs) {
+  struct timespec ts_beg, ts_end;
+  cw_log("Computing for %lu usecs\n", usecs);
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_beg);
+  do {
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
+  } while (ts_sub_us(ts_end, ts_beg) < usecs);
+}
+
 void *receive_thread(void *data) {
   int sock = (int)(long) data;
   unsigned char buf[1024];
@@ -62,11 +73,16 @@ void *receive_thread(void *data) {
   while (1) {
     size_t msg_size = recv_message(sock, buf, sizeof(buf));
     if (msg_size == 0) {
-      printf("Connection closed by remote end\n");
+      cw_log("Connection closed by remote end\n");
       break;
     }
     message_t *m = (message_t *) buf;
-    printf("Received %lu bytes, req_id=%u, req_size=%u, num=%d\n", msg_size, m->req_id, m->req_size, m->num);
+    cw_log("Received %lu bytes, req_id=%u, req_size=%u, num=%d\n", msg_size, m->req_id, m->req_size, m->num);
+    if (m->num >= 1) {
+      if (m->cmds[0].cmd == COMPUTE) {
+	compute_for(m->cmds[0].u.comp_time_us);
+      }
+    }
     safe_send(sock, buf, 1);
   }
   check(close(sock));
@@ -101,13 +117,13 @@ int main(int argc, char *argv[]) {
 
   /*---- Listen on the socket, with 5 max connection requests queued ----*/
   check(listen(welcomeSocket,5));
-  printf("Listening\n");
+  cw_log("Listening\n");
 
   while (1) {
     /*---- Accept call creates a new socket for the incoming connection ----*/
     addr_size = sizeof serverStorage;
     newSocket = accept(welcomeSocket, (struct sockaddr *) &serverStorage, &addr_size);
-    printf("Spawning thread for new connection...\n");
+    cw_log("Spawning thread for new connection...\n");
     pthread_t child;
     check(pthread_create(&child, NULL, receive_thread, (void *)(long) newSocket));
     check(pthread_detach(child));
