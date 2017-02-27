@@ -50,7 +50,7 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   return read_tot;
 }
 
-#define MAX_PKTS 10
+#define MAX_PKTS 100
 
 clockid_t clk_id = CLOCK_REALTIME;
 int clientSocket;
@@ -61,7 +61,7 @@ struct timespec ts_start;
 
 void *thread_sender(void *data) {
   int id = (int)(long) data;
-  unsigned char send_buf[1024];
+  unsigned char send_buf[256];
 
   struct timespec ts_now;
   clock_gettime(clk_id, &ts_now);
@@ -79,19 +79,20 @@ void *thread_sender(void *data) {
     m->req_size = sizeof(send_buf);
     m->num = 1;
     m->cmds[0].cmd = COMPUTE;
-    m->cmds[0].u.comp_time_us = 1000;
+    m->cmds[0].u.comp_time_us = 1;
     cw_log("Sending %u bytes...\n", m->req_size);
     safe_send(clientSocket, send_buf, m->req_size);
-    struct timespec ts_delta = (struct timespec) { 0, 100000000 };// 100ms
+    struct timespec ts_delta = (struct timespec) { 0, 1000000 };// 1ms
     ts_now = ts_add(ts_now, ts_delta);
 
-    int rv;
     check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
   }
+
+  return 0;
 }
 
 void *thread_receiver(void *data) {
-  unsigned char recv_buf[1024];
+  unsigned char recv_buf[256];
   for (int i = 0; i < MAX_PKTS; i++) {
     /*---- Read the message from the server into the buffer ----*/
     safe_recv(clientSocket, recv_buf, 1);
@@ -103,6 +104,12 @@ void *thread_receiver(void *data) {
     usecs_recv[pkt_id] = usecs;
     cw_log("Data received: %02x (elapsed %ld us)\n", pkt_id, usecs - usecs_send[pkt_id]);
   }
+
+  for (int i = 0; i < MAX_PKTS; i++) {
+    printf("elapsed: %ld us\n", usecs_recv[i] - usecs_send[i]);
+  }
+
+  return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -123,7 +130,6 @@ int main(int argc, char *argv[]) {
     argc--;  argv++;
   }
 
-  char *ip;
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
   check(e != NULL);

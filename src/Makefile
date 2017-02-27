@@ -1,4 +1,5 @@
-CFLAGS=-g
+CFLAGS=-Wall -O3
+#CFLAGS=-g -DCW_DEBUG
 LDFLAGS=-pthread
 
 all: client node
