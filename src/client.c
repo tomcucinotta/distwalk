@@ -18,7 +18,6 @@
 #include "message.h"
 #include "timespec.h"
 
-#define CW_DEBUG
 #include "cw_debug.h"
 
 #define check(cond) do {	 \
