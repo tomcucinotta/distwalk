@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      cw_log("Usage: client [-h|--help] [-s hostname] [-c pkt_count]\n");
+      printf("Usage: client [-h|--help] [-s hostname] [-c pkt_count]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
