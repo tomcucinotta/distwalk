@@ -96,7 +96,7 @@ void *thread_sender(void *data) {
 
 void *thread_receiver(void *data) {
   unsigned char recv_buf[256];
-  for (int i = 0; i < MAX_PKTS; i++) {
+  for (int i = 0; i < num_pkts; i++) {
     /*---- Read the message from the server into the buffer ----*/
     safe_recv(clientSocket, recv_buf, 1);
     int pkt_id = recv_buf[0];
@@ -108,7 +108,7 @@ void *thread_receiver(void *data) {
     cw_log("Data received: %02x (elapsed %ld us)\n", pkt_id, usecs - usecs_send[pkt_id]);
   }
 
-  for (int i = 0; i < MAX_PKTS; i++) {
+  for (int i = 0; i < num_pkts; i++) {
     printf("elapsed: %ld us\n", usecs_recv[i] - usecs_send[i]);
   }
 
