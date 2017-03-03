@@ -122,8 +122,8 @@ void process_messages(int sock, int buf_id) {
 	compute_for(m->cmds[0].u.comp_time_us);
       }
     }
-    cw_log("Sending back %d\n", buf[0]);
-    safe_send(sock, buf, 1);
+    cw_log("Sending back %lu\n", m->req_id);
+    safe_send(sock, buf, sizeof(message_t));
 
     // move to batch processing of next message if any
     buf += m->req_size;
@@ -162,7 +162,7 @@ void *receive_thread(void *data) {
 	compute_for(m->cmds[0].u.comp_time_us);
       }
     }
-    safe_send(sock, buf, 1);
+    safe_send(sock, buf, sizeof(message_t));
   }
   check(close(sock));
   return 0;

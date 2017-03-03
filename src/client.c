@@ -97,14 +97,15 @@ void *thread_receiver(void *data) {
   unsigned char recv_buf[256];
   for (int i = 0; i < num_pkts; i++) {
     /*---- Read the message from the server into the buffer ----*/
-    safe_recv(clientSocket, recv_buf, 1);
-    int pkt_id = recv_buf[0];
+    safe_recv(clientSocket, recv_buf, sizeof(message_t));
+    message_t *m = (message_t *) recv_buf;
+    unsigned long pkt_id = m->req_id;
     struct timespec ts_now;
     clock_gettime(clk_id, &ts_now);
     unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
       + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
     usecs_elapsed[pkt_id] = usecs - usecs_send[pkt_id];
-    cw_log("Data received: %02x (elapsed %ld us)\n", pkt_id, usecs_elapsed[pkt_id]);
+    cw_log("Data received: %02lx (elapsed %ld us)\n", pkt_id, usecs_elapsed[pkt_id]);
   }
 
   for (int i = 0; i < num_pkts; i++) {
