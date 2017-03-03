@@ -59,6 +59,7 @@ long usecs_recv[MAX_PKTS];
 // abs start-time of the experiment
 struct timespec ts_start;
 unsigned long num_pkts = 1000;
+unsigned long period_us = 1000;
 
 void *thread_sender(void *data) {
   unsigned char send_buf[256];
@@ -82,7 +83,7 @@ void *thread_sender(void *data) {
     m->cmds[0].u.comp_time_us = 1;
     cw_log("Sending %u bytes...\n", m->req_size);
     safe_send(clientSocket, send_buf, m->req_size);
-    struct timespec ts_delta = (struct timespec) { 0, 1000000 };// 1ms
+    struct timespec ts_delta = (struct timespec) { period_us / 1000000, (period_us % 1000000) * 1000 };
     ts_now = ts_add(ts_now, ts_delta);
 
     check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
@@ -120,7 +121,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-s hostname] [-c pkt_count]\n");
+      printf("Usage: client [-h|--help] [-s hostname] [-c num_pkts] [-p period(us)]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -131,12 +132,18 @@ int main(int argc, char *argv[]) {
       num_pkts = atoi(argv[1]);
       assert(num_pkts <= MAX_PKTS);
       argc--;  argv++;
+    } else if (strcmp(argv[0], "-p") == 0) {
+      assert(argc >= 2);
+      period_us = atol(argv[1]);
+      argc--;  argv++;
     } else {
       printf("Unrecognized option: %s\n", argv[0]);
       exit(-1);
     }
     argc--;  argv++;
   }
+
+  printf("Configuration: hostname=%s num_pkts=%lu period_us=%lu\n", hostname, num_pkts, period_us);
 
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
