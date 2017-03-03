@@ -17,6 +17,8 @@
 
 #include "message.h"
 #include "timespec.h"
+
+#define CW_DEBUG
 #include "cw_debug.h"
 
 #define check(cond) do {	 \
@@ -69,7 +71,7 @@ void *thread_sender(void *data) {
   // Remember in ts_start the abs start time of the experiment
   ts_start = ts_now;
 
-  for (int i = 0; i < MAX_PKTS; i++) {
+  for (int i = 0; i < num_pkts; i++) {
     /* remember time of send relative to ts_start */
     struct timespec ts_send;
     clock_gettime(clk_id, &ts_send);
