@@ -58,7 +58,7 @@ long usecs_send[MAX_PKTS];
 long usecs_recv[MAX_PKTS];
 // abs start-time of the experiment
 struct timespec ts_start;
-unsigned long num_pkts = 1000;
+unsigned long num_pkts = 10;
 unsigned long period_us = 1000;
 
 void *thread_sender(void *data) {
