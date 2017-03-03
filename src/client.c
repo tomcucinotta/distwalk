@@ -50,7 +50,7 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   return read_tot;
 }
 
-#define MAX_PKTS 100
+#define MAX_PKTS 1000000
 
 clockid_t clk_id = CLOCK_REALTIME;
 int clientSocket;
@@ -58,9 +58,9 @@ long usecs_send[MAX_PKTS];
 long usecs_recv[MAX_PKTS];
 // abs start-time of the experiment
 struct timespec ts_start;
+unsigned long num_pkts = 1000;
 
 void *thread_sender(void *data) {
-  int id = (int)(long) data;
   unsigned char send_buf[256];
 
   struct timespec ts_now;
@@ -120,12 +120,20 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      cw_log("Usage: client [-h|--help] [-s hostname]\n");
+      cw_log("Usage: client [-h|--help] [-s hostname] [-c pkt_count]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
       hostname = argv[1];
       argc--;  argv++;
+    } else if (strcmp(argv[0], "-c") == 0) {
+      assert(argc >= 2);
+      num_pkts = atoi(argv[1]);
+      assert(num_pkts <= MAX_PKTS);
+      argc--;  argv++;
+    } else {
+      printf("Unrecognized option: %s\n", argv[0]);
+      exit(-1);
     }
     argc--;  argv++;
   }
