@@ -56,7 +56,7 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
 clockid_t clk_id = CLOCK_REALTIME;
 int clientSocket;
 long usecs_send[MAX_PKTS];
-long usecs_recv[MAX_PKTS];
+long usecs_elapsed[MAX_PKTS];
 // abs start-time of the experiment
 struct timespec ts_start;
 unsigned long num_pkts = 10;
@@ -103,12 +103,12 @@ void *thread_receiver(void *data) {
     clock_gettime(clk_id, &ts_now);
     unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
       + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
-    usecs_recv[pkt_id] = usecs;
-    cw_log("Data received: %02x (elapsed %ld us)\n", pkt_id, usecs - usecs_send[pkt_id]);
+    usecs_elapsed[pkt_id] = usecs - usecs_send[pkt_id];
+    cw_log("Data received: %02x (elapsed %ld us)\n", pkt_id, usecs_elapsed[pkt_id]);
   }
 
   for (int i = 0; i < num_pkts; i++) {
-    printf("elapsed: %ld us\n", usecs_recv[i] - usecs_send[i]);
+    printf("elapsed: %ld us\n", usecs_elapsed[i]);
   }
 
   return 0;
