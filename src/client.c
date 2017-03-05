@@ -20,14 +20,6 @@
 
 #include "cw_debug.h"
 
-#define check(cond) do {	 \
-    int rv = (cond);		 \
-    if (rv < 0) {		 \
-      perror("Error: " #cond);	 \
-      exit(-1);			 \
-    }				 \
-  } while (0)
-
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
     int sent;

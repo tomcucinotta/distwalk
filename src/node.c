@@ -19,14 +19,6 @@
 #include <pthread.h>
 #include <sys/epoll.h>
 
-#define check(cond) do {	 \
-    int rv = (cond);		 \
-    if (rv < 0) {		 \
-      perror("Error: " #cond);	 \
-      exit(-1);			 \
-    }				 \
-  } while (0)
-
 typedef struct {
   unsigned char *buf;		// NULL for unused buf_info
   unsigned long buf_size;
