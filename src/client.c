@@ -116,6 +116,7 @@ void *thread_receiver(void *data) {
 }
 
 int main(int argc, char *argv[]) {
+  int rv;
   char *hostname = "127.0.0.1";
   struct sockaddr_in serveraddr;
   socklen_t addr_size;
@@ -177,7 +178,6 @@ int main(int argc, char *argv[]) {
   pthread_t receiver;
   pthread_create(&receiver, NULL, thread_receiver, NULL);
 
-  int rv;
   pthread_join(sender, (void **) &rv);
   pthread_join(receiver, (void **) &rv);
 
