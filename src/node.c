@@ -41,6 +41,9 @@ typedef struct {
 #define MAX_SOCKETS 16
 sock_info socks[MAX_SOCKETS];
 
+char *bind_name = "0.0.0.0";
+int bind_port = 7891;
+
 // add the IP/port into the socks[] map to allow FORWARD finding an
 // already set-up socket, through sock_find()
 // FIXME: bad complexity with many sockets
@@ -90,21 +93,24 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
 
 unsigned char fwd_buf[BUF_SIZE];
 
-void forward(int buf_id, message_t *m) {
-  int sock = sock_find_addr(m->cmds[0].u.fwd.fwd_host, m->cmds[0].u.fwd.fwd_port);
+// cmd_id is the index of the FORWARD item within m->cmds[] here, we
+// remove the first (cmd_id+1) commands from cmds[], and forward the
+// rest to the next hop
+void forward(int buf_id, message_t *m, int cmd_id) {
+  int sock = sock_find_addr(m->cmds[cmd_id].u.fwd.fwd_host, m->cmds[cmd_id].u.fwd.fwd_port);
   assert(sock != -1);
   message_t *m_dst = (message_t *) fwd_buf;
   // copy message header
   *m_dst = *m;
-  // left-shift m->cmds[] into m_dst->cmds[], removing m->cmds[0] (FORWARD)
-  for (int i = 1; i < m->num; i++) {
-    m_dst->cmds[i - 1] = m->cmds[i];
+  // left-shift m->cmds[] into m_dst->cmds[], removing m->cmds[cmd_id] (FORWARD)
+  for (int i = cmd_id + 1; i < m->num; i++) {
+    m_dst->cmds[i - cmd_id - 1] = m->cmds[i];
   }
-  m_dst->num = m->num - 1;
-  m_dst->req_size = m->cmds[0].u.fwd.pkt_size;
+  m_dst->num = m->num - cmd_id - 1;
+  m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
   cw_log("Forwarding req %u to %s:%d\n", m->req_id,
-	 inet_ntoa((struct in_addr) { m->cmds[0].u.fwd.fwd_host }),
-	 m->cmds[0].u.fwd.fwd_port);
+	 inet_ntoa((struct in_addr) { m->cmds[cmd_id].u.fwd.fwd_host }),
+	 m->cmds[cmd_id].u.fwd.fwd_port);
   cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num, m_dst->req_size);
   // TODO: return to epoll loop to handle sending of long packets
   // (here I'm blocking the thread)
@@ -124,7 +130,7 @@ size_t recv_message(int sock, unsigned char *buf, size_t len) {
 
 void compute_for(unsigned long usecs) {
   struct timespec ts_beg, ts_end;
-  cw_log("Computing for %lu usecs\n", usecs);
+  cw_log("COMPUTE: computing for %lu usecs\n", usecs);
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_beg);
   do {
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
@@ -165,15 +171,19 @@ void process_messages(int sock, int buf_id) {
       cw_log("Got header but incomplete message, need to recv() more...\n");
       break;
     }
-    if (m->num >= 1) {
-      if (m->cmds[0].cmd == COMPUTE) {
-	compute_for(m->cmds[0].u.comp_time_us);
-      } else if (m->cmds[0].cmd == FORWARD) {
-	forward(buf_id, m);
-      } else if (m->cmds[0].cmd == REPLY) {
+    for (int i = 0; i < m->num; i++) {
+      if (m->cmds[i].cmd == COMPUTE) {
+	compute_for(m->cmds[i].u.comp_time_us);
+      } else if (m->cmds[i].cmd == FORWARD) {
+	forward(buf_id, m, i);
+	// rest of cmds[] are for next hop, not me
+	break;
+      } else if (m->cmds[i].cmd == REPLY) {
 	// TODO: send back a new message whose size is m->cmds[0].u.pkt_size
-	cw_log("Sending back %u\n", m->req_id);
+	cw_log("REPLY: sending back %u\n", m->req_id);
 	safe_send(sock, buf, sizeof(message_t));
+	// not sure what host any further cmds[] is for, guess not me
+	break;
       } else {
 	cw_log("Unknown cmd: %d\n", m->cmds[0].cmd);
 	exit(-1);
@@ -315,6 +325,26 @@ int main(int argc, char *argv[]) {
   int welcomeSocket;
   struct sockaddr_in serverAddr;
 
+  argc--;  argv++;
+  while (argc > 0) {
+    if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
+      printf("Usage: node [-h|--help] [-b bindname] [-bp bindport]\n");
+      exit(0);
+    } else if (strcmp(argv[0], "-b") == 0) {
+      assert(argc >= 2);
+      bind_name = argv[1];
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-bp") == 0) {
+      assert(argc >= 2);
+      bind_port = atol(argv[1]);
+      argc--;  argv++;
+    } else {
+      printf("Unrecognized option: %s\n", argv[0]);
+      exit(-1);
+    }
+    argc--;  argv++;
+  }
+
   // Tag all buf_info as unused
   for (int i = 0; i < MAX_BUFFERS; i++) {
     bufs[i].buf = 0;
@@ -336,9 +366,9 @@ int main(int argc, char *argv[]) {
   /* Address family = Internet */
   serverAddr.sin_family = AF_INET;
   /* Set port number, using htons function to use proper byte order */
-  serverAddr.sin_port = htons(7891);
+  serverAddr.sin_port = htons(bind_port);
   /* Set IP address to localhost */
-  serverAddr.sin_addr.s_addr = inet_addr("0.0.0.0");
+  serverAddr.sin_addr.s_addr = inet_addr(bind_name);
   /* Set all bits of the padding field to 0 */
   memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
 
