@@ -21,6 +21,7 @@
 #include "expon.h"
 
 int use_expon = 0;
+int wait_spinning = 0;
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
@@ -92,7 +93,14 @@ void *thread_sender(void *data) {
 
     ts_now = ts_add(ts_now, ts_delta);
 
-    check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
+    if (wait_spinning) {
+      struct timespec ts;
+      do {
+	clock_gettime(clk_id, &ts);
+      } while (ts_leq(ts, ts_now));
+    } else {
+      check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
+    }
   }
 
   return 0;
@@ -146,14 +154,16 @@ int main(int argc, char *argv[]) {
       argc--;  argv++;
     } else if (strcmp(argv[0], "-e") == 0 || strcmp(argv[0], "--expon") == 0) {
       use_expon = 1;
-    } else {
+    } else if (strcmp(argv[0], "-ws") == 0 || strcmp(argv[0], "--waitspin") == 0) {
+      wait_spinning = 1;
+   } else {
       printf("Unrecognized option: %s\n", argv[0]);
       exit(-1);
     }
     argc--;  argv++;
   }
 
-  printf("Configuration: hostname=%s num_pkts=%lu period_us=%lu\n", hostname, num_pkts, period_us);
+  printf("Configuration: hostname=%s num_pkts=%lu period_us=%lu expon=%d waitspin=%d\n", hostname, num_pkts, period_us, use_expon, wait_spinning);
 
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
