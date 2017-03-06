@@ -114,7 +114,7 @@ void process_messages(int sock, int buf_id) {
 	compute_for(m->cmds[0].u.comp_time_us);
       }
     }
-    cw_log("Sending back %lu\n", m->req_id);
+    cw_log("Sending back %u\n", m->req_id);
     safe_send(sock, buf, sizeof(message_t));
 
     // move to batch processing of next message if any
