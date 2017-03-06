@@ -6,11 +6,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-
+#include <math.h>
 #include <stdlib.h>
-#include <time.h>
-
 #include <unistd.h>
+#include <time.h>
 
 #include <pthread.h>
 #include <netdb.h>
@@ -19,6 +18,9 @@
 #include "timespec.h"
 
 #include "cw_debug.h"
+#include "expon.h"
+
+int use_expon = 0;
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
@@ -56,9 +58,12 @@ unsigned long period_us = 1000;
 
 void *thread_sender(void *data) {
   unsigned char send_buf[256];
-
   struct timespec ts_now;
+  struct drand48_data rnd_buf;
+
   clock_gettime(clk_id, &ts_now);
+  srand48_r(time(NULL), &rnd_buf);
+
   // Remember in ts_start the abs start time of the experiment
   ts_start = ts_now;
 
@@ -76,7 +81,15 @@ void *thread_sender(void *data) {
     m->cmds[0].u.comp_time_us = 1;
     cw_log("Sending %u bytes...\n", m->req_size);
     safe_send(clientSocket, send_buf, m->req_size);
-    struct timespec ts_delta = (struct timespec) { period_us / 1000000, (period_us % 1000000) * 1000 };
+
+    unsigned long period_ns;
+    if (use_expon) {
+      period_ns = lround(expon(1.0 / period_us, &rnd_buf) * 1000.0);
+    } else {
+      period_ns = period_us * 1000;
+    }
+    struct timespec ts_delta = (struct timespec) { period_ns / 1000000000, period_ns % 1000000000 };
+
     ts_now = ts_add(ts_now, ts_delta);
 
     check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
@@ -116,7 +129,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-s hostname] [-c num_pkts] [-p period(us)]\n");
+      printf("Usage: client [-h|--help] [-s hostname] [-c num_pkts] [-p period(us)] [-e|--expon]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -131,6 +144,8 @@ int main(int argc, char *argv[]) {
       assert(argc >= 2);
       period_us = atol(argv[1]);
       argc--;  argv++;
+    } else if (strcmp(argv[0], "-e") == 0 || strcmp(argv[0], "--expon") == 0) {
+      use_expon = 1;
     } else {
       printf("Unrecognized option: %s\n", argv[0]);
       exit(-1);
