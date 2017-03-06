@@ -57,6 +57,9 @@ struct timespec ts_start;
 unsigned long num_pkts = 10;
 unsigned long period_us = 1000;
 
+char *hostname = "127.0.0.1";
+char *bindname = "127.0.0.1";
+
 void *thread_sender(void *data) {
   unsigned char send_buf[256];
   struct timespec ts_now;
@@ -135,18 +138,21 @@ void *thread_receiver(void *data) {
 
 int main(int argc, char *argv[]) {
   int rv;
-  char *hostname = "127.0.0.1";
   struct sockaddr_in serveraddr;
   socklen_t addr_size;
 
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-s hostname] [-c num_pkts] [-p period(us)] [-e|--expon]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-s hostname] [-c num_pkts] [-p period(us)] [-e|--expon]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
       hostname = argv[1];
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-b") == 0) {
+      assert(argc >= 2);
+      bindname = argv[1];
       argc--;  argv++;
     } else if (strcmp(argv[0], "-c") == 0) {
       assert(argc >= 2);
@@ -168,11 +174,12 @@ int main(int argc, char *argv[]) {
     argc--;  argv++;
   }
 
-  printf("Configuration: hostname=%s num_pkts=%lu period_us=%lu expon=%d waitspin=%d\n", hostname, num_pkts, period_us, use_expon, wait_spinning);
+  printf("Configuration: bindname=%s hostname=%s num_pkts=%lu period_us=%lu expon=%d waitspin=%d\n", bindname, hostname, num_pkts, period_us, use_expon, wait_spinning);
 
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
   check(e != NULL);
+  cw_log("Host %s resolved to %d bytes: %s\n", hostname, e->h_length, inet_ntoa(*(struct in_addr *)e->h_addr));
 
   /* build the server's Internet address */
   bzero((char *) &serveraddr, sizeof(serveraddr));
@@ -181,14 +188,32 @@ int main(int argc, char *argv[]) {
 	(char *)&serveraddr.sin_addr.s_addr, e->h_length);
   serveraddr.sin_port = htons(7891);
 
-  cw_log("Host %s resolved to %d bytes: %s\n", hostname, e->h_length, inet_ntoa(serveraddr.sin_addr));
-
   /*---- Create the socket. The three arguments are: ----*/
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
   clientSocket = socket(PF_INET, SOCK_STREAM, 0);
 
   int val = 0;
   setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val));
+
+  cw_log("Resolving %s...\n", bindname);
+  struct hostent *e2 = gethostbyname(bindname);
+  check(e2 != NULL);
+  cw_log("Host %s resolved to %d bytes: %s\n", bindname, e2->h_length, inet_ntoa(*(struct in_addr *)e2->h_addr));
+
+  struct sockaddr_in myaddr;
+  myaddr.sin_family = AF_INET;
+  /* Set IP address to resolved bindname */
+  bcopy((char *)e2->h_addr,
+	(char *)&myaddr.sin_addr.s_addr, e2->h_length);
+  /* Set port to zero, requesting allocation of any available ephemeral port */
+  myaddr.sin_port = 0;
+  /* Set all bits of the padding field to 0 */
+  memset(myaddr.sin_zero, '\0', sizeof(myaddr.sin_zero));
+
+  cw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr), myaddr.sin_port);
+
+  /*---- Bind the address struct to the socket ----*/
+  check(bind(clientSocket, (struct sockaddr *) &myaddr, sizeof(myaddr)));
 
   /*---- Connect the socket to the server using the address struct ----*/
   addr_size = sizeof(serveraddr);
