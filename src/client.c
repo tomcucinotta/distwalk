@@ -22,6 +22,8 @@
 
 int use_expon = 0;
 int wait_spinning = 0;
+int server_port = 7891;
+int bind_port = 0;
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
@@ -144,15 +146,23 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-s hostname] [-c num_pkts] [-p period(us)] [-e|--expon]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-e|--expon]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
       hostname = argv[1];
       argc--;  argv++;
+    } else if (strcmp(argv[0], "-sp") == 0) {
+      assert(argc >= 2);
+      server_port = atoi(argv[1]);
+      argc--;  argv++;
     } else if (strcmp(argv[0], "-b") == 0) {
       assert(argc >= 2);
       bindname = argv[1];
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-bp") == 0) {
+      assert(argc >= 2);
+      bind_port = atoi(argv[1]);
       argc--;  argv++;
     } else if (strcmp(argv[0], "-c") == 0) {
       assert(argc >= 2);
@@ -174,7 +184,7 @@ int main(int argc, char *argv[]) {
     argc--;  argv++;
   }
 
-  printf("Configuration: bindname=%s hostname=%s num_pkts=%lu period_us=%lu expon=%d waitspin=%d\n", bindname, hostname, num_pkts, period_us, use_expon, wait_spinning);
+  printf("Configuration: bindname=%s:%d hostname=%s:%d num_pkts=%lu period_us=%lu expon=%d waitspin=%d\n", bindname, bind_port, hostname, server_port, num_pkts, period_us, use_expon, wait_spinning);
 
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
@@ -186,7 +196,7 @@ int main(int argc, char *argv[]) {
   serveraddr.sin_family = AF_INET;
   bcopy((char *)e->h_addr, 
 	(char *)&serveraddr.sin_addr.s_addr, e->h_length);
-  serveraddr.sin_port = htons(7891);
+  serveraddr.sin_port = htons(server_port);
 
   /*---- Create the socket. The three arguments are: ----*/
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
@@ -206,7 +216,7 @@ int main(int argc, char *argv[]) {
   bcopy((char *)e2->h_addr,
 	(char *)&myaddr.sin_addr.s_addr, e2->h_length);
   /* Set port to zero, requesting allocation of any available ephemeral port */
-  myaddr.sin_port = 0;
+  myaddr.sin_port = bind_port;
   /* Set all bits of the padding field to 0 */
   memset(myaddr.sin_zero, '\0', sizeof(myaddr.sin_zero));
 
