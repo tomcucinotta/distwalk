@@ -20,10 +20,13 @@
 #include "cw_debug.h"
 #include "expon.h"
 
-int use_expon = 0;
+int use_exp_arrivals = 0;
 int wait_spinning = 0;
 int server_port = 7891;
 int bind_port = 0;
+
+unsigned long comptimes_us = 1000;	// defaults to 1ms
+int use_exp_comptimes = 0;
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
@@ -84,7 +87,11 @@ void *thread_sender(void *data) {
     m->req_size = sizeof(send_buf);
     m->num = 2;
     m->cmds[0].cmd = COMPUTE;
-    m->cmds[0].u.comp_time_us = 1;
+    if (use_exp_comptimes) {
+      m->cmds[0].u.comp_time_us = lround(expon(1.0 / comptimes_us, &rnd_buf));
+    } else {
+      m->cmds[0].u.comp_time_us = comptimes_us;
+    }
     // Expect only req_id in message header as reply
     // TODO: support send and receive of variable reply-size requests
     m->cmds[1].cmd = REPLY;
@@ -93,7 +100,7 @@ void *thread_sender(void *data) {
     safe_send(clientSocket, send_buf, m->req_size);
 
     unsigned long period_ns;
-    if (use_expon) {
+    if (use_exp_arrivals) {
       period_ns = lround(expon(1.0 / period_us, &rnd_buf) * 1000.0);
     } else {
       period_ns = period_us * 1000;
@@ -146,7 +153,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-e|--expon]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-ea|--exp-arrivals] [-C comptime(us)] [-ec|--exp-comp]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -173,8 +180,10 @@ int main(int argc, char *argv[]) {
       assert(argc >= 2);
       period_us = atol(argv[1]);
       argc--;  argv++;
-    } else if (strcmp(argv[0], "-e") == 0 || strcmp(argv[0], "--expon") == 0) {
-      use_expon = 1;
+    } else if (strcmp(argv[0], "-ea") == 0 || strcmp(argv[0], "--exp-arrivals") == 0) {
+      use_exp_arrivals = 1;
+    } else if (strcmp(argv[0], "-ec") == 0 || strcmp(argv[0], "--exp-comp") == 0) {
+      use_exp_comptimes = 1;
     } else if (strcmp(argv[0], "-ws") == 0 || strcmp(argv[0], "--waitspin") == 0) {
       wait_spinning = 1;
    } else {
@@ -184,7 +193,7 @@ int main(int argc, char *argv[]) {
     argc--;  argv++;
   }
 
-  printf("Configuration: bindname=%s:%d hostname=%s:%d num_pkts=%lu period_us=%lu expon=%d waitspin=%d\n", bindname, bind_port, hostname, server_port, num_pkts, period_us, use_expon, wait_spinning);
+  printf("Configuration: bindname=%s:%d hostname=%s:%d num_pkts=%lu period_us=%lu exp_arrivals=%d waitspin=%d comptime_us=%lu exp_comptimes=%d\n", bindname, bind_port, hostname, server_port, num_pkts, period_us, use_exp_arrivals, wait_spinning, comptimes_us, use_exp_comptimes);
 
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
