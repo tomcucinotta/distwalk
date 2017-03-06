@@ -32,6 +32,39 @@ typedef struct {
 
 buf_info bufs[MAX_BUFFERS];
 
+typedef struct {
+  in_addr_t inaddr;	// target IP
+  uint16_t port;	// target port (for multiple nodes on same host)
+  int sock;		// socket handling messages from/to inaddr:port (0=unused)
+} sock_info;
+
+#define MAX_SOCKETS 16
+sock_info socks[MAX_SOCKETS];
+
+// add the IP/port into the socks[] map to allow FORWARD finding an
+// already set-up socket, through sock_find()
+// FIXME: bad complexity with many sockets
+int sock_add(in_addr_t inaddr, int port, int sock) {
+  for (int i = 0; i < MAX_SOCKETS; i++) {
+    if (socks[i].sock == -1) {
+      socks[i].inaddr = inaddr;
+      socks[i].port = port;
+      socks[i].sock = sock;
+      return i;
+    }
+  }
+  return -1;
+}
+
+int sock_find_addr(in_addr_t inaddr, int port) {
+  for (int i = 0; i < MAX_SOCKETS; i++) {
+    if (socks[i].inaddr == inaddr && socks[i].port == port) {
+      return socks[i].sock;
+    }
+  }
+  return -1;
+}
+
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
     int sent;
@@ -53,6 +86,29 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
     read_tot += read;
   }
   return read_tot;
+}
+
+unsigned char fwd_buf[BUF_SIZE];
+
+void forward(int buf_id, message_t *m) {
+  int sock = sock_find_addr(m->cmds[0].u.fwd.fwd_host, m->cmds[0].u.fwd.fwd_port);
+  assert(sock != -1);
+  message_t *m_dst = (message_t *) fwd_buf;
+  // copy message header
+  *m_dst = *m;
+  // left-shift m->cmds[] into m_dst->cmds[], removing m->cmds[0] (FORWARD)
+  for (int i = 1; i < m->num; i++) {
+    m_dst->cmds[i - 1] = m->cmds[i];
+  }
+  m_dst->num = m->num - 1;
+  m_dst->req_size = m->cmds[0].u.fwd.pkt_size;
+  cw_log("Forwarding req %u to %s:%d\n", m->req_id,
+	 inet_ntoa((struct in_addr) { m->cmds[0].u.fwd.fwd_host }),
+	 m->cmds[0].u.fwd.fwd_port);
+  cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num, m_dst->req_size);
+  // TODO: return to epoll loop to handle sending of long packets
+  // (here I'm blocking the thread)
+  safe_send(sock, fwd_buf, m_dst->req_size);
 }
 
 size_t recv_message(int sock, unsigned char *buf, size_t len) {
@@ -112,10 +168,17 @@ void process_messages(int sock, int buf_id) {
     if (m->num >= 1) {
       if (m->cmds[0].cmd == COMPUTE) {
 	compute_for(m->cmds[0].u.comp_time_us);
+      } else if (m->cmds[0].cmd == FORWARD) {
+	forward(buf_id, m);
+      } else if (m->cmds[0].cmd == REPLY) {
+	// TODO: send back a new message whose size is m->cmds[0].u.pkt_size
+	cw_log("Sending back %u\n", m->req_id);
+	safe_send(sock, buf, sizeof(message_t));
+      } else {
+	cw_log("Unknown cmd: %d\n", m->cmds[0].cmd);
+	exit(-1);
       }
     }
-    cw_log("Sending back %u\n", m->req_id);
-    safe_send(sock, buf, sizeof(message_t));
 
     // move to batch processing of next message if any
     buf += m->req_size;
@@ -205,10 +268,11 @@ void epoll_main_loop(int listen_sock) {
 	  perror("accept");
 	  exit(EXIT_FAILURE);
 	}
-	// TODO: add the IP/port into a map to allow FORWARD finding the
-	// already set-up socket
 	cw_log("Accepted connection from: %s:%d\n", inet_ntoa(addr.sin_addr), addr.sin_port);
 	setnonblocking(conn_sock);
+
+	check(sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock) != -1);
+
 	int buf_id;
 	for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++)
 	  if (bufs[buf_id].buf == 0)
@@ -254,6 +318,11 @@ int main(int argc, char *argv[]) {
   // Tag all buf_info as unused
   for (int i = 0; i < MAX_BUFFERS; i++) {
     bufs[i].buf = 0;
+  }
+
+  // Tag all sock_info as unused
+  for (int i = 0; i < MAX_SOCKETS; i++) {
+    socks[i].sock = -1;
   }
 
   /*---- Create the socket. The three arguments are: ----*/

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <netinet/in.h>
 
-typedef enum { COMPUTE, STORE, FORWARD } command_type_t;
+typedef enum { COMPUTE, STORE, FORWARD, REPLY } command_type_t;
 
 typedef struct {
   in_addr_t fwd_host;	// target IP of host to forward to

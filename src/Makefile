@@ -2,10 +2,12 @@ CFLAGS=-Wall -O3
 CFLAGS_DEBUG=-g -DCW_DEBUG
 LDLIBS=-pthread -lm
 
-all: client node client_debug node_debug
+PROGRAMS=client node client_debug node_debug
+
+all: $(PROGRAMS)
 
 clean:
-	rm -f *.o client node
+	rm -f *.o *~ $(PROGRAMS)
 
 client: client.o expon.o
 client_debug: client_debug.o expon_debug.o
