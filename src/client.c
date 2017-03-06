@@ -77,9 +77,13 @@ void *thread_sender(void *data) {
     message_t *m = (message_t *) send_buf;
     m->req_id = i;
     m->req_size = sizeof(send_buf);
-    m->num = 1;
+    m->num = 2;
     m->cmds[0].cmd = COMPUTE;
     m->cmds[0].u.comp_time_us = 1;
+    // Expect only req_id in message header as reply
+    // TODO: support send and receive of variable reply-size requests
+    m->cmds[1].cmd = REPLY;
+    m->cmds[1].u.fwd.pkt_size = sizeof(message_t);
     cw_log("Sending %u bytes...\n", m->req_size);
     safe_send(clientSocket, send_buf, m->req_size);
 
@@ -110,6 +114,7 @@ void *thread_receiver(void *data) {
   unsigned char recv_buf[256];
   for (int i = 0; i < num_pkts; i++) {
     /*---- Read the message from the server into the buffer ----*/
+    // TODO: support receive of variable reply-size requests
     safe_recv(clientSocket, recv_buf, sizeof(message_t));
     message_t *m = (message_t *) recv_buf;
     unsigned long pkt_id = m->req_id;
