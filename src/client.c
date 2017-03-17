@@ -25,7 +25,7 @@ int wait_spinning = 0;
 int server_port = 7891;
 int bind_port = 0;
 
-unsigned long comptimes_us = 1000;	// defaults to 1ms
+unsigned long comptimes_us = 100;	// defaults to 1ms
 int use_exp_comptimes = 0;
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
