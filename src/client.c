@@ -20,13 +20,21 @@
 #include "cw_debug.h"
 #include "expon.h"
 
-int use_exp_arrivals = 0;
+int exp_arrivals = 0;
 int wait_spinning = 0;
 int server_port = 7891;
 int bind_port = 0;
 
-unsigned long comptimes_us = 100;	// defaults to 1ms
-int use_exp_comptimes = 0;
+unsigned long comptimes_us = 100;	// defaults to 100us
+int exp_comptimes = 0;
+
+unsigned long pkt_size = 128;
+int exp_pkt_size = 0;
+
+unsigned long resp_size = 128;
+int exp_resp_size = 0;
+
+#define BUF_SIZE 4096
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
@@ -66,7 +74,7 @@ char *hostname = "127.0.0.1";
 char *bindname = "127.0.0.1";
 
 void *thread_sender(void *data) {
-  unsigned char send_buf[256];
+  unsigned char send_buf[BUF_SIZE];
   struct timespec ts_now;
   struct drand48_data rnd_buf;
 
@@ -84,10 +92,10 @@ void *thread_sender(void *data) {
     /*---- Issue a request to the server ---*/
     message_t *m = (message_t *) send_buf;
     m->req_id = i;
-    m->req_size = sizeof(send_buf);
+    m->req_size = pkt_size;
     m->num = 2;
     m->cmds[0].cmd = COMPUTE;
-    if (use_exp_comptimes) {
+    if (exp_comptimes) {
       m->cmds[0].u.comp_time_us = lround(expon(1.0 / comptimes_us, &rnd_buf));
     } else {
       m->cmds[0].u.comp_time_us = comptimes_us;
@@ -95,12 +103,12 @@ void *thread_sender(void *data) {
     // Expect only req_id in message header as reply
     // TODO: support send and receive of variable reply-size requests
     m->cmds[1].cmd = REPLY;
-    m->cmds[1].u.fwd.pkt_size = sizeof(message_t);
+    m->cmds[1].u.fwd.pkt_size = resp_size;
     cw_log("Sending %u bytes...\n", m->req_size);
     safe_send(clientSocket, send_buf, m->req_size);
 
     unsigned long period_ns;
-    if (use_exp_arrivals) {
+    if (exp_arrivals) {
       period_ns = lround(expon(1.0 / period_us, &rnd_buf) * 1000.0);
     } else {
       period_ns = period_us * 1000;
@@ -123,13 +131,18 @@ void *thread_sender(void *data) {
 }
 
 void *thread_receiver(void *data) {
-  unsigned char recv_buf[256];
+  unsigned char recv_buf[BUF_SIZE];
   for (int i = 0; i < num_pkts; i++) {
     /*---- Read the message from the server into the buffer ----*/
     // TODO: support receive of variable reply-size requests
+    cw_log("Receiving %lu bytes (header)", sizeof(message_t));
     safe_recv(clientSocket, recv_buf, sizeof(message_t));
     message_t *m = (message_t *) recv_buf;
     unsigned long pkt_id = m->req_id;
+    cw_log("Receiving further %lu bytes (total pkt_size %u bytes)",
+	   m->req_size - sizeof(message_t), m->req_size);
+    safe_recv(clientSocket, recv_buf + sizeof(message_t), m->req_size - sizeof(message_t));
+
     struct timespec ts_now;
     clock_gettime(clk_id, &ts_now);
     unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
@@ -153,7 +166,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-ea|--exp-arrivals] [-C comptime(us)] [-ec|--exp-comp] [-ws|--wait-spin]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-ea|--exp-arrivals] [-C comptime(us)] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -181,12 +194,24 @@ int main(int argc, char *argv[]) {
       period_us = atol(argv[1]);
       argc--;  argv++;
     } else if (strcmp(argv[0], "-ea") == 0 || strcmp(argv[0], "--exp-arrivals") == 0) {
-      use_exp_arrivals = 1;
+      exp_arrivals = 1;
     } else if (strcmp(argv[0], "-ec") == 0 || strcmp(argv[0], "--exp-comp") == 0) {
-      use_exp_comptimes = 1;
+      exp_comptimes = 1;
     } else if (strcmp(argv[0], "-ws") == 0 || strcmp(argv[0], "--waitspin") == 0) {
       wait_spinning = 1;
-   } else {
+    } else if (strcmp(argv[0], "-ps") == 0 || strcmp(argv[0], "--pkt-size") == 0) {
+      assert(argc >= 2);
+      pkt_size = atol(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-eps") == 0 || strcmp(argv[0], "--exp-pkt-size") == 0) {
+      exp_pkt_size = 1;
+    } else if (strcmp(argv[0], "-rs") == 0 || strcmp(argv[0], "--resp-size") == 0) {
+      assert(argc >= 2);
+      resp_size = atol(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-ers") == 0 || strcmp(argv[0], "--exp-resp-size") == 0) {
+      exp_resp_size = 1;
+    } else {
       printf("Unrecognized option: %s\n", argv[0]);
       exit(-1);
     }
@@ -198,10 +223,21 @@ int main(int argc, char *argv[]) {
   printf("  hostname=%s:%d\n", hostname, server_port);
   printf("  num_pkts=%lu\n", num_pkts);
   printf("  period_us=%lu, exp_arrivals=%d\n",
-	 period_us, use_exp_arrivals);
+	 period_us, exp_arrivals);
   printf("  waitspin=%d\n", wait_spinning);
   printf("  comptime_us=%lu, exp_comptimes=%d\n",
-	 comptimes_us, use_exp_comptimes);
+	 comptimes_us, exp_comptimes);
+  printf("  pkt_size=%lu, exp_pkt_size=%d\n",
+	 pkt_size, exp_pkt_size);
+  printf("  resp_size=%lu, exp_resp_size=%d\n",
+	 resp_size, exp_resp_size);
+  printf("  min packet size due to header: %lu\n", sizeof(message_t));
+  printf("  max packet size: %d\n", BUF_SIZE);
+
+  assert(pkt_size >= sizeof(message_t));
+  assert(pkt_size <= BUF_SIZE);
+  assert(resp_size >= sizeof(message_t));
+  assert(resp_size <= BUF_SIZE);
 
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
@@ -219,8 +255,8 @@ int main(int argc, char *argv[]) {
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
   clientSocket = socket(PF_INET, SOCK_STREAM, 0);
 
-  int val = 0;
-  setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val));
+  int val = 1;
+  check(setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val)) == 0);
 
   cw_log("Resolving %s...\n", bindname);
   struct hostent *e2 = gethostbyname(bindname);

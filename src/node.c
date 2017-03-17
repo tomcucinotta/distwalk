@@ -2,8 +2,10 @@
 #include "timespec.h"
 #include "cw_debug.h"
 
+#include <sys/types.h>          /* See NOTES */
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 
 #include <stdio.h>
@@ -180,8 +182,8 @@ void process_messages(int sock, int buf_id) {
 	break;
       } else if (m->cmds[i].cmd == REPLY) {
 	// TODO: send back a new message whose size is m->cmds[0].u.pkt_size
-	cw_log("REPLY: sending back %u\n", m->req_id);
-	safe_send(sock, buf, sizeof(message_t));
+	cw_log("REPLY: sending back %u bytes, req_id=%u\n", m->req_size, m->req_id);
+	safe_send(sock, buf, m->cmds[i].u.fwd.pkt_size);
 	// not sure what host any further cmds[] is for, guess not me
 	break;
       } else {
@@ -280,6 +282,8 @@ void epoll_main_loop(int listen_sock) {
 	}
 	cw_log("Accepted connection from: %s:%d\n", inet_ntoa(addr.sin_addr), addr.sin_port);
 	setnonblocking(conn_sock);
+	int val = 1;
+	check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val)) == 0);
 
 	check(sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock) != -1);
 
