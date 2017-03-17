@@ -153,7 +153,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-ea|--exp-arrivals] [-C comptime(us)] [-ec|--exp-comp]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-ea|--exp-arrivals] [-C comptime(us)] [-ec|--exp-comp] [-ws|--wait-spin]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -193,7 +193,15 @@ int main(int argc, char *argv[]) {
     argc--;  argv++;
   }
 
-  printf("Configuration: bindname=%s:%d hostname=%s:%d num_pkts=%lu period_us=%lu exp_arrivals=%d waitspin=%d comptime_us=%lu exp_comptimes=%d\n", bindname, bind_port, hostname, server_port, num_pkts, period_us, use_exp_arrivals, wait_spinning, comptimes_us, use_exp_comptimes);
+  printf("Configuration:\n");
+  printf("  bind=%s:%d\n", bindname, bind_port);
+  printf("  hostname=%s:%d\n", hostname, server_port);
+  printf("  num_pkts=%lu\n", num_pkts);
+  printf("  period_us=%lu, exp_arrivals=%d\n",
+	 period_us, use_exp_arrivals);
+  printf("  waitspin=%d\n", wait_spinning);
+  printf("  comptime_us=%lu, exp_comptimes=%d\n",
+	 comptimes_us, use_exp_comptimes);
 
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
