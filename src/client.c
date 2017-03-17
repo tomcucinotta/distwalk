@@ -69,11 +69,18 @@ long usecs_send[MAX_PKTS];
 long usecs_elapsed[MAX_PKTS];
 // abs start-time of the experiment
 struct timespec ts_start;
+unsigned int rate = 1000;	// pkt/s rate (period is its inverse)
+
 unsigned long num_pkts = 10;
-unsigned long period_us = 1000;
+
+unsigned int ramp_step_secs = 0;	// if non-zero, supersedes num_pkts
+unsigned int ramp_delta_rate = 100;	// added to rate every ramp_secs
+unsigned int ramp_num_steps = 10;	// number of ramp-up steps
 
 char *hostname = "127.0.0.1";
 char *bindname = "127.0.0.1";
+
+int done = 0;
 
 void *thread_sender(void *data) {
   unsigned char send_buf[BUF_SIZE];
@@ -85,6 +92,7 @@ void *thread_sender(void *data) {
 
   // Remember in ts_start the abs start time of the experiment
   ts_start = ts_now;
+  int rate_start = rate;
 
   for (int i = 0; i < num_pkts; i++) {
     /* remember time of send relative to ts_start */
@@ -109,6 +117,7 @@ void *thread_sender(void *data) {
     cw_log("Sending %u bytes...\n", m->req_size);
     safe_send(clientSocket, send_buf, m->req_size);
 
+    unsigned long period_us = 1000000 / rate;
     unsigned long period_ns;
     if (exp_arrivals) {
       period_ns = lround(expon(1.0 / period_us, &rnd_buf) * 1000.0);
@@ -127,7 +136,17 @@ void *thread_sender(void *data) {
     } else {
       check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
     }
+
+    if (ramp_step_secs != 0) {
+      int step = usecs_send[i] / 1000000 / ramp_step_secs;
+      rate = rate_start + step * ramp_delta_rate;
+      cw_log("rate: %d\n", rate);
+    }
   }
+
+  // allow for last packets to be received by receiver thread
+  sleep(1);
+  done = 1;
 
   return 0;
 }
@@ -137,11 +156,11 @@ void *thread_receiver(void *data) {
   for (int i = 0; i < num_pkts; i++) {
     /*---- Read the message from the server into the buffer ----*/
     // TODO: support receive of variable reply-size requests
-    cw_log("Receiving %lu bytes (header)", sizeof(message_t));
+    cw_log("Receiving %lu bytes (header)\n", sizeof(message_t));
     safe_recv(clientSocket, recv_buf, sizeof(message_t));
     message_t *m = (message_t *) recv_buf;
     unsigned long pkt_id = m->req_id;
-    cw_log("Receiving further %lu bytes (total pkt_size %u bytes)",
+    cw_log("Receiving further %lu bytes (total pkt_size %u bytes)\n",
 	   m->req_size - sizeof(message_t), m->req_size);
     safe_recv(clientSocket, recv_buf + sizeof(message_t), m->req_size - sizeof(message_t));
 
@@ -150,11 +169,11 @@ void *thread_receiver(void *data) {
     unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
       + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
     usecs_elapsed[pkt_id] = usecs - usecs_send[pkt_id];
-    cw_log("Data received: %02lx (elapsed %ld us)\n", pkt_id, usecs_elapsed[pkt_id]);
+    cw_log("Data received: %lu (elapsed %ld us)\n", pkt_id, usecs_elapsed[pkt_id]);
   }
 
   for (int i = 0; i < num_pkts; i++) {
-    printf("elapsed: %ld us\n", usecs_elapsed[i]);
+    printf("t: %ld us, elapsed: %ld us\n", usecs_send[i], usecs_elapsed[i]);
   }
 
   return 0;
@@ -168,7 +187,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-ea|--exp-arrivals] [-C comptime(us)] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd val|--no-delay val]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-C comptime(us)] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -193,10 +212,26 @@ int main(int argc, char *argv[]) {
       argc--;  argv++;
     } else if (strcmp(argv[0], "-p") == 0) {
       assert(argc >= 2);
-      period_us = atol(argv[1]);
+      rate = 1000000 / atol(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-r") == 0 || strcmp(argv[0], "--rate") == 0) {
+      assert(argc >= 2);
+      rate = atoi(argv[1]);
       argc--;  argv++;
     } else if (strcmp(argv[0], "-ea") == 0 || strcmp(argv[0], "--exp-arrivals") == 0) {
       exp_arrivals = 1;
+    } else if (strcmp(argv[0], "-rdr") == 0 || strcmp(argv[0], "--ramp-delta-rate") == 0) {
+      assert(argc >= 2);
+      ramp_delta_rate = atoi(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-rns") == 0 || strcmp(argv[0], "--ramp-num-steps") == 0) {
+      assert(argc >= 2);
+      ramp_num_steps = atoi(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-rss") == 0 || strcmp(argv[0], "--ramp-step-secs") == 0) {
+      assert(argc >= 2);
+      ramp_step_secs = atoi(argv[1]);
+      argc--;  argv++;
     } else if (strcmp(argv[0], "-ec") == 0 || strcmp(argv[0], "--exp-comp") == 0) {
       exp_comptimes = 1;
     } else if (strcmp(argv[0], "-ws") == 0 || strcmp(argv[0], "--waitspin") == 0) {
@@ -224,13 +259,24 @@ int main(int argc, char *argv[]) {
     argc--;  argv++;
   }
 
+  if (ramp_step_secs != 0) {
+    num_pkts = 0;
+    int r = rate;
+    for (int s = 0; s < ramp_num_steps; s++) {
+      num_pkts += r * ramp_step_secs;
+      r += ramp_delta_rate;
+    }
+  }
+
   printf("Configuration:\n");
   printf("  bind=%s:%d\n", bindname, bind_port);
   printf("  hostname=%s:%d\n", hostname, server_port);
   printf("  num_pkts=%lu\n", num_pkts);
-  printf("  period_us=%lu, exp_arrivals=%d\n",
-	 period_us, exp_arrivals);
+  printf("  rate=%d, exp_arrivals=%d\n",
+	 rate, exp_arrivals);
   printf("  waitspin=%d\n", wait_spinning);
+  printf("  ramp_num_steps=%d, ramp_delta_rate=%d, ramp_step_secs=%d\n",
+	 ramp_num_steps, ramp_delta_rate, ramp_step_secs);
   printf("  comptime_us=%lu, exp_comptimes=%d\n",
 	 comptimes_us, exp_comptimes);
   printf("  pkt_size=%lu, exp_pkt_size=%d\n",
