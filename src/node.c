@@ -46,6 +46,8 @@ sock_info socks[MAX_SOCKETS];
 char *bind_name = "0.0.0.0";
 int bind_port = 7891;
 
+int no_delay = 1;
+
 // add the IP/port into the socks[] map to allow FORWARD finding an
 // already set-up socket, through sock_find()
 // FIXME: bad complexity with many sockets
@@ -342,6 +344,10 @@ int main(int argc, char *argv[]) {
       assert(argc >= 2);
       bind_port = atol(argv[1]);
       argc--;  argv++;
+    } else if (strcmp(argv[0], "-nd") == 0 || strcmp(argv[0], "--no-delay") == 0) {
+      assert(argc >= 2);
+      no_delay = atoi(argv[1]);
+      argc--;  argv++;
     } else {
       printf("Unrecognized option: %s\n", argv[0]);
       exit(-1);
@@ -363,8 +369,7 @@ int main(int argc, char *argv[]) {
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
   welcomeSocket = socket(PF_INET, SOCK_STREAM, 0);
 
-  int i = 0;
-  setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEADDR, (void *)&i, sizeof(i));
+  setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEADDR, (void *)&no_delay, sizeof(no_delay));
 
   /*---- Configure settings of the server address struct ----*/
   /* Address family = Internet */

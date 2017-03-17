@@ -34,6 +34,8 @@ int exp_pkt_size = 0;
 unsigned long resp_size = 128;
 int exp_resp_size = 0;
 
+int no_delay = 1;
+
 #define BUF_SIZE 4096
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
@@ -166,7 +168,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-ea|--exp-arrivals] [-C comptime(us)] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-ea|--exp-arrivals] [-C comptime(us)] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd val|--no-delay val]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -211,6 +213,10 @@ int main(int argc, char *argv[]) {
       argc--;  argv++;
     } else if (strcmp(argv[0], "-ers") == 0 || strcmp(argv[0], "--exp-resp-size") == 0) {
       exp_resp_size = 1;
+    } else if (strcmp(argv[0], "-nd") == 0 || strcmp(argv[0], "--no-delay") == 0) {
+      assert(argc >= 2);
+      no_delay = atoi(argv[1]);
+      argc--;  argv++;
     } else {
       printf("Unrecognized option: %s\n", argv[0]);
       exit(-1);
@@ -233,11 +239,13 @@ int main(int argc, char *argv[]) {
 	 resp_size, exp_resp_size);
   printf("  min packet size due to header: %lu\n", sizeof(message_t));
   printf("  max packet size: %d\n", BUF_SIZE);
+  printf("  no_delay: %d\n", no_delay);
 
   assert(pkt_size >= sizeof(message_t));
   assert(pkt_size <= BUF_SIZE);
   assert(resp_size >= sizeof(message_t));
   assert(resp_size <= BUF_SIZE);
+  assert(no_delay == 0 || no_delay == 1);
 
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);
@@ -255,8 +263,7 @@ int main(int argc, char *argv[]) {
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
   clientSocket = socket(PF_INET, SOCK_STREAM, 0);
 
-  int val = 1;
-  check(setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val)) == 0);
+  check(setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&no_delay, sizeof(no_delay)) == 0);
 
   cw_log("Resolving %s...\n", bindname);
   struct hostent *e2 = gethostbyname(bindname);
