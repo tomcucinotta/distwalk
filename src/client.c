@@ -80,8 +80,6 @@ unsigned int ramp_num_steps = 10;	// number of ramp-up steps
 char *hostname = "127.0.0.1";
 char *bindname = "127.0.0.1";
 
-int done = 0;
-
 void *thread_sender(void *data) {
   unsigned char send_buf[BUF_SIZE];
   struct timespec ts_now;
@@ -144,9 +142,7 @@ void *thread_sender(void *data) {
     }
   }
 
-  // allow for last packets to be received by receiver thread
-  sleep(1);
-  done = 1;
+  cw_log("sender thread is over\n");
 
   return 0;
 }
@@ -175,6 +171,7 @@ void *thread_receiver(void *data) {
   for (int i = 0; i < num_pkts; i++) {
     printf("t: %ld us, elapsed: %ld us\n", usecs_send[i], usecs_elapsed[i]);
   }
+  cw_log("receiver thread is over\n");
 
   return 0;
 }
@@ -187,7 +184,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-C comptime(us)] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-C|--comp-time comp_time(us)] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val]\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -231,6 +228,11 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(argv[0], "-rss") == 0 || strcmp(argv[0], "--ramp-step-secs") == 0) {
       assert(argc >= 2);
       ramp_step_secs = atoi(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-C") == 0 || strcmp(argv[0], "--comp-time") == 0) {
+      assert(argc >= 2);
+      comptimes_us = atoi(argv[1]);
+      assert(num_pkts <= MAX_PKTS);
       argc--;  argv++;
     } else if (strcmp(argv[0], "-ec") == 0 || strcmp(argv[0], "--exp-comp") == 0) {
       exp_comptimes = 1;
@@ -343,6 +345,8 @@ int main(int argc, char *argv[]) {
 
   pthread_join(sender, (void **) &rv);
   pthread_join(receiver, (void **) &rv);
+
+  cw_log("Joined sender and receiver threads, exiting\n");
 
   return 0;
 }
