@@ -78,7 +78,7 @@ unsigned int ramp_delta_rate = 100;	// added to rate every ramp_secs
 unsigned int ramp_num_steps = 10;	// number of ramp-up steps
 
 char *hostname = "127.0.0.1";
-char *bindname = "127.0.0.1";
+char *bindname = "0.0.0.0";
 
 void *thread_sender(void *data) {
   unsigned char send_buf[BUF_SIZE];
