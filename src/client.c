@@ -42,6 +42,7 @@ void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
     int sent;
     check(sent = send(sock, buf, len, 0));
+    cw_log("Sent %d bytes.\n", sent);
     buf += sent;
     len -= sent;
   }
@@ -112,7 +113,8 @@ void *thread_sender(void *data) {
     // TODO: support send and receive of variable reply-size requests
     m->cmds[1].cmd = REPLY;
     m->cmds[1].u.fwd.pkt_size = resp_size;
-    cw_log("Sending %u bytes...\n", m->req_size);
+    cw_log("Sending %u bytes (will expect %u bytes in response)...\n", m->req_size,
+	   m->cmds[1].u.fwd.pkt_size = resp_size);
     safe_send(clientSocket, send_buf, m->req_size);
 
     unsigned long period_us = 1000000 / rate;
@@ -142,7 +144,7 @@ void *thread_sender(void *data) {
     }
   }
 
-  cw_log("sender thread is over\n");
+  cw_log("Sender thread is over.\n");
 
   return 0;
 }
@@ -153,25 +155,29 @@ void *thread_receiver(void *data) {
     /*---- Read the message from the server into the buffer ----*/
     // TODO: support receive of variable reply-size requests
     cw_log("Receiving %lu bytes (header)\n", sizeof(message_t));
-    safe_recv(clientSocket, recv_buf, sizeof(message_t));
+    unsigned long read = safe_recv(clientSocket, recv_buf, sizeof(message_t));
+    assert(read == sizeof(message_t));
     message_t *m = (message_t *) recv_buf;
     unsigned long pkt_id = m->req_id;
-    cw_log("Receiving further %lu bytes (total pkt_size %u bytes)\n",
-	   m->req_size - sizeof(message_t), m->req_size);
-    safe_recv(clientSocket, recv_buf + sizeof(message_t), m->req_size - sizeof(message_t));
+    cw_log("Received %lu bytes, req_id=%lu, pkt_size=%u, ops=%d\n",
+	   read, pkt_id, m->req_size, m->num);
+    cw_log("Expecting further %lu bytes (total pkt_size %u bytes)\n",
+	   m->req_size - read, m->req_size);
+    safe_recv(clientSocket, recv_buf + read, m->req_size - read);
 
     struct timespec ts_now;
     clock_gettime(clk_id, &ts_now);
     unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
       + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
     usecs_elapsed[pkt_id] = usecs - usecs_send[pkt_id];
-    cw_log("Data received: %lu (elapsed %ld us)\n", pkt_id, usecs_elapsed[pkt_id]);
+    cw_log("req_id %lu elapsed %ld us\n", pkt_id, usecs_elapsed[pkt_id]);
   }
 
   for (int i = 0; i < num_pkts; i++) {
     printf("t: %ld us, elapsed: %ld us\n", usecs_send[i], usecs_elapsed[i]);
   }
-  cw_log("receiver thread is over\n");
+  cw_log("receiver thread is over, closing socket\n");
+  close(clientSocket);
 
   return 0;
 }
@@ -337,11 +343,11 @@ int main(int argc, char *argv[]) {
   addr_size = sizeof(serveraddr);
   check(connect(clientSocket, (struct sockaddr *) &serveraddr, addr_size));
 
-  pthread_t sender;
-  pthread_create(&sender, NULL, thread_sender, (void *) 0);
-
   pthread_t receiver;
   pthread_create(&receiver, NULL, thread_receiver, NULL);
+
+  pthread_t sender;
+  pthread_create(&sender, NULL, thread_sender, (void *) 0);
 
   pthread_join(sender, (void **) &rv);
   pthread_join(receiver, (void **) &rv);
