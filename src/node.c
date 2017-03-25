@@ -97,6 +97,17 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
 
 unsigned char fwd_buf[BUF_SIZE];
 
+// Copy m header into m_dst, skipping the first cmd_id elems in m_dst->cmds[]
+void copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
+  // copy message header
+  *m_dst = *m;
+  // left-shift m->cmds[] into m_dst->cmds[], removing m->cmds[cmd_id]
+  for (int i = cmd_id; i < m->num; i++) {
+    m_dst->cmds[i - cmd_id] = m->cmds[i];
+  }
+  m_dst->num = m->num - cmd_id;
+}
+
 // cmd_id is the index of the FORWARD item within m->cmds[] here, we
 // remove the first (cmd_id+1) commands from cmds[], and forward the
 // rest to the next hop
@@ -104,13 +115,7 @@ void forward(int buf_id, message_t *m, int cmd_id) {
   int sock = sock_find_addr(m->cmds[cmd_id].u.fwd.fwd_host, m->cmds[cmd_id].u.fwd.fwd_port);
   assert(sock != -1);
   message_t *m_dst = (message_t *) fwd_buf;
-  // copy message header
-  *m_dst = *m;
-  // left-shift m->cmds[] into m_dst->cmds[], removing m->cmds[cmd_id] (FORWARD)
-  for (int i = cmd_id + 1; i < m->num; i++) {
-    m_dst->cmds[i - cmd_id - 1] = m->cmds[i];
-  }
-  m_dst->num = m->num - cmd_id - 1;
+  copy_tail(m, m_dst, cmd_id + 1);
   m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
   cw_log("Forwarding req %u to %s:%d\n", m->req_id,
 	 inet_ntoa((struct in_addr) { m->cmds[cmd_id].u.fwd.fwd_host }),
@@ -119,6 +124,19 @@ void forward(int buf_id, message_t *m, int cmd_id) {
   // TODO: return to epoll loop to handle sending of long packets
   // (here I'm blocking the thread)
   safe_send(sock, fwd_buf, m_dst->req_size);
+}
+
+unsigned char reply_buf[BUF_SIZE];
+
+void reply(int sock, message_t *m, int cmd_id) {
+  message_t *m_dst = (message_t *) reply_buf;
+  copy_tail(m, m_dst, cmd_id + 1);
+  m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
+  cw_log("Replying to req %u\n", m->req_id);
+  cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num, m_dst->req_size);
+  // TODO: return to epoll loop to handle sending of long packets
+  // (here I'm blocking the thread)
+  safe_send(sock, reply_buf, m_dst->req_size);
 }
 
 size_t recv_message(int sock, unsigned char *buf, size_t len) {
@@ -183,10 +201,8 @@ void process_messages(int sock, int buf_id) {
 	// rest of cmds[] are for next hop, not me
 	break;
       } else if (m->cmds[i].cmd == REPLY) {
-	// TODO: send back a new message whose size is m->cmds[0].u.pkt_size
-	cw_log("REPLY: sending back %u bytes, req_id=%u\n", m->req_size, m->req_id);
-	safe_send(sock, buf, m->cmds[i].u.fwd.pkt_size);
-	// not sure what host any further cmds[] is for, guess not me
+	reply(sock, m, i);
+	// any further cmds[] for replied-to hop, not me
 	break;
       } else {
 	cw_log("Unknown cmd: %d\n", m->cmds[0].cmd);
@@ -369,7 +385,8 @@ int main(int argc, char *argv[]) {
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
   welcomeSocket = socket(PF_INET, SOCK_STREAM, 0);
 
-  setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEADDR, (void *)&no_delay, sizeof(no_delay));
+  int val = 1;
+  setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEADDR, (void *)&val, sizeof(val));
 
   /*---- Configure settings of the server address struct ----*/
   /* Address family = Internet */
