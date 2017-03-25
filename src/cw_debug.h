@@ -8,6 +8,7 @@
 
 #define cw_log(msg, args...) do { \
     printf(msg, ##args);  \
+    fflush(stdout);  \
   } while (0);
 
 #else
