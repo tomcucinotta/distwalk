@@ -183,7 +183,6 @@ void *thread_receiver(void *data) {
 }
 
 int main(int argc, char *argv[]) {
-  int rv;
   struct sockaddr_in serveraddr;
   socklen_t addr_size;
 
@@ -344,13 +343,13 @@ int main(int argc, char *argv[]) {
   check(connect(clientSocket, (struct sockaddr *) &serveraddr, addr_size));
 
   pthread_t receiver;
-  pthread_create(&receiver, NULL, thread_receiver, NULL);
+  assert(pthread_create(&receiver, NULL, thread_receiver, NULL) == 0);
 
   pthread_t sender;
-  pthread_create(&sender, NULL, thread_sender, (void *) 0);
+  assert(pthread_create(&sender, NULL, thread_sender, NULL) == 0);
 
-  pthread_join(sender, (void **) &rv);
-  pthread_join(receiver, (void **) &rv);
+  pthread_join(sender, NULL);
+  pthread_join(receiver, NULL);
 
   cw_log("Joined sender and receiver threads, exiting\n");
 
