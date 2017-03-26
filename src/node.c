@@ -183,12 +183,14 @@ void process_messages(int sock, int buf_id) {
   unsigned long msg_size = bufs[buf_id].curr_buf - buf;
   // batch processing of multiple messages, if received more than 1
   do {
-    if (msg_size < 8) {
+    cw_log("msg_size=%lu\n", msg_size);
+    if (msg_size < sizeof(message_t)) {
       cw_log("Got incomplete header, need to recv() more...\n");
       break;
     }
     message_t *m = (message_t *) buf;
     cw_log("Received %lu bytes, req_id=%u, req_size=%u, num=%d\n", msg_size, m->req_id, m->req_size, m->num);
+    assert(msg_size > 0 && msg_size <= BUF_SIZE);
     if (msg_size < m->req_size) {
       cw_log("Got header but incomplete message, need to recv() more...\n");
       break;
@@ -224,9 +226,10 @@ void process_messages(int sock, int buf_id) {
   } else {
     // leftover received data, move it to beginning of buf
     // TODO do this only if we're beyond a threshold in buf[]
-    memmove(bufs[buf_id].buf, buf, bufs[buf_id].curr_buf - buf);
-    bufs[buf_id].curr_buf = bufs[buf_id].buf;
-    bufs[buf_id].curr_size = bufs[buf_id].buf_size - (bufs[buf_id].curr_buf - bufs[buf_id].buf);
+    unsigned long leftover = bufs[buf_id].curr_buf - buf;
+    memmove(bufs[buf_id].buf, buf, leftover);
+    bufs[buf_id].curr_buf = bufs[buf_id].buf + leftover;
+    bufs[buf_id].curr_size = bufs[buf_id].buf_size - leftover;
   }
 }
 
