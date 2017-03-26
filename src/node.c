@@ -224,12 +224,16 @@ void process_messages(int sock, int buf_id) {
     bufs[buf_id].curr_buf = bufs[buf_id].buf;
     bufs[buf_id].curr_size = bufs[buf_id].buf_size;
   } else {
-    // leftover received data, move it to beginning of buf
-    // TODO do this only if we're beyond a threshold in buf[]
-    unsigned long leftover = bufs[buf_id].curr_buf - buf;
-    memmove(bufs[buf_id].buf, buf, leftover);
-    bufs[buf_id].curr_buf = bufs[buf_id].buf + leftover;
-    bufs[buf_id].curr_size = bufs[buf_id].buf_size - leftover;
+    // leftover received data, move it to beginning of buf unless already there
+    if (buf != bufs[buf_id].buf) {
+      // TODO do this only if we're beyond a threshold in buf[]
+      unsigned long leftover = bufs[buf_id].curr_buf - buf;
+      cw_log("Moving %lu leftover bytes back to beginning of buf with buf_id %d",
+	     leftover, buf_id);
+      memmove(bufs[buf_id].buf, buf, leftover);
+      bufs[buf_id].curr_buf = bufs[buf_id].buf + leftover;
+      bufs[buf_id].curr_size = bufs[buf_id].buf_size - leftover;
+    }
   }
 }
 
