@@ -30,7 +30,6 @@ typedef struct {
 } buf_info;
 
 #define MAX_BUFFERS 16
-#define BUF_SIZE 4096
 
 buf_info bufs[MAX_BUFFERS];
 
@@ -190,11 +189,11 @@ void process_messages(int sock, int buf_id) {
     }
     message_t *m = (message_t *) buf;
     cw_log("Received %lu bytes, req_id=%u, req_size=%u, num=%d\n", msg_size, m->req_id, m->req_size, m->num);
-    assert(msg_size > 0 && msg_size <= BUF_SIZE);
     if (msg_size < m->req_size) {
       cw_log("Got header but incomplete message, need to recv() more...\n");
       break;
     }
+    assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
     for (int i = 0; i < m->num; i++) {
       if (m->cmds[i].cmd == COMPUTE) {
 	compute_for(m->cmds[i].u.comp_time_us);

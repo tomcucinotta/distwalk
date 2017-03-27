@@ -36,8 +36,6 @@ int exp_resp_size = 0;
 
 int no_delay = 1;
 
-#define BUF_SIZE 4096
-
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
     int sent;
@@ -109,9 +107,9 @@ void *thread_sender(void *data) {
     } else {
       m->cmds[0].u.comp_time_us = comptimes_us;
     }
-    // Expect only req_id in message header as reply
-    // TODO: support send and receive of variable reply-size requests
+    // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
     m->cmds[1].cmd = REPLY;
+    assert(resp_size >= sizeof(message_t) && resp_size <= BUF_SIZE);
     m->cmds[1].u.fwd.pkt_size = resp_size;
     cw_log("Sending %u bytes (will expect %u bytes in response)...\n", m->req_size,
 	   m->cmds[1].u.fwd.pkt_size = resp_size);
@@ -163,6 +161,7 @@ void *thread_receiver(void *data) {
 	   read, pkt_id, m->req_size, m->num);
     cw_log("Expecting further %lu bytes (total pkt_size %u bytes)\n",
 	   m->req_size - read, m->req_size);
+    assert(m->req_size >= sizeof(message_t));
     safe_recv(clientSocket, recv_buf + read, m->req_size - read);
 
     struct timespec ts_now;

@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <netinet/in.h>
 
+#define BUF_SIZE 16384
+
 typedef enum { COMPUTE, STORE, FORWARD, REPLY } command_type_t;
 
 typedef struct {
