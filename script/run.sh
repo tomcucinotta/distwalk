@@ -54,7 +54,7 @@ for PS in 128 256 512 1024 2048 4096; do
 		continue;
 	    fi
 
-	    echo "Starting server..."
+	    echo "Starting server constrained on CPUs $CPUL..."
 	    taskset -c $CPUL ../src/node &
 
 	    echo "Launching client ..."
