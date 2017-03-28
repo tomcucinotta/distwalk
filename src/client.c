@@ -50,7 +50,9 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   size_t read_tot = 0;
   while (len > 0) {
     int read;
-    check(read = recv(sock, buf, len, 0));
+    read = recv(sock, buf, len, 0);
+    cw_log("Read %d bytes\n", read);
+    check(read);
     if (read == 0)
       break;
     buf += read;

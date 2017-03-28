@@ -288,6 +288,7 @@ void epoll_main_loop(int listen_sock) {
   }
 
   for (;;) {
+    cw_log("epoll_wait()ing...\n");
     int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
     if (nfds == -1) {
       perror("epoll_wait");
@@ -331,7 +332,7 @@ void epoll_main_loop(int listen_sock) {
 	bufs[buf_id].curr_size = BUF_SIZE;
 	bufs[buf_id].sock = conn_sock;
 
-	ev.events = EPOLLIN | EPOLLET;
+	ev.events = EPOLLIN;
 	// Use the data.u32 field to store the buf_id in bufs[]
 	ev.data.u32 = buf_id;
 	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock,
