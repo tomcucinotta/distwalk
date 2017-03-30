@@ -16,23 +16,29 @@
 
 #
 # Name of the traffic control command.
-TC=/sbin/tc
+TC="sudo /sbin/tc"
 
 # The network interface we're planning on limiting bandwidth.
 #IFACE=eth0             # Interface
-IFACE=${IFACE:-enp3s0}
+IFACE=${IFACE:-$(route -n | grep '^0.0.0.0' | sed -e 's/.* \([a-z0-9]\+\)$/\1/')}
 
 # Download limit (in mega bits)
-DNLD=${PDNLD:-1mbit}          # DOWNLOAD Limit
+DNLD=${DNLD:-1mbit}          # DOWNLOAD Limit
 
 # Upload limit (in mega bits)
 UPLD=${UPLD:-1mbit}          # UPLOAD Limit
 
 # IP address of the machine we are controlling
 #IP=216.3.128.12     # Host IP
-IP=${IP:-$(/sbin/ifconfig $IFACE | grep inet | sed -e 's/.*inet //' | cut -d ' ' -f1)}
+IP=${IP:-$(/sbin/ifconfig $IFACE | grep inet | sed -e 's/[[:blank:]]*inet //' -e 's/addr://' | cut -d ' ' -f1)}
 
-echo IP=$IP
+echo IFACE=$IFACE, IP=$IP, IP2=$IP2, DNLD=$DNLD, UPLD=$UPLD
+
+if [ "$1" = "start" -a "$IP2" = "" ]; then
+    echo "Error: you need to provide the target IP address!"
+    echo "Usage: IP2=a.b.c.d $0 {start|stop|show}"
+    exit -1
+fi
 
 # Filter options for limiting the intended interface.
 U32="$TC filter add dev $IFACE protocol ip parent 1:0 prio 1 u32"
@@ -46,8 +52,8 @@ start() {
     $TC qdisc add dev $IFACE root handle 1: htb default 30
     $TC class add dev $IFACE parent 1: classid 1:1 htb rate $DNLD
     $TC class add dev $IFACE parent 1: classid 1:2 htb rate $UPLD
-    $U32 match ip dst $IP/32 flowid 1:1
-    $U32 match ip src $IP/32 flowid 1:2
+    $U32 match ip dst $IP/32 match ip src $IP2/32 flowid 1:1
+    $U32 match ip src $IP/32 match ip dst $IP2/32 flowid 1:2
 
 # The first line creates the root qdisc, and the next two lines
 # create two child qdisc that are to be used to shape download
@@ -77,9 +83,14 @@ restart() {
 
 show() {
 
-# Display status of traffic control status.
-    $TC -s qdisc ls dev $IFACE
+    /sbin/ifconfig $IFACE
+    /sbin/ethtool $IFACE
+    /sbin/route -n
 
+    # Display status of traffic control status.
+    $TC -s qdisc ls dev $IFACE
+    $TC class show dev $IFACE
+    $TC filter show dev $IFACE
 }
 
 case "$1" in

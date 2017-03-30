@@ -7,18 +7,32 @@ echo() {
 echo "Starting on $(date) @ $(hostname) - $(uname -r)"
 
 PKTS=10000
-CPUS="0"
-CPUL=$(/bin/echo $CPUS | sed -e 's/ /,/g')
+NODE_CPUS="0"
+CLIENT_CPUS="2 3"
+NODE_CPUL=$(/bin/echo $NODE_CPUS | sed -e 's/ /,/g')
+CLIENT_CPUL=$(/bin/echo $CLIENT_CPUS | sed -e 's/ /,/g')
 CLIENT=balsini.retis
 SERVER=$(hostname)
+
+echo "Node NIC configuration and limits:"
+./tc.sh show
+
+echo "Node routing table:"
+/sbin/route -n
+
+echo "Client NIC configuration and limits:"
+ssh $CLIENT cloudwalk/script/tc.sh show
+
+echo "Client routing table:"
+ssh $CLIENT /sbin/route -n
 
 # sleep-time between exps rounds
 PAUSE=0
 
-# Check whether any of the selected $CPUS share the same core_id
+# Check whether any of the selected $NODE_CPUS share the same core_id
 # (possible with hyper-threading, very likely leads to bad results)
-for c1 in $CPUS; do
-    for c2 in $CPUS; do
+for c1 in $NODE_CPUS; do
+    for c2 in $NODE_CPUS; do
 	if [ "$c1" = "$c2" ]; then
 	    continue;
 	fi
@@ -39,8 +53,8 @@ rsync -avz -e ssh --exclude=.git --exclude='log*.txt' ../ $CLIENT:cloudwalk/
 
 echo "Looping over configurations..."
 
-for PS in 128 256 512 1024 2048 4096; do
-    for DT in 600 700 800 900 1000; do
+for PS in 128 256 512 1024 2048; do
+    for DT in 800 900 1000 1250 1500 1750 2000 2500 5000; do
 	for BW in 0.5 0.6 0.7 0.8 0.9; do
 	    # Round bc output
 	    CT=$(/bin/echo "$DT * $BW" | bc -l | sed -e 's/\..*//')
@@ -54,11 +68,11 @@ for PS in 128 256 512 1024 2048 4096; do
 		continue;
 	    fi
 
-	    echo "Starting server constrained on CPUs $CPUL..."
-	    taskset -c $CPUL ../src/node &
+	    echo "Starting server constrained on CPUs $NODE_CPUL..."
+	    taskset -c $NODE_CPUL ../src/node &
 
 	    echo "Launching client ..."
-	    ssh $CLIENT "echo logged && cloudwalk/src/client -s $SERVER -c $PKTS -p $DT -ea -ps $PS -C $CT -ec > log.txt"
+	    ssh $CLIENT "echo logged && taskset -c $CLIENT_CPUL cloudwalk/src/client -s $SERVER -c $PKTS -p $DT -ea -ps $PS -C $CT -ec > log.txt"
 
 	    echo "Client done, copying log.txt..."
 	    scp $CLIENT:log.txt log-t$DT-s$PS-c$CT.txt
