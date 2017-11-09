@@ -11,6 +11,7 @@ clean:
 
 client: client.o expon.o
 client_debug: client_debug.o expon_debug.o
+test_expon: test_expon.o expon.o
 
 %_debug.o: %.c
 	$(CC) -c $(CFLAGS_DEBUG) $(CPPFLAGS_DEBUG) -o $@ $<
