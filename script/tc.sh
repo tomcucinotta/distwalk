@@ -16,11 +16,11 @@
 
 #
 # Name of the traffic control command.
-TC="sudo /sbin/tc"
+TC="/sbin/tc"
 
 # The network interface we're planning on limiting bandwidth.
 #IFACE=eth0             # Interface
-IFACE=${IFACE:-$(route -n | grep '^0.0.0.0' | sed -e 's/.* \([a-z0-9]\+\)$/\1/')}
+IFACE=${IFACE:-$(/sbin/route -n | grep '^0.0.0.0' | head -1 | sed -e 's/.* \([a-z0-9]\+\)$/\1/')}
 
 # Download limit (in mega bits)
 DNLD=${DNLD:-1mbit}          # DOWNLOAD Limit
@@ -126,7 +126,7 @@ case "$1" in
   *)
 
     pwd=$(pwd)
-    echo "Usage: tc.bash {start|stop|restart|show}"
+    echo "Usage: tc.sh {start|stop|restart|show}"
     ;;
 
 esac
