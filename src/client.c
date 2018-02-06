@@ -39,7 +39,7 @@ int no_delay = 1;
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
     int sent;
-    check(sent = send(sock, buf, len, 0));
+    sys_check(sent = send(sock, buf, len, 0));
     cw_log("Sent %d bytes.\n", sent);
     buf += sent;
     len -= sent;
@@ -50,9 +50,8 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   size_t read_tot = 0;
   while (len > 0) {
     int read;
-    read = recv(sock, buf, len, 0);
+    sys_check(read = recv(sock, buf, len, 0));
     cw_log("Read %d bytes\n", read);
-    check(read);
     if (read == 0)
       break;
     buf += read;
@@ -134,7 +133,7 @@ void *thread_sender(void *data) {
 	clock_gettime(clk_id, &ts);
       } while (ts_leq(ts, ts_now));
     } else {
-      check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
+      sys_check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
     }
 
     if (ramp_step_secs != 0) {
@@ -317,7 +316,7 @@ int main(int argc, char *argv[]) {
   /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
   clientSocket = socket(PF_INET, SOCK_STREAM, 0);
 
-  check(setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&no_delay, sizeof(no_delay)) == 0);
+  sys_check(setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&no_delay, sizeof(no_delay)));
 
   cw_log("Resolving %s...\n", bindname);
   struct hostent *e2 = gethostbyname(bindname);
@@ -337,11 +336,11 @@ int main(int argc, char *argv[]) {
   cw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr), myaddr.sin_port);
 
   /*---- Bind the address struct to the socket ----*/
-  check(bind(clientSocket, (struct sockaddr *) &myaddr, sizeof(myaddr)));
+  sys_check(bind(clientSocket, (struct sockaddr *) &myaddr, sizeof(myaddr)));
 
   /*---- Connect the socket to the server using the address struct ----*/
   addr_size = sizeof(serveraddr);
-  check(connect(clientSocket, (struct sockaddr *) &serveraddr, addr_size));
+  sys_check(connect(clientSocket, (struct sockaddr *) &serveraddr, addr_size));
 
   pthread_t receiver;
   assert(pthread_create(&receiver, NULL, thread_receiver, NULL) == 0);

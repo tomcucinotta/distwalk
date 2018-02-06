@@ -17,11 +17,19 @@
 
 #endif
 
+// Exit immediately if the syscall call returns an error
+#define sys_check(call) do {	 \
+    int __rv = (call);		 \
+    if (__rv < 0) {		 \
+      perror("Error: " #call);	 \
+      exit(-1);			 \
+    }				 \
+  } while (0)
+
 // Exit immediately if cond is violated
 #define check(cond) do {	 \
-    int __rv = (cond);		 \
-    if (__rv < 0) {		 \
-      perror("Error: " #cond);	 \
+    if (!(cond)) {		 \
+      fprintf(stderr, "Error: " #cond);		\
       exit(-1);			 \
     }				 \
   } while (0)

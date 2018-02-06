@@ -74,7 +74,7 @@ int sock_find_addr(in_addr_t inaddr, int port) {
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
     int sent;
-    check(sent = send(sock, buf, len, 0));
+    sys_check(sent = send(sock, buf, len, 0));
     buf += sent;
     len -= sent;
   }
@@ -84,7 +84,7 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   size_t read_tot = 0;
   while (len > 0) {
     int read;
-    check(read = recv(sock, buf, len, 0));
+    sys_check(read = recv(sock, buf, len, 0));
     if (read == 0)
       return read_tot;
     buf += read;
@@ -255,7 +255,7 @@ void *receive_thread(void *data) {
     }
     safe_send(sock, buf, sizeof(message_t));
   }
-  check(close(sock));
+  sys_check(close(sock));
   return 0;
 }
 
@@ -308,7 +308,7 @@ void epoll_main_loop(int listen_sock) {
 	cw_log("Accepted connection from: %s:%d\n", inet_ntoa(addr.sin_addr), addr.sin_port);
 	setnonblocking(conn_sock);
 	int val = 1;
-	check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val)) == 0);
+	sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val)));
 
 	check(sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock) != -1);
 
@@ -406,10 +406,10 @@ int main(int argc, char *argv[]) {
   memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
 
   /*---- Bind the address struct to the socket ----*/
-  check(bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr)));
+  sys_check(bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr)));
 
   /*---- Listen on the socket, with 5 max connection requests queued ----*/
-  check(listen(welcomeSocket, 5));
+  sys_check(listen(welcomeSocket, 5));
   cw_log("Accepting new connections...\n");
 
   epoll_main_loop(welcomeSocket);
