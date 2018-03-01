@@ -23,13 +23,17 @@ which is capable of handling multiple client connections via epoll(7).
 
 COMPILING
 ----------------------------------------------------------------------
-Please, use Linux. Just enter the src/ folder, and type:
+This program has been developed and tested on a Linux Ubuntu system,
+versions 16.xx and 17.xx. Therefore, please, use Linux.
+
+In order to compile the client and the server, just type, from the
+root folder:
 
   make
 
 two executables are created:
-- client: the client program, try typing ./client -h
-- node: the server program, try typing ./server -h
+- src/client: the client program, try typing ./client -h
+- src/node: the server program, try typing ./server -h
 
 
 EXAMPLE OF USE
