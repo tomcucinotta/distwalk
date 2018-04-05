@@ -306,7 +306,7 @@ void epoll_main_loop(int listen_sock) {
 	  exit(EXIT_FAILURE);
 	}
 	cw_log("Accepted connection from: %s:%d\n", inet_ntoa(addr.sin_addr), addr.sin_port);
-	setnonblocking(conn_sock);
+	//setnonblocking(conn_sock);
 	int val = 1;
 	sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val)));
 
