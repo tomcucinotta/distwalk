@@ -61,6 +61,29 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   return read_tot;
 }
 
+#define TCPIP_HEADERS_SIZE 66
+#define MIN_SEND_SIZE (sizeof(message_t) + 2*sizeof(command_t))
+#define MIN_REPLY_SIZE sizeof(message_t)
+
+uint32_t exp_packet_size(uint32_t avg, uint32_t min, uint32_t max, struct drand48_data* rnd_buf){
+  /* The pkt_size in input does not consider header size but I need to take
+  * that into account if I want to generate an exponential distribution.
+  */
+  uint32_t ret = lround(expon(1.0 / (avg+TCPIP_HEADERS_SIZE), rnd_buf));
+
+  if (ret >= TCPIP_HEADERS_SIZE)
+    ret -= TCPIP_HEADERS_SIZE;
+  else
+    ret = 0;
+
+  if (ret < min)
+    return min;
+  else if (ret > max)
+    return max;
+  else
+    return ret;
+}
+
 #define MAX_PKTS 1000000
 
 clockid_t clk_id = CLOCK_REALTIME;
@@ -100,7 +123,13 @@ void *thread_sender(void *data) {
     /*---- Issue a request to the server ---*/
     message_t *m = (message_t *) send_buf;
     m->req_id = i;
-    m->req_size = pkt_size;
+
+    if (exp_pkt_size){
+      m->req_size = exp_packet_size(pkt_size, MIN_SEND_SIZE, BUF_SIZE, &rnd_buf);
+    } else{
+      m->req_size = pkt_size;
+    }
+
     m->num = 2;
     m->cmds[0].cmd = COMPUTE;
     if (exp_comptimes) {
@@ -110,10 +139,14 @@ void *thread_sender(void *data) {
     }
     // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
     m->cmds[1].cmd = REPLY;
-    assert(resp_size >= sizeof(message_t) && resp_size <= BUF_SIZE);
-    m->cmds[1].u.fwd.pkt_size = resp_size;
+
+    if (exp_resp_size){
+       m->cmds[1].u.fwd.pkt_size = exp_packet_size(resp_size, MIN_REPLY_SIZE, BUF_SIZE, &rnd_buf);
+    } else
+      m->cmds[1].u.fwd.pkt_size = resp_size;
+
     cw_log("Sending %u bytes (will expect %u bytes in response)...\n", m->req_size,
-	   m->cmds[1].u.fwd.pkt_size = resp_size);
+	   m->cmds[1].u.fwd.pkt_size);
     safe_send(clientSocket, send_buf, m->req_size);
 
     unsigned long period_us = 1000000 / rate;
@@ -190,6 +223,7 @@ int main(int argc, char *argv[]) {
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
       printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-C|--comp-time comp_time(us)] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val]\n");
+      printf("Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n");
       exit(0);
     } else if (strcmp(argv[0], "-s") == 0) {
       assert(argc >= 2);
@@ -286,17 +320,17 @@ int main(int argc, char *argv[]) {
 	 ramp_num_steps, ramp_delta_rate, ramp_step_secs);
   printf("  comptime_us=%lu, exp_comptimes=%d\n",
 	 comptimes_us, exp_comptimes);
-  printf("  pkt_size=%lu, exp_pkt_size=%d\n",
-	 pkt_size, exp_pkt_size);
-  printf("  resp_size=%lu, exp_resp_size=%d\n",
-	 resp_size, exp_resp_size);
-  printf("  min packet size due to header: %lu\n", sizeof(message_t));
+  printf("  pkt_size=%lu (%lu with headers), exp_pkt_size=%d\n",
+	 pkt_size, pkt_size+TCPIP_HEADERS_SIZE, exp_pkt_size);
+  printf("  resp_size=%lu (%lu with headers), exp_resp_size=%d\n",
+	 resp_size, resp_size+TCPIP_HEADERS_SIZE, exp_resp_size);
+  printf("  min packet size due to header: send=%lu, reply=%lu\n", MIN_SEND_SIZE, MIN_REPLY_SIZE);
   printf("  max packet size: %d\n", BUF_SIZE);
   printf("  no_delay: %d\n", no_delay);
 
-  assert(pkt_size >= sizeof(message_t));
+  assert(pkt_size >= MIN_SEND_SIZE);
   assert(pkt_size <= BUF_SIZE);
-  assert(resp_size >= sizeof(message_t));
+  assert(resp_size >= MIN_REPLY_SIZE);
   assert(resp_size <= BUF_SIZE);
   assert(no_delay == 0 || no_delay == 1);
 
