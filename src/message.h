@@ -15,11 +15,21 @@ typedef struct {
 } fwd_opts_t;
 
 typedef struct {
+  uint32_t pkt_size;	// size of forwarded packet
+} reply_opts_t;
+
+typedef struct {
+  uint64_t offset;
+  uint32_t pkt_size;	// size of forwarded packet
+} store_opts_t;
+
+typedef struct {
   command_type_t cmd;
   union {
     uint16_t comp_time_us;	// COMPUTE time (usecs)
     uint16_t store_flags;	// STORE flags
     fwd_opts_t fwd;		// FORWARD host+port and pkt size
+    reply_opts_t reply;		// REPLY pkt size
   } u;
 } command_t;
 
