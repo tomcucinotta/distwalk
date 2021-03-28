@@ -47,6 +47,8 @@ int bind_port = 7891;
 
 int no_delay = 1;
 
+int epollfd;
+
 // add the IP/port into the socks[] map to allow FORWARD finding an
 // already set-up socket, through sock_find()
 // FIXME: bad complexity with many sockets
@@ -158,13 +160,20 @@ void compute_for(unsigned long usecs) {
   } while (ts_sub_us(ts_end, ts_beg) < usecs);
 }
 
+int close_and_forget(int sock) {
+  if (epoll_ctl(epollfd, EPOLL_CTL_DEL, sock, NULL) == -1) {
+    perror("epoll_ctl: deleting socket");
+    exit(EXIT_FAILURE);
+  }
+  return close(sock);
+}
+
 void process_messages(int sock, int buf_id) {
   size_t received = recv(sock, bufs[buf_id].curr_buf, bufs[buf_id].curr_size, 0);
   cw_log("recv() returned: %d\n", (int)received);
   if (received == 0) {
     cw_log("Connection closed by remote end\n");
-    // EPOLL_CTL_DEL ?
-    close(sock);
+    close_and_forget(sock);
     free(bufs[buf_id].buf);
     bufs[buf_id].buf = NULL;
     return;
@@ -255,7 +264,7 @@ void *receive_thread(void *data) {
     }
     safe_send(sock, buf, sizeof(message_t));
   }
-  sys_check(close(sock));
+  sys_check(close_and_forget(sock));
   return 0;
 }
 
@@ -269,7 +278,6 @@ void setnonblocking(int fd) {
 #define MAX_EVENTS 10
 void epoll_main_loop(int listen_sock) {
   struct epoll_event ev, events[MAX_EVENTS];
-  int epollfd;
 
   /* Code to set up listening socket, 'listen_sock',
      (socket(), bind(), listen()) omitted */
@@ -318,13 +326,13 @@ void epoll_main_loop(int listen_sock) {
 	    break;
 	if (buf_id == MAX_BUFFERS) {
 	  fprintf(stderr, "Not enough buffers for new connection, closing!\n");
-	  close(conn_sock);
+	  close_and_forget(conn_sock);
 	  continue;
 	}
 	bufs[buf_id].buf = malloc(BUF_SIZE);
 	if (bufs[buf_id].buf == 0) {
 	  fprintf(stderr, "Not enough memory for allocating new buffer, closing!\n");
-	  close(conn_sock);
+	  close_and_forget(conn_sock);
 	  continue;
 	}
 	bufs[buf_id].buf_size = BUF_SIZE;
