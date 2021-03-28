@@ -49,6 +49,27 @@ int no_delay = 1;
 
 int epollfd;
 
+// return sock associated to inaddr:port
+int sock_find_addr(in_addr_t inaddr, int port) {
+  for (int i = 0; i < MAX_SOCKETS; i++) {
+    if (socks[i].inaddr == inaddr && socks[i].port == port) {
+      return socks[i].sock;
+    }
+  }
+  return -1;
+}
+
+// return index of sock in socks[]
+int sock_find_sock(int sock) {
+  assert(sock != -1);
+  for (int i = 0; i < MAX_SOCKETS; i++) {
+    if (socks[i].sock == sock) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 // add the IP/port into the socks[] map to allow FORWARD finding an
 // already set-up socket, through sock_find()
 // FIXME: bad complexity with many sockets
@@ -64,13 +85,19 @@ int sock_add(in_addr_t inaddr, int port, int sock) {
   return -1;
 }
 
-int sock_find_addr(in_addr_t inaddr, int port) {
-  for (int i = 0; i < MAX_SOCKETS; i++) {
-    if (socks[i].inaddr == inaddr && socks[i].port == port) {
-      return socks[i].sock;
-    }
-  }
-  return -1;
+void sock_del_id(int id) {
+  assert(id < MAX_SOCKETS);
+  cw_log("marking socks[%d] invalid\n", id);
+  socks[id].sock = -1;
+}
+
+// make entry in socks[] associated to sock invalid, return entry ID if found or -1
+int sock_del(int sock) {
+  int id = sock_find_sock(sock);
+  if (id == -1)
+    return -1;
+  sock_del_id(id);
+  return id;
 }
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
@@ -161,10 +188,13 @@ void compute_for(unsigned long usecs) {
 }
 
 int close_and_forget(int sock) {
+  cw_log("removing sock=%d from epollfd\n", sock);
   if (epoll_ctl(epollfd, EPOLL_CTL_DEL, sock, NULL) == -1) {
     perror("epoll_ctl: deleting socket");
     exit(EXIT_FAILURE);
   }
+  cw_log("removing sock=%d from socks[]\n", sock);
+  sock_del(sock);
   return close(sock);
 }
 
