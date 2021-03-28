@@ -21,12 +21,16 @@
 #include <pthread.h>
 #include <sys/epoll.h>
 
+typedef enum { RECEIVING, SENDING, LOADING, STORING, CONNECTING } req_status;
+
 typedef struct {
   unsigned char *buf;		// NULL for unused buf_info
   unsigned long buf_size;
   unsigned char *curr_buf;
   unsigned long curr_size;
   int sock;
+  req_status status;
+  int orig_sock_id;             // ID in socks[]
 } buf_info;
 
 #define MAX_BUFFERS 16
@@ -74,6 +78,9 @@ int sock_find_sock(int sock) {
 // already set-up socket, through sock_find()
 // FIXME: bad complexity with many sockets
 int sock_add(in_addr_t inaddr, int port, int sock) {
+  int sock_id = sock_find_addr(inaddr, port);
+  if (sock_id != -1)
+    return sock_id;
   for (int i = 0; i < MAX_SOCKETS; i++) {
     if (socks[i].sock == -1) {
       socks[i].inaddr = inaddr;
@@ -275,6 +282,14 @@ void process_messages(int sock, int buf_id) {
   }
 }
 
+void send_messages(int buf_id) {
+  printf("send_messages()\n");
+}
+
+void finalize_conn(int buf_id) {
+  printf("finalize_conn()\n");
+}
+
 void *receive_thread(void *data) {
   int sock = (int)(long) data;
   unsigned char buf[1024];
@@ -348,7 +363,8 @@ void epoll_main_loop(int listen_sock) {
 	int val = 1;
 	sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val)));
 
-	check(sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock) != -1);
+        int orig_sock_id = sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock);
+        check(orig_sock_id != -1);
 
 	int buf_id;
 	for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++)
@@ -369,8 +385,10 @@ void epoll_main_loop(int listen_sock) {
 	bufs[buf_id].curr_buf = bufs[buf_id].buf;
 	bufs[buf_id].curr_size = BUF_SIZE;
 	bufs[buf_id].sock = conn_sock;
+        bufs[buf_id].status = RECEIVING;
+        bufs[buf_id].orig_sock_id = orig_sock_id;
 
-	ev.events = EPOLLIN;
+	ev.events = EPOLLIN | EPOLLOUT;
 	// Use the data.u32 field to store the buf_id in bufs[]
 	ev.data.u32 = buf_id;
 	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock,
@@ -382,7 +400,16 @@ void epoll_main_loop(int listen_sock) {
 	// FIXME - allow for receiving only message parts, handle EAGAIN
 	int buf_id = events[i].data.u32;
 	cw_log("Receiving and processing on buf_id=%d...\n", buf_id);
-	process_messages(bufs[buf_id].sock, buf_id);
+        if ((events[i].events | EPOLLIN) && bufs[buf_id].status == RECEIVING)
+          process_messages(bufs[buf_id].sock, buf_id);
+        else if ((events[i].events | EPOLLOUT) && bufs[buf_id].status == SENDING)
+          send_messages(buf_id);
+        else if ((events[i].events | EPOLLOUT) && bufs[buf_id].status == CONNECTING)
+          finalize_conn(buf_id);
+        else {
+          fprintf(stderr, "unexpected status: event=%d, %d\n", events[i].events, bufs[buf_id].status);
+          exit(EXIT_FAILURE);
+        }
       }
     }
   }
