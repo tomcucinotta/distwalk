@@ -131,6 +131,15 @@ void safe_send(int sock, unsigned char *buf, size_t len) {
   }
 }
 
+void safe_write(int fd, unsigned char *buf, size_t len) {
+  while (len > 0) {
+    int sent;
+    sys_check(sent = write(fd, buf, len));
+    buf += sent;
+    len -= sent;
+  }
+}
+
 size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   size_t read_tot = 0;
   while (len > 0) {
@@ -211,18 +220,18 @@ void compute_for(unsigned long usecs) {
  
 ssize_t store(size_t bytes) {
   //generate the data to be stored
-  char* tmp = (char*) malloc(bytes + 1);
+  unsigned char* tmp = (unsigned char*) malloc(bytes + 1);
   ssize_t wrote;
   cw_log("STORE: storing %lu bytes\n", bytes);
 
   memset(tmp, 'X', bytes);
   tmp[bytes] = '\0';
 
-  sys_check(wrote = write(storage_fd, tmp, bytes));
+  safe_write(storage_fd, tmp, bytes);
   fsync(storage_fd);
 
   free(tmp);
-  return wrote;
+  return bytes;
 }
 
 ssize_t load(size_t bytes) {
