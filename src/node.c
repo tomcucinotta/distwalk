@@ -21,7 +21,7 @@
 #include <pthread.h>
 #include <sys/epoll.h>
 
-typedef enum { RECEIVING, SENDING, LOADING, STORING, CONNECTING } req_status;
+typedef enum { RECEIVING, SENDING, FORWARDING, LOADING, STORING, CONNECTING } req_status;
 
 typedef struct {
   unsigned char *buf;		// NULL for unused buf_info
@@ -31,6 +31,8 @@ typedef struct {
   int sock;
   req_status status;
   int orig_sock_id;             // ID in socks[]
+  int parent_buf_id;            // used in FORWARDING, identifies the entry in bufs[] related to the client that issued the forward
+  int parent_cmd_id;            // same
 } buf_info;
 
 #define MAX_BUFFERS 16
@@ -52,6 +54,13 @@ int bind_port = 7891;
 int no_delay = 1;
 
 int epollfd;
+
+void setnonblocking(int fd) {
+   int flags = fcntl(fd, F_GETFL, 0);
+   assert(flags >= 0);
+   flags |= O_NONBLOCK;
+   assert(fcntl(fd, F_SETFL, flags) == 0);
+}
 
 // return sock associated to inaddr:port
 int sock_find_addr(in_addr_t inaddr, int port) {
@@ -107,6 +116,21 @@ int sock_del(int sock) {
   return id;
 }
 
+// return ID of free buf_info in bufs[], or -1
+int new_buf_info() {
+  for (int buf_id = 0; buf_id < MAX_BUFFERS; buf_id++)
+    if (bufs[buf_id].buf == 0) {
+      bufs[buf_id].buf = malloc(BUF_SIZE);
+      if (bufs[buf_id].buf == 0) {
+        fprintf(stderr, "Not enough memory for allocating new buffer!\n");
+        return -1;
+      }
+      bufs[buf_id].buf_size = BUF_SIZE;
+      return buf_id;
+    }
+  return -1;
+}
+
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
     int sent;
@@ -143,12 +167,22 @@ void copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
   m_dst->num = m->num - cmd_id;
 }
 
-// cmd_id is the index of the FORWARD item within m->cmds[] here, we
-// remove the first (cmd_id+1) commands from cmds[], and forward the
-// rest to the next hop
-void forward(int buf_id, message_t *m, int cmd_id) {
-  int sock = sock_find_addr(m->cmds[cmd_id].u.fwd.fwd_host, m->cmds[cmd_id].u.fwd.fwd_port);
-  assert(sock != -1);
+int remember(in_addr_t inaddr, int port, int sock) {
+  if (sock_add(inaddr, port, sock) == -1)
+    return -1;
+  struct epoll_event ev;
+  ev.events = EPOLLIN | EPOLLOUT;
+  ev.data.fd = sock;
+  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sock, &ev) == -1) {
+    perror("epoll_ctl: listen_sock");
+    exit(EXIT_FAILURE);
+  }
+  return 0;
+}
+
+void forward_sock(int buf_id, int cmd_id, int sock) {
+  unsigned char *buf = bufs[buf_id].buf;
+  message_t *m = (message_t *) buf;
   message_t *m_dst = (message_t *) fwd_buf;
   copy_tail(m, m_dst, cmd_id + 1);
   m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
@@ -159,6 +193,44 @@ void forward(int buf_id, message_t *m, int cmd_id) {
   // TODO: return to epoll loop to handle sending of long packets
   // (here I'm blocking the thread)
   safe_send(sock, fwd_buf, m_dst->req_size);
+}
+
+// cmd_id is the index of the FORWARD item within m->cmds[] here, we
+// remove the first (cmd_id+1) commands from cmds[], and forward the
+// rest to the next hop
+void forward(int buf_id, int cmd_id) {
+  unsigned char *buf = bufs[buf_id].buf;
+  message_t *m = (message_t *) buf;
+  int sock = sock_find_addr(m->cmds[cmd_id].u.fwd.fwd_host, m->cmds[cmd_id].u.fwd.fwd_port);
+  if (sock == -1) {
+    sock = socket(PF_INET, SOCK_STREAM, 0);
+    sys_check(setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (void *)&no_delay, sizeof(no_delay)));
+    setnonblocking(sock);
+    struct sockaddr_in serveraddr;
+    bzero((char *) &serveraddr, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    bcopy((char *)&m->cmds[cmd_id].u.fwd.fwd_host, 
+          (char *)&serveraddr.sin_addr.s_addr, sizeof(m->cmds[cmd_id].u.fwd.fwd_host));
+    serveraddr.sin_port = htons(m->cmds[cmd_id].u.fwd.fwd_port);
+    size_t addr_size = sizeof(serveraddr);
+    int rv = connect(sock, (struct sockaddr *) &serveraddr, addr_size);
+    if (rv == 0) {
+      // unlikely in non-blocking mode
+      remember(m->cmds[cmd_id].u.fwd.fwd_host, m->cmds[cmd_id].u.fwd.fwd_port, sock);
+      forward_sock(buf_id, cmd_id, sock);
+    } else {
+      if (errno == -EINPROGRESS) {
+        remember(m->cmds[cmd_id].u.fwd.fwd_host, m->cmds[cmd_id].u.fwd.fwd_port, sock);
+        bufs[buf_id].status = CONNECTING;
+      } else {
+        perror("connect() failed: ");
+        exit(EXIT_FAILURE);
+      }
+    }
+  } else {
+    bufs[buf_id].status = FORWARDING;
+    forward_sock(buf_id, cmd_id, sock);
+  }
 }
 
 unsigned char reply_buf[BUF_SIZE];
@@ -244,7 +316,7 @@ void process_messages(int sock, int buf_id) {
       if (m->cmds[i].cmd == COMPUTE) {
 	compute_for(m->cmds[i].u.comp_time_us);
       } else if (m->cmds[i].cmd == FORWARD) {
-	forward(buf_id, m, i);
+	forward(buf_id, i);
 	// rest of cmds[] are for next hop, not me
 	break;
       } else if (m->cmds[i].cmd == REPLY) {
@@ -288,6 +360,14 @@ void send_messages(int buf_id) {
 
 void finalize_conn(int buf_id) {
   printf("finalize_conn()\n");
+  int val;
+  socklen_t val_size = sizeof(val);
+  sys_check(getsockopt(bufs[buf_id].sock, SOL_SOCKET, SO_ERROR, &val, &val_size));
+  if (val != 0) {
+    fprintf(stderr, "connect() failed: %s\n", strerror(val));
+    exit(EXIT_FAILURE);
+  }
+  forward_sock(buf_id, cmd_id, sock);
 }
 
 void *receive_thread(void *data) {
@@ -311,13 +391,6 @@ void *receive_thread(void *data) {
   }
   sys_check(close_and_forget(sock));
   return 0;
-}
-
-void setnonblocking(int fd) {
-   int flags = fcntl(fd, F_GETFL, 0);
-   assert(flags >= 0);
-   flags |= O_NONBLOCK;
-   assert(fcntl(fd, F_SETFL, flags) == 0);
 }
 
 #define MAX_EVENTS 10
@@ -366,22 +439,12 @@ void epoll_main_loop(int listen_sock) {
         int orig_sock_id = sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock);
         check(orig_sock_id != -1);
 
-	int buf_id;
-	for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++)
-	  if (bufs[buf_id].buf == 0)
-	    break;
-	if (buf_id == MAX_BUFFERS) {
+	int buf_id = new_buf_info();
+	if (buf_id == -1) {
 	  fprintf(stderr, "Not enough buffers for new connection, closing!\n");
 	  close_and_forget(conn_sock);
 	  continue;
 	}
-	bufs[buf_id].buf = malloc(BUF_SIZE);
-	if (bufs[buf_id].buf == 0) {
-	  fprintf(stderr, "Not enough memory for allocating new buffer, closing!\n");
-	  close_and_forget(conn_sock);
-	  continue;
-	}
-	bufs[buf_id].buf_size = BUF_SIZE;
 	bufs[buf_id].curr_buf = bufs[buf_id].buf;
 	bufs[buf_id].curr_size = BUF_SIZE;
 	bufs[buf_id].sock = conn_sock;
@@ -459,6 +522,7 @@ int main(int argc, char *argv[]) {
 
   int val = 1;
   setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEADDR, (void *)&val, sizeof(val));
+  setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEPORT, (void *)&val, sizeof(val));
 
   /*---- Configure settings of the server address struct ----*/
   /* Address family = Internet */
