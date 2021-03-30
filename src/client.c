@@ -199,14 +199,14 @@ void *thread_sender(void *data) {
        m->cmds[1].u.fwd.pkt_size = exp_packet_size(resp_size, MIN_REPLY_SIZE, BUF_SIZE, &rnd_buf);
     } else
       m->cmds[1].u.fwd.pkt_size = resp_size;
-   
-    // to simulate data retrieving
+  
+    uint32_t return_bytes = m->cmds[1].u.fwd.pkt_size;
     if (m->cmds[0].cmd == LOAD) {
-      m->cmds[1].u.fwd.pkt_size += load_nbytes;
+      return_bytes += load_nbytes;
     }
 
     cw_log("%s: sending %u bytes (will expect %u bytes in response)...\n", get_command_name(next_cmd), m->req_size,
-	                                                                   m->cmds[1].u.fwd.pkt_size);
+	                                                                   return_bytes);
     safe_send(clientSocket, send_buf, m->req_size);
 
     unsigned long period_us = 1000000 / rate;

@@ -295,9 +295,9 @@ void process_messages(int sock, int buf_id) {
       } else if (m->cmds[i].cmd == REPLY) {
         printf("data %ld\n", data);
 	printf("pkt %u\n", m->cmds[i].u.fwd.pkt_size);
-        //check for partial data load
+        //simulate data retrieve
 	if (data >= 0) {
-          m->cmds[i].u.fwd.pkt_size += data - m->cmds[i-1].u.load_nbytes;
+          m->cmds[i].u.fwd.pkt_size += data;
 	  data = -1;
 	}
 	reply(sock, m, i);
