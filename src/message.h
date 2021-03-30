@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <netinet/in.h>
 
-#define BUF_SIZE 16384
+#define BUF_SIZE (16*1024*1024)
 
 typedef enum { COMPUTE, STORE, LOAD, FORWARD, REPLY } command_type_t;
 
@@ -42,9 +42,9 @@ typedef struct {
 typedef struct {
   command_type_t cmd;
   union {
-    uint16_t comp_time_us;	// COMPUTE time (usecs)
-    uint16_t store_nbytes;	// STORE data size
-    uint16_t load_nbytes;	// LOAD data size
+    uint32_t comp_time_us;	// COMPUTE time (usecs)
+    uint32_t store_nbytes;	// STORE data size
+    uint32_t load_nbytes;	// LOAD data size
     fwd_opts_t fwd;		// FORWARD host+port and pkt size
     //reply_opts_t reply;	// REPLY pkt size
   } u;
