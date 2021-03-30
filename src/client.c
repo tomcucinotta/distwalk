@@ -25,6 +25,13 @@ int wait_spinning = 0;
 int server_port = 7891;
 int bind_port = 0;
 
+unsigned int n_store = 0; 		// Number of STORE requests
+unsigned long store_nbytes = 10; 	// Number of bytes to be written to the server's storage
+
+unsigned int n_load = 0;		// Number of LOAD requests
+unsigned long load_nbytes = 10; 	// Number of bytes to be read from the server's storage 
+
+unsigned int n_compute = 0;		// Number of COMPUTE requests
 unsigned long comptimes_us = 100;	// defaults to 100us
 int exp_comptimes = 0;
 
@@ -61,6 +68,24 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   return read_tot;
 }
 
+//Weighted probabilities of executing a COMPUTE/STORE/LOAD request
+//(Used for randomly patterned messages)
+int sum_w = 0;
+int weights[3] = {0,0,0}; //0 compute, 1 store, 2 load
+
+//Weighted command type picker
+command_type_t pick_next_cmd() {
+  int r = rand() % sum_w;
+  int i = 0;
+
+  while (r >= weights[i] && i < 3) {
+     r -= weights[i];
+     i++;
+  }
+
+  return (command_type_t) i;
+}
+
 #define TCPIP_HEADERS_SIZE 66
 #define MIN_SEND_SIZE (sizeof(message_t) + 2*sizeof(command_t))
 #define MIN_REPLY_SIZE sizeof(message_t)
@@ -94,7 +119,7 @@ long usecs_elapsed[MAX_PKTS];
 struct timespec ts_start;
 unsigned int rate = 1000;	// pkt/s rate (period is its inverse)
 
-unsigned long num_pkts = 10;
+unsigned long num_pkts = 0;
 
 unsigned int ramp_step_secs = 0;	// if non-zero, supersedes num_pkts
 unsigned int ramp_delta_rate = 100;	// added to rate every ramp_secs
@@ -131,22 +156,57 @@ void *thread_sender(void *data) {
     }
 
     m->num = 2;
-    m->cmds[0].cmd = COMPUTE;
-    if (exp_comptimes) {
-      m->cmds[0].u.comp_time_us = lround(expon(1.0 / comptimes_us, &rnd_buf));
-    } else {
-      m->cmds[0].u.comp_time_us = comptimes_us;
+    command_type_t next_cmd;
+
+    if (sum_w > 0) { //weighted pick
+      next_cmd = pick_next_cmd();
+    } else { //request prioritY: COMPUTE>STORE>LOAD
+      if (n_compute > 0) {
+        n_compute--;
+        next_cmd = COMPUTE;
+      } else if (n_store > 0) {
+        n_store--;
+        next_cmd = STORE;
+      } else if (n_load > 0) {
+        n_load--;
+        next_cmd = LOAD;
+      } else { //COMPUTE by default
+        next_cmd = COMPUTE;
+      }
     }
+
+    m->cmds[0].cmd = next_cmd;
     // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
     m->cmds[1].cmd = REPLY;
+
+    if (m->cmds[0].cmd == COMPUTE) {
+      if (exp_comptimes) {
+        m->cmds[0].u.comp_time_us = lround(expon(1.0 / comptimes_us, &rnd_buf));
+      } else {
+        m->cmds[0].u.comp_time_us = comptimes_us;
+      }
+    } else if (m->cmds[0].cmd == STORE) {
+      m->cmds[0].u.store_nbytes = store_nbytes;
+      m->req_size += store_nbytes;
+    } else if (m->cmds[0].cmd == LOAD ){
+      m->cmds[0].u.load_nbytes = load_nbytes;
+    } else {
+      printf("Unexpected branch (2)\n");
+      exit(-1);
+    }
 
     if (exp_resp_size){
        m->cmds[1].u.fwd.pkt_size = exp_packet_size(resp_size, MIN_REPLY_SIZE, BUF_SIZE, &rnd_buf);
     } else
       m->cmds[1].u.fwd.pkt_size = resp_size;
+   
+    // to simulate data retrieving
+    if (m->cmds[0].cmd == LOAD) {
+      m->cmds[1].u.fwd.pkt_size += load_nbytes;
+    }
 
-    cw_log("Sending %u bytes (will expect %u bytes in response)...\n", m->req_size,
-	   m->cmds[1].u.fwd.pkt_size);
+    cw_log("%s: sending %u bytes (will expect %u bytes in response)...\n", get_command_name(next_cmd), m->req_size,
+	                                                                   m->cmds[1].u.fwd.pkt_size);
     safe_send(clientSocket, send_buf, m->req_size);
 
     unsigned long period_us = 1000000 / rate;
@@ -222,10 +282,10 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-s servername] [-sb serverport] [-c num_pkts] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-C|--comp-time comp_time(us)] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-C|--comp-time comp_time(us)] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight n] [-Sw|--store-weight n] [-Lw|--load-weight n] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val]\n");
       printf("Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n");
       exit(0);
-    } else if (strcmp(argv[0], "-s") == 0) {
+    } else if (strcmp(argv[0], "-sn") == 0) {
       assert(argc >= 2);
       hostname = argv[1];
       argc--;  argv++;
@@ -241,12 +301,23 @@ int main(int argc, char *argv[]) {
       assert(argc >= 2);
       bind_port = atoi(argv[1]);
       argc--;  argv++;
-    } else if (strcmp(argv[0], "-c") == 0) {
+    } else if (strcmp(argv[0], "-n") == 0) {
       assert(argc >= 2);
       num_pkts = atoi(argv[1]);
-      assert(num_pkts <= MAX_PKTS);
       argc--;  argv++;
-    } else if (strcmp(argv[0], "-p") == 0) {
+    } else if (strcmp(argv[0], "-c") == 0) {
+      assert(argc >= 2);
+      n_compute = atoi(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-s") == 0) {
+      assert(argc >= 2);
+      n_store = atoi(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-l") == 0) {
+      assert(argc >= 2);
+      n_load = atoi(argv[1]);
+      argc--;  argv++;
+   } else if (strcmp(argv[0], "-p") == 0) {
       assert(argc >= 2);
       rate = 1000000 / atol(argv[1]);
       argc--;  argv++;
@@ -271,7 +342,26 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(argv[0], "-C") == 0 || strcmp(argv[0], "--comp-time") == 0) {
       assert(argc >= 2);
       comptimes_us = atoi(argv[1]);
-      assert(num_pkts <= MAX_PKTS);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-S") == 0 || strcmp(argv[0], "--store-data") == 0) {
+      assert(argc >= 2);
+      store_nbytes = atoi(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-L") == 0 || strcmp(argv[0], "--load-data") == 0) {
+      assert(argc >= 2);
+      load_nbytes = atoi(argv[1]);
+      argc--;  argv++;
+   } else if (strcmp(argv[0], "-Cw") == 0 || strcmp(argv[0], "--comp-weight") == 0) {
+      assert(argc >= 2);
+      weights[COMPUTE] = atoi(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-Sw") == 0 || strcmp(argv[0], "--store-weight") == 0) {
+      assert(argc >= 2);
+      weights[STORE] = atoi(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-Lw") == 0 || strcmp(argv[0], "--load-weight") == 0) {
+      assert(argc >= 2);
+      weights[LOAD] = atoi(argv[1]);
       argc--;  argv++;
     } else if (strcmp(argv[0], "-ec") == 0 || strcmp(argv[0], "--exp-comp") == 0) {
       exp_comptimes = 1;
@@ -300,6 +390,21 @@ int main(int argc, char *argv[]) {
     argc--;  argv++;
   }
 
+  //globals
+  for (int i = 0; i < 3; i++) {
+    sum_w += weights[i];
+  }
+
+  //check input args consistency
+  if (num_pkts == 0) { //-n option has not been used
+    num_pkts = n_compute + n_store + n_load;
+  } else {
+    if (n_compute > 0 || n_store > 0 || n_load > 0) {
+        assert(num_pkts == n_compute + n_store + n_load);
+    }
+  }
+  assert(num_pkts <= MAX_PKTS);
+  
   if (ramp_step_secs != 0) {
     num_pkts = 0;
     int r = rate;
@@ -312,7 +417,7 @@ int main(int argc, char *argv[]) {
   printf("Configuration:\n");
   printf("  bind=%s:%d\n", bindname, bind_port);
   printf("  hostname=%s:%d\n", hostname, server_port);
-  printf("  num_pkts=%lu\n", num_pkts);
+  printf("  num_pkts=%lu (COMPUTE:%d, STORE:%d, LOAD:%d)\n", num_pkts, n_compute, n_store, n_load);
   printf("  rate=%d, exp_arrivals=%d\n",
 	 rate, exp_arrivals);
   printf("  waitspin=%d\n", wait_spinning);
@@ -333,6 +438,9 @@ int main(int argc, char *argv[]) {
   assert(resp_size >= MIN_REPLY_SIZE);
   assert(resp_size <= BUF_SIZE);
   assert(no_delay == 0 || no_delay == 1);
+
+  //Init random number generator
+  srand(time(NULL));
 
   cw_log("Resolving %s...\n", hostname);
   struct hostent *e = gethostbyname(hostname);

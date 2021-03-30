@@ -1,0 +1,9 @@
+src/client
+src/client.o
+src/client_debug
+src/client_debug.o
+src/expon.o
+src/expon_debug.o
+src/node
+src/node.o
+src/node_debug

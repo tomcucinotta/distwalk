@@ -2,11 +2,26 @@
 #define __MESSAGE_H__
 
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <netinet/in.h>
 
 #define BUF_SIZE 16384
 
-typedef enum { COMPUTE, STORE, FORWARD, REPLY } command_type_t;
+typedef enum { COMPUTE, STORE, LOAD, FORWARD, REPLY } command_type_t;
+
+const char* get_command_name(command_type_t cmd) {
+  switch (cmd) {
+    case COMPUTE: return "COMPUTE";
+    case STORE: return "STORE";
+    case LOAD: return "LOAD";
+    case FORWARD: return "FORWARD";
+    case REPLY: return "REPLY";
+    default: 
+      printf("Unknown command type\n");
+      exit(-1);
+  }
+}
 
 typedef struct {
   in_addr_t fwd_host;	// target IP of host to forward to
@@ -14,22 +29,24 @@ typedef struct {
   uint32_t pkt_size;	// size of forwarded packet
 } fwd_opts_t;
 
-typedef struct {
-  uint32_t pkt_size;	// size of forwarded packet
-} reply_opts_t;
+//TODO: consider whether to use this structs
+/*typedef struct {
+  uint64_t offset;
+  uint32_t pkt_size;   // size of forwarded packet
+} store_opts_t;
 
 typedef struct {
-  uint64_t offset;
   uint32_t pkt_size;	// size of forwarded packet
-} store_opts_t;
+} reply_opts_t;*/
 
 typedef struct {
   command_type_t cmd;
   union {
     uint16_t comp_time_us;	// COMPUTE time (usecs)
-    uint16_t store_flags;	// STORE flags
+    uint16_t store_nbytes;	// STORE data size
+    uint16_t load_nbytes;	// LOAD data size
     fwd_opts_t fwd;		// FORWARD host+port and pkt size
-    reply_opts_t reply;		// REPLY pkt size
+    //reply_opts_t reply;	// REPLY pkt size
   } u;
 } command_t;
 
