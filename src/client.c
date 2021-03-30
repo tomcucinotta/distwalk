@@ -129,7 +129,8 @@ char *hostname = "127.0.0.1";
 char *bindname = "0.0.0.0";
 
 void *thread_sender(void *data) {
-  unsigned char send_buf[BUF_SIZE];
+  unsigned char *send_buf = malloc(BUF_SIZE);
+  check(send_buf != NULL);
   struct timespec ts_now;
   struct drand48_data rnd_buf;
 
@@ -197,9 +198,11 @@ void *thread_sender(void *data) {
 
     if (exp_resp_size){
        m->cmds[1].u.fwd.pkt_size = exp_packet_size(resp_size, MIN_REPLY_SIZE, BUF_SIZE, &rnd_buf);
-    } else
+    } else {
+      assert(resp_size <= BUF_SIZE);
       m->cmds[1].u.fwd.pkt_size = resp_size;
-  
+    }
+
     uint32_t return_bytes = m->cmds[1].u.fwd.pkt_size;
     if (m->cmds[0].cmd == LOAD) {
       return_bytes += load_nbytes;
@@ -207,6 +210,7 @@ void *thread_sender(void *data) {
 
     cw_log("%s: sending %u bytes (will expect %u bytes in response)...\n", get_command_name(next_cmd), m->req_size,
 	                                                                   return_bytes);
+    assert(m->req_size <= BUF_SIZE);
     safe_send(clientSocket, send_buf, m->req_size);
 
     unsigned long period_us = 1000000 / rate;
@@ -242,7 +246,8 @@ void *thread_sender(void *data) {
 }
 
 void *thread_receiver(void *data) {
-  unsigned char recv_buf[BUF_SIZE];
+  unsigned char *recv_buf = malloc(BUF_SIZE);
+  check(recv_buf != NULL);
   for (int i = 0; i < num_pkts; i++) {
     /*---- Read the message from the server into the buffer ----*/
     // TODO: support receive of variable reply-size requests
