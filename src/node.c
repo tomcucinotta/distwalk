@@ -1,9 +1,11 @@
+#define _GNU_SOURCE
 #include "message.h"
 #include "timespec.h"
 #include "cw_debug.h"
 
 #include <sys/types.h>          /* See NOTES */
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -53,6 +55,8 @@ char *bind_name = "0.0.0.0";
 int bind_port = 7891;
 
 int no_delay = 1;
+
+int use_odirect = 0;
 
 int epollfd;
 
@@ -217,20 +221,19 @@ void compute_for(unsigned long usecs) {
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
   } while (ts_sub_us(ts_end, ts_beg) < usecs);
 }
- 
+
+unsigned char* store_buf = 0;
+unsigned long blk_size = 0;
+
 ssize_t store(size_t bytes) {
   //generate the data to be stored
-  unsigned char* tmp = (unsigned char*) malloc(bytes + 1);
-  ssize_t wrote;
+  if (use_odirect)
+    bytes = (bytes + blk_size - 1) / blk_size * blk_size;
   cw_log("STORE: storing %lu bytes\n", bytes);
 
-  memset(tmp, 'X', bytes);
-  tmp[bytes] = '\0';
-
-  safe_write(storage_fd, tmp, bytes);
+  safe_write(storage_fd, store_buf, bytes);
   fsync(storage_fd);
 
-  free(tmp);
   return bytes;
 }
 
@@ -487,7 +490,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: node [-h|--help] [-b bindname] [-bp bindport] [-s|--storage path/to/storage/file]\n");
+      printf("Usage: node [-h|--help] [-b bindname] [-bp bindport] [-s|--storage path/to/storage/file] [--odirect]\n");
       exit(0);
     } else if (strcmp(argv[0], "-b") == 0) {
       assert(argc >= 2);
@@ -505,7 +508,9 @@ int main(int argc, char *argv[]) {
       assert(argc >= 2);
       storage_path = argv[1];
       argc--;  argv++; 
-    }else {
+    } else if (strcmp(argv[0], "--odirect") == 0) {
+      use_odirect = 1;
+    } else {
       printf("Unrecognized option: %s\n", argv[0]);
       exit(-1);
     }
@@ -527,7 +532,16 @@ int main(int argc, char *argv[]) {
 
   // Open storage file, if any
   if (storage_path) {
-    sys_check(storage_fd = open(storage_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR));
+    int flags = O_RDWR | O_CREAT | O_TRUNC;
+    if (use_odirect)
+      flags |= O_DIRECT;
+    sys_check(storage_fd = open(storage_path, flags, S_IRUSR | S_IWUSR));
+    struct stat s;
+    sys_check(fstat(storage_fd, &s));
+    blk_size = s.st_blksize;
+    cw_log("blk_size = %lu\n", blk_size);
+    store_buf = (unsigned char*) aligned_alloc(blk_size, BUF_SIZE + blk_size);
+    assert(store_buf != NULL);
   }
 
   /*---- Create the socket. The three arguments are: ----*/
@@ -536,6 +550,7 @@ int main(int argc, char *argv[]) {
 
   int val = 1;
   setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEADDR, (void *)&val, sizeof(val));
+  setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEPORT, (void *)&val, sizeof(val));
 
   /*---- Configure settings of the server address struct ----*/
   /* Address family = Internet */
@@ -555,6 +570,8 @@ int main(int argc, char *argv[]) {
   cw_log("Accepting new connections...\n");
 
   epoll_main_loop(welcomeSocket);
+
+  free(store_buf);
 
   return 0;
 }
