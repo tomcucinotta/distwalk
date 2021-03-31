@@ -7,3 +7,4 @@ src/expon_debug.o
 src/node
 src/node.o
 src/node_debug
+src/node_tsan
