@@ -305,8 +305,6 @@ void process_messages(int sock, int buf_id) {
 	// rest of cmds[] are for next hop, not me
 	break;
       } else if (m->cmds[i].cmd == REPLY) {
-        printf("data %ld\n", data);
-	printf("pkt %u\n", m->cmds[i].u.fwd.pkt_size);
         //simulate data retrieve
 	if (data >= 0) {
           m->cmds[i].u.fwd.pkt_size += data;
