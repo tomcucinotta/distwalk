@@ -1,13 +1,13 @@
 #!/bin/bash
 
-./client -c 1 &
-./client -c 1 &
-./client -c 1 &
-./client -c 1 &
-./client -c 1 &
-./client -c 1 &
-./client -c 1 &
-./client -c 1 &
-./client -c 1 &
-./client -c 1 &
+../src/client -c 1 &
+../src/client -c 1 &
+../src/client -c 1 &
+../src/client -c 1 &
+../src/client -c 1 &
+../src/client -c 1 &
+../src/client -c 1 &
+../src/client -c 1 &
+../src/client -c 1 &
+../src/client -c 1 &
 wait
