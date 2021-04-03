@@ -12,6 +12,7 @@
 
 #include <stdio.h>
 #include <signal.h>
+#include <sys/eventfd.h>
 #include <string.h>
 #include <assert.h>
 
@@ -47,6 +48,7 @@ typedef struct {
 typedef struct {
   int epollfd;
   struct epoll_event events[MAX_EVENTS];
+  int terminationfd; //special eventfd to handle termination
 } thread_info;
 
 
@@ -55,6 +57,7 @@ static volatile int node_running = 1; //epoll_main_loop flag
 #define MAX_BUFFERS 16
 
 buf_info bufs[MAX_BUFFERS];
+pthread_t workers[MAX_BUFFERS];
 thread_info thread_infos[MAX_BUFFERS];
 pthread_mutex_t bufs_mtx[MAX_BUFFERS]; //FIXME: Expensive with lots of buf_infos
 
@@ -114,6 +117,12 @@ int storage_fd = -1;
 void sigint_cleanup(int _) {
   (void)_; //to avoid unused var warnings
   node_running = 0;
+
+  //terminate workers by sending a notificaiton
+  //on their terminationfd
+  for (int i = 0; i < MAX_BUFFERS; i++) {
+    eventfd_write(thread_infos[i].terminationfd, 1);
+  }
 }
 
 // add the IP/port into the socks[] map to allow FORWARD finding an
@@ -303,6 +312,7 @@ int process_messages(int sock, int buf_id) {
     free(bufs[buf_id].reply_buf);
     free(bufs[buf_id].fwd_buf);
     free(bufs[buf_id].store_buf);
+
     pthread_mutex_lock(&bufs_mtx[buf_id]);
     bufs[buf_id].buf = NULL;
     bufs[buf_id].reply_buf = NULL;
@@ -354,9 +364,9 @@ int process_messages(int sock, int buf_id) {
 	reply(sock, buf_id, m, i);
 	// any further cmds[] for replied-to hop, not me
 	break;
-      } else if (m->cmds[i].cmd == STORE) {
+      } else if (m->cmds[i].cmd == STORE && storage_path) {
         store(buf_id, m->cmds[i].u.store_nbytes);
-      } else if (m->cmds[i].cmd == LOAD) {
+      } else if (m->cmds[i].cmd == LOAD && storage_path) {
         data = load(m->cmds[i].u.load_nbytes);
       } else {
 	cw_log("Unknown cmd: %d\n", m->cmds[0].cmd);
@@ -431,7 +441,13 @@ void setnonblocking(int fd) {
 
 void* epoll_worker_loop(void* args) {
   thread_info* infos = (thread_info*) args;
+  struct epoll_event ev;
   int worker_running = 1;
+
+  // Add terminationfd
+  ev.events = EPOLLIN;
+  ev.data.fd = infos->terminationfd;
+  sys_check(epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev)); 
 
   while (worker_running) {
     int nfds = epoll_wait(infos->epollfd, infos->events, MAX_EVENTS, -1);
@@ -446,22 +462,27 @@ void* epoll_worker_loop(void* args) {
     }
 
     for (int i = 0; i < nfds; i++) {
-      int buf_id = infos->events[i].data.u32;
+      if (infos->events[i].data.fd == infos->terminationfd) {
+        worker_running = 0;
+	break;
+      } else {
+        int buf_id = infos->events[i].data.u32;
 
-      if ((infos->events[i].events | EPOLLIN) && bufs[buf_id].status == RECEIVING) {
-        worker_running = process_messages(bufs[buf_id].sock, buf_id);
+        if ((infos->events[i].events | EPOLLIN) && bufs[buf_id].status == RECEIVING) {
+          int ret = process_messages(bufs[buf_id].sock, buf_id);
 
-	if (!worker_running) {
-          close_and_forget(infos->epollfd, bufs[buf_id].sock);
+	  if (!ret) {
+            close_and_forget(infos->epollfd, bufs[buf_id].sock); 
+	  }
+        } 
+        else if ((infos->events[i].events | EPOLLOUT) && bufs[buf_id].status == SENDING)
+          send_messages(buf_id);
+        else if ((infos->events[i].events | EPOLLOUT) && bufs[buf_id].status == CONNECTING)
+          finalize_conn(buf_id);
+        else {
+          fprintf(stderr, "unexpected status: event=%d, %d\n", infos->events[i].events, bufs[buf_id].status);
+          exit(EXIT_FAILURE);
 	}
-      } 
-      else if ((infos->events[i].events | EPOLLOUT) && bufs[buf_id].status == SENDING)
-        send_messages(buf_id);
-      else if ((infos->events[i].events | EPOLLOUT) && bufs[buf_id].status == CONNECTING)
-        finalize_conn(buf_id);
-      else {
-        fprintf(stderr, "unexpected status: event=%d, %d\n", infos->events[i].events, bufs[buf_id].status);
-        exit(EXIT_FAILURE);
       }
     }
   }
@@ -480,7 +501,7 @@ void epoll_main_loop(int listen_sock) {
     perror("epoll_create1");
     exit(EXIT_FAILURE);
   }
-
+  
   ev.events = EPOLLIN;
   ev.data.fd = -1;	// Special value denoting listen_sock
   if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listen_sock, &ev) == -1) {
@@ -535,16 +556,20 @@ void epoll_main_loop(int listen_sock) {
 	bufs[buf_id].buf = malloc(BUF_SIZE);
 	bufs[buf_id].reply_buf = malloc(BUF_SIZE);
 	bufs[buf_id].fwd_buf = malloc(BUF_SIZE);
-	bufs[buf_id].store_buf = (unsigned char*) aligned_alloc(blk_size, BUF_SIZE + blk_size);
-        
-	assert(bufs[buf_id].store_buf != NULL);
+	if (storage_path) {
+	  bufs[buf_id].store_buf = (unsigned char*) aligned_alloc(blk_size, BUF_SIZE + blk_size);
+	  assert(bufs[buf_id].store_buf != NULL);
+        }
+
 	if (bufs[buf_id].buf == 0 || bufs[buf_id].reply_buf == 0 || bufs[buf_id].fwd_buf == 0) {
 	  fprintf(stderr, "Not enough memory for allocating new buffer, closing!\n");
 	  close_and_forget(epollfd, conn_sock);
 	  continue;
 	}
         pthread_mutex_unlock(&bufs_mtx[buf_id]);
-
+     	
+	// From here, safe to assume that bufs[buf_id] is thread-safe
+	cw_log("Connection assigned to worker %d\n", buf_id);
 	bufs[buf_id].buf_size = BUF_SIZE;
 	bufs[buf_id].curr_buf = bufs[buf_id].buf;
 	bufs[buf_id].curr_size = BUF_SIZE;
@@ -556,14 +581,9 @@ void epoll_main_loop(int listen_sock) {
         // Use the data.u32 field to store the buf_id in bufs[]
         ev.data.u32 = buf_id;
         
-	//prepare client epoll
-        sys_check(thread_infos[buf_id].epollfd = epoll_create1(0));
+	//add client fd to the worker epoll
+	//(which, at this point, is already up and running)
         sys_check(epoll_ctl(thread_infos[buf_id].epollfd, EPOLL_CTL_ADD, conn_sock, &ev));
-
-        //start client thread
-        pthread_t tid;
-        sys_check(pthread_create(&tid, NULL, epoll_worker_loop, (void*) &thread_infos[buf_id]));
-        sys_check(pthread_detach(tid));
       } 
     }
   }
@@ -614,6 +634,13 @@ int main(int argc, char *argv[]) {
   // Tag all sock_info as unused
   for (int i = 0; i < MAX_SOCKETS; i++) {
     socks[i].sock = -1;
+  }
+ 
+  // Init worker threads
+  for (int i = 0; i < MAX_BUFFERS; i++) {
+    thread_infos[i].terminationfd = eventfd(0, 0);  
+    sys_check(thread_infos[i].epollfd = epoll_create1(0));
+    sys_check(pthread_create(&workers[i], NULL, epoll_worker_loop, (void*) &thread_infos[i]));
   }
 
   // Init bufs mutexs
@@ -668,6 +695,12 @@ int main(int argc, char *argv[]) {
   cw_log("Accepting new connections...\n");
 
   epoll_main_loop(welcomeSocket);
+
+  //Join worker threads
+  for (int i = 0; i < MAX_BUFFERS; i++) {
+    sys_check(pthread_join(workers[i], NULL));
+    close(thread_infos[i].terminationfd);
+  }
 
   //termination clean-ups
   if (storage_fd >= 0) {
