@@ -551,7 +551,6 @@ void epoll_main_loop(int listen_sock) {
 	if (buf_id == MAX_BUFFERS) {
 	  fprintf(stderr, "Not enough buffers for new connection, closing!\n");
 	  close_and_forget(epollfd, conn_sock);
-	  pthread_mutex_unlock(&bufs[buf_id - 1].mtx);
 	  continue;
 	}
 	bufs[buf_id].buf = malloc(BUF_SIZE);
