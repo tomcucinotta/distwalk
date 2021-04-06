@@ -540,6 +540,22 @@ void epoll_main_loop(int listen_sock) {
         int orig_sock_id = sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock);
         check(orig_sock_id != -1);
 
+        unsigned char *new_buf = 0;
+        unsigned char *new_reply_buf = 0;
+        unsigned char *new_fwd_buf = 0;
+        unsigned char *new_store_buf = 0;
+
+        new_buf = malloc(BUF_SIZE);
+        new_reply_buf = malloc(BUF_SIZE);
+        new_fwd_buf = malloc(BUF_SIZE);
+	if (storage_path)
+          new_store_buf = (use_odirect ? aligned_alloc(blk_size, BUF_SIZE + blk_size) : malloc(BUF_SIZE));
+
+        if (new_buf == 0 || new_reply_buf == 0 || new_fwd_buf == 0 || (storage_path && new_store_buf == 0)) {
+	  close_and_forget(epollfd, conn_sock);
+          goto continue_free;
+        }
+
 	int buf_id;
 	for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
 	  pthread_mutex_lock(&bufs[buf_id].mtx);
@@ -551,22 +567,14 @@ void epoll_main_loop(int listen_sock) {
 	if (buf_id == MAX_BUFFERS) {
 	  fprintf(stderr, "Not enough buffers for new connection, closing!\n");
 	  close_and_forget(epollfd, conn_sock);
-	  continue;
+	  goto continue_free;
 	}
-	bufs[buf_id].buf = malloc(BUF_SIZE);
-	bufs[buf_id].reply_buf = malloc(BUF_SIZE);
-	bufs[buf_id].fwd_buf = malloc(BUF_SIZE);
-	if (storage_path) {
-	  bufs[buf_id].store_buf = (unsigned char*) aligned_alloc(blk_size, BUF_SIZE + blk_size);
-	  assert(bufs[buf_id].store_buf != NULL);
-        }
+	bufs[buf_id].buf = new_buf;
+	bufs[buf_id].reply_buf = new_reply_buf;
+	bufs[buf_id].fwd_buf = new_fwd_buf;
+	if (storage_path)
+	  bufs[buf_id].store_buf = new_store_buf;
 
-	if (bufs[buf_id].buf == 0 || bufs[buf_id].reply_buf == 0 || bufs[buf_id].fwd_buf == 0) {
-	  fprintf(stderr, "Not enough memory for allocating new buffer, closing!\n");
-	  close_and_forget(epollfd, conn_sock);
-	  pthread_mutex_unlock(&bufs[buf_id].mtx);
-	  continue;
-	}
         pthread_mutex_unlock(&bufs[buf_id].mtx);
      	
 	// From here, safe to assume that bufs[buf_id] is thread-safe
@@ -585,7 +593,20 @@ void epoll_main_loop(int listen_sock) {
 	//add client fd to the worker epoll
 	//(which, at this point, is already up and running)
         sys_check(epoll_ctl(thread_infos[buf_id].epollfd, EPOLL_CTL_ADD, conn_sock, &ev));
-      } 
+
+        continue;
+
+      continue_free:
+
+        if (new_buf)
+          free(new_buf);
+        if (new_reply_buf)
+          free(new_reply_buf);
+        if (new_fwd_buf)
+          free(new_fwd_buf);
+        if (storage_path && new_store_buf)
+          free(new_store_buf);
+      }
     }
   }
 }
