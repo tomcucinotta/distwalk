@@ -1,6 +1,18 @@
 #!/bin/bash
 
-../src/client -l 1 -S 1000 &
-../src/client -l 1 -S 10000 &
-../src/client -l 1 -S 100000 &
+if [ "$1" = "" ]; then
+    echo "Usage: $0 nclients"
+    exit -1
+fi
+
+../src/node -s ../src/test.data &
+
+for i in $(seq 1 1 $1)
+do
+        ../src/client -l 10 -L 10000 &
+done
+
+sleep 2
+
+kill -SIGINT $(pgrep node)
 wait
