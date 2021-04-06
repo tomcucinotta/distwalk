@@ -43,6 +43,7 @@ typedef struct {
   int sock;
   req_status status;
   int orig_sock_id;             // ID in socks[]
+  pthread_mutex_t mtx;
 } buf_info;
 
 typedef struct {
@@ -59,7 +60,6 @@ static volatile int node_running = 1; //epoll_main_loop flag
 buf_info bufs[MAX_BUFFERS];
 pthread_t workers[MAX_BUFFERS];
 thread_info thread_infos[MAX_BUFFERS];
-pthread_mutex_t bufs_mtx[MAX_BUFFERS]; //FIXME: Expensive with lots of buf_infos
 
 typedef struct {
   in_addr_t inaddr;	// target IP
@@ -313,10 +313,10 @@ int process_messages(int sock, int buf_id) {
     free(bufs[buf_id].fwd_buf);
     free(bufs[buf_id].store_buf);
 
-    pthread_mutex_lock(&bufs_mtx[buf_id]);
+    pthread_mutex_lock(&bufs[buf_id].mtx);
     bufs[buf_id].buf = NULL;
     bufs[buf_id].reply_buf = NULL;
-    pthread_mutex_unlock(&bufs_mtx[buf_id]);
+    pthread_mutex_unlock(&bufs[buf_id].mtx);
 
     return 0;
   } else if (received == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -542,16 +542,16 @@ void epoll_main_loop(int listen_sock) {
 
 	int buf_id;
 	for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
-	  pthread_mutex_lock(&bufs_mtx[buf_id]);
+	  pthread_mutex_lock(&bufs[buf_id].mtx);
 	  if (bufs[buf_id].buf == 0){
 	    break; //unlock mutex above after mallocs
 	  }
-	  pthread_mutex_unlock(&bufs_mtx[buf_id]);
+	  pthread_mutex_unlock(&bufs[buf_id].mtx);
 	}
 	if (buf_id == MAX_BUFFERS) {
 	  fprintf(stderr, "Not enough buffers for new connection, closing!\n");
 	  close_and_forget(epollfd, conn_sock);
-	  pthread_mutex_unlock(&bufs_mtx[buf_id]);
+	  pthread_mutex_unlock(&bufs[buf_id - 1].mtx);
 	  continue;
 	}
 	bufs[buf_id].buf = malloc(BUF_SIZE);
@@ -565,10 +565,10 @@ void epoll_main_loop(int listen_sock) {
 	if (bufs[buf_id].buf == 0 || bufs[buf_id].reply_buf == 0 || bufs[buf_id].fwd_buf == 0) {
 	  fprintf(stderr, "Not enough memory for allocating new buffer, closing!\n");
 	  close_and_forget(epollfd, conn_sock);
-	  pthread_mutex_unlock(&bufs_mtx[buf_id]);
+	  pthread_mutex_unlock(&bufs[buf_id].mtx);
 	  continue;
 	}
-        pthread_mutex_unlock(&bufs_mtx[buf_id]);
+        pthread_mutex_unlock(&bufs[buf_id].mtx);
      	
 	// From here, safe to assume that bufs[buf_id] is thread-safe
 	cw_log("Connection assigned to worker %d\n", buf_id);
@@ -647,7 +647,7 @@ int main(int argc, char *argv[]) {
 
   // Init bufs mutexs
   for (int i = 0; i < MAX_BUFFERS; i++) {
-    sys_check(pthread_mutex_init(&bufs_mtx[i], NULL));
+    sys_check(pthread_mutex_init(&bufs[i].mtx, NULL));
   }
 
   // Init socks mutex
@@ -703,6 +703,13 @@ int main(int argc, char *argv[]) {
     sys_check(pthread_join(workers[i], NULL));
     close(thread_infos[i].terminationfd);
   }
+
+  // Init bufs mutexs
+  for (int i = 0; i < MAX_BUFFERS; i++) {
+    sys_check(pthread_mutex_destroy(&bufs[i].mtx));
+  }
+
+  sys_check(pthread_mutex_destroy(&socks_mtx));
 
   //termination clean-ups
   if (storage_fd >= 0) {
