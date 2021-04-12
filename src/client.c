@@ -119,7 +119,7 @@ long usecs_elapsed[MAX_PKTS];
 struct timespec ts_start;
 unsigned int rate = 1000;	// pkt/s rate (period is its inverse)
 
-unsigned long num_pkts = 0;
+unsigned long num_pkts = MAX_PKTS;
 
 unsigned int ramp_step_secs = 0;	// if non-zero, supersedes num_pkts
 unsigned int ramp_delta_rate = 100;	// added to rate every ramp_secs
