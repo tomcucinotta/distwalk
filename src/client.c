@@ -434,14 +434,15 @@ int main(int argc, char *argv[]) {
       FILE *ramp_fid = fopen(ramp_fname, "r");
       check(ramp_fid != NULL);
       int cnt = 0;
-      for (ramp_num_steps = 0; !feof(ramp_fid); ramp_num_steps++) {
-        int read_fields;
-        do {
-          read_fields = fscanf(ramp_fid, "%u", &rates[ramp_num_steps]);
-        } while (read_fields == 0);
-        cnt += rates[ramp_num_steps] * ramp_step_secs;
+      for (ramp_num_steps = 0; !feof(ramp_fid);) {
+        int read_fields = fscanf(ramp_fid, "%u", &rates[ramp_num_steps]);
+        if (read_fields == 1) {
+          cnt += rates[ramp_num_steps] * ramp_step_secs;
+          ramp_num_steps++;
+        }
       }
       fclose(ramp_fid);
+      rate = rates[0];
       if (num_pkts == 0 || num_pkts > cnt)
         num_pkts = cnt;
     } else {
