@@ -7,6 +7,7 @@
 #include <string.h>
 #include <assert.h>
 #include <math.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
@@ -42,6 +43,9 @@ unsigned long resp_size = 128;
 int exp_resp_size = 0;
 
 int no_delay = 1;
+
+pthread_t sender;
+pthread_t receiver;
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
@@ -121,9 +125,11 @@ unsigned int rate = 1000;	// pkt/s rate (period is its inverse)
 
 unsigned long num_pkts = MAX_PKTS;
 
+unsigned int rates[MAX_PKTS];
 unsigned int ramp_step_secs = 0;	// if non-zero, supersedes num_pkts
-unsigned int ramp_delta_rate = 100;	// added to rate every ramp_secs
-unsigned int ramp_num_steps = 10;	// number of ramp-up steps
+unsigned int ramp_delta_rate = 0;	// added to rate every ramp_secs
+unsigned int ramp_num_steps = 0;	// number of ramp-up steps
+char *ramp_fname = NULL;
 
 char *hostname = "127.0.0.1";
 char *bindname = "0.0.0.0";
@@ -233,10 +239,13 @@ void *thread_sender(void *data) {
       sys_check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
     }
 
-    if (ramp_step_secs != 0) {
+    if (ramp_step_secs != 0 && i > 0) {
       int step = usecs_send[i] / 1000000 / ramp_step_secs;
-      rate = rate_start + step * ramp_delta_rate;
-      cw_log("rate: %d\n", rate);
+      int old_step = usecs_send[i-1] / 1000000 / ramp_step_secs;
+      if (step > old_step) {
+        rate = (ramp_fname != NULL) ? rates[step] : rate_start + step * ramp_delta_rate;
+        cw_log("rate: %d\n", rate);
+      }
     }
   }
 
@@ -283,6 +292,8 @@ void *thread_receiver(void *data) {
 int main(int argc, char *argv[]) {
   struct sockaddr_in serveraddr;
   socklen_t addr_size;
+
+  check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
 
   argc--;  argv++;
   while (argc > 0) {
@@ -343,6 +354,10 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(argv[0], "-rss") == 0 || strcmp(argv[0], "--ramp-step-secs") == 0) {
       assert(argc >= 2);
       ramp_step_secs = atoi(argv[1]);
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "-rfn") == 0 || strcmp(argv[0], "--ramp-file-name") == 0) {
+      assert(argc >= 2);
+      ramp_fname = argv[1];
       argc--;  argv++;
     } else if (strcmp(argv[0], "-C") == 0 || strcmp(argv[0], "--comp-time") == 0) {
       assert(argc >= 2);
@@ -411,11 +426,28 @@ int main(int argc, char *argv[]) {
   assert(num_pkts <= MAX_PKTS);
   
   if (ramp_step_secs != 0) {
-    num_pkts = 0;
-    int r = rate;
-    for (int s = 0; s < ramp_num_steps; s++) {
-      num_pkts += r * ramp_step_secs;
-      r += ramp_delta_rate;
+    if (ramp_fname != NULL) {
+      check(ramp_delta_rate == 0);
+      FILE *ramp_fid = fopen(ramp_fname, "r");
+      check(ramp_fid != NULL);
+      int cnt = 0;
+      for (ramp_num_steps = 0; !feof(ramp_fid); ramp_num_steps++) {
+        int read_fields;
+        do {
+          read_fields = fscanf(ramp_fid, "%u", &rates[ramp_num_steps]);
+        } while (read_fields == 0);
+        cnt += rates[ramp_num_steps] * ramp_step_secs;
+      }
+      fclose(ramp_fid);
+      if (num_pkts == 0 || num_pkts > cnt)
+        num_pkts = cnt;
+    } else {
+      num_pkts = 0;
+      int r = rate;
+      for (int s = 0; s < ramp_num_steps; s++) {
+        num_pkts += r * ramp_step_secs;
+        r += ramp_delta_rate;
+      }
     }
   }
 
@@ -489,10 +521,7 @@ int main(int argc, char *argv[]) {
   addr_size = sizeof(serveraddr);
   sys_check(connect(clientSocket, (struct sockaddr *) &serveraddr, addr_size));
 
-  pthread_t receiver;
   assert(pthread_create(&receiver, NULL, thread_receiver, NULL) == 0);
-
-  pthread_t sender;
   assert(pthread_create(&sender, NULL, thread_sender, NULL) == 0);
 
   pthread_join(sender, NULL);
