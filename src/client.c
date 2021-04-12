@@ -243,7 +243,10 @@ void *thread_sender(void *data) {
       int step = usecs_send[i] / 1000000 / ramp_step_secs;
       int old_step = usecs_send[i-1] / 1000000 / ramp_step_secs;
       if (step > old_step) {
-        rate = (ramp_fname != NULL) ? rates[step] : rate_start + step * ramp_delta_rate;
+        if (ramp_fname != NULL)
+          rate = rates[(step < ramp_num_steps) ? step : (ramp_num_steps - 1)];
+        else
+          rate = rate_start + step * ramp_delta_rate;
         cw_log("rate: %d\n", rate);
       }
     }
