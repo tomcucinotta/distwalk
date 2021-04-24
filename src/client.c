@@ -44,8 +44,9 @@ int exp_resp_size = 0;
 
 int no_delay = 1;
 
-pthread_t sender;
-pthread_t receiver;
+#define MAX_THREADS 1024
+pthread_t sender[MAX_THREADS];
+pthread_t receiver[MAX_THREADS];
 
 void safe_send(int sock, unsigned char *buf, size_t len) {
   while (len > 0) {
@@ -116,7 +117,7 @@ uint32_t exp_packet_size(uint32_t avg, uint32_t min, uint32_t max, struct drand4
 #define MAX_PKTS 1000000
 
 clockid_t clk_id = CLOCK_REALTIME;
-int clientSocket;
+int clientSocket[MAX_THREADS];
 long usecs_send[MAX_PKTS];
 long usecs_elapsed[MAX_PKTS];
 // abs start-time of the experiment
@@ -134,7 +135,12 @@ char *ramp_fname = NULL;
 char *hostname = "127.0.0.1";
 char *bindname = "0.0.0.0";
 
+struct sockaddr_in myaddr;
+struct sockaddr_in serveraddr;
+socklen_t addr_size;
+
 void *thread_sender(void *data) {
+  unsigned long thread_id = (unsigned long) data;
   unsigned char *send_buf = malloc(BUF_SIZE);
   check(send_buf != NULL);
   struct timespec ts_now;
@@ -217,7 +223,7 @@ void *thread_sender(void *data) {
     cw_log("%s: sending %u bytes (will expect %u bytes in response)...\n", get_command_name(next_cmd), m->req_size,
 	                                                                   return_bytes);
     assert(m->req_size <= BUF_SIZE);
-    safe_send(clientSocket, send_buf, m->req_size);
+    safe_send(clientSocket[thread_id], send_buf, m->req_size);
 
     unsigned long period_us = 1000000 / rate;
     unsigned long period_ns;
@@ -258,13 +264,33 @@ void *thread_sender(void *data) {
 }
 
 void *thread_receiver(void *data) {
+  unsigned long thread_id = (unsigned long) data;
   unsigned char *recv_buf = malloc(BUF_SIZE);
   check(recv_buf != NULL);
+
+  /*---- Create the socket. The three arguments are: ----*/
+  /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
+  clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
+
+  sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP, TCP_NODELAY, (void *)&no_delay, sizeof(no_delay)));
+
+  cw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr), myaddr.sin_port);
+
+  /*---- Bind the address struct to the socket ----*/
+  sys_check(bind(clientSocket[thread_id], (struct sockaddr *) &myaddr, sizeof(myaddr)));
+
+  /*---- Connect the socket to the server using the address struct ----*/
+  addr_size = sizeof(serveraddr);
+  sys_check(connect(clientSocket[thread_id], (struct sockaddr *) &serveraddr, addr_size));
+
+  /* spawn sender once connection is established */
+  assert(pthread_create(&sender[thread_id], NULL, thread_sender, (void*)thread_id) == 0);
+
   for (int i = 0; i < num_pkts; i++) {
     /*---- Read the message from the server into the buffer ----*/
     // TODO: support receive of variable reply-size requests
     cw_log("Receiving %lu bytes (header)\n", sizeof(message_t));
-    unsigned long read = safe_recv(clientSocket, recv_buf, sizeof(message_t));
+    unsigned long read = safe_recv(clientSocket[thread_id], recv_buf, sizeof(message_t));
     assert(read == sizeof(message_t));
     message_t *m = (message_t *) recv_buf;
     unsigned long pkt_id = m->req_id;
@@ -273,7 +299,7 @@ void *thread_receiver(void *data) {
     cw_log("Expecting further %lu bytes (total pkt_size %u bytes)\n",
 	   m->req_size - read, m->req_size);
     assert(m->req_size >= sizeof(message_t));
-    safe_recv(clientSocket, recv_buf + read, m->req_size - read);
+    safe_recv(clientSocket[thread_id], recv_buf + read, m->req_size - read);
 
     struct timespec ts_now;
     clock_gettime(clk_id, &ts_now);
@@ -287,15 +313,14 @@ void *thread_receiver(void *data) {
     printf("t: %ld us, elapsed: %ld us\n", usecs_send[i], usecs_elapsed[i]);
   }
   cw_log("receiver thread is over, closing socket\n");
-  close(clientSocket);
+  close(clientSocket[thread_id]);
+
+  pthread_join(receiver[thread_id], NULL);
 
   return 0;
 }
 
 int main(int argc, char *argv[]) {
-  struct sockaddr_in serveraddr;
-  socklen_t addr_size;
-
   check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
 
   argc--;  argv++;
@@ -495,18 +520,11 @@ int main(int argc, char *argv[]) {
 	(char *)&serveraddr.sin_addr.s_addr, e->h_length);
   serveraddr.sin_port = htons(server_port);
 
-  /*---- Create the socket. The three arguments are: ----*/
-  /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
-  clientSocket = socket(PF_INET, SOCK_STREAM, 0);
-
-  sys_check(setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&no_delay, sizeof(no_delay)));
-
   cw_log("Resolving %s...\n", bindname);
   struct hostent *e2 = gethostbyname(bindname);
   check(e2 != NULL);
   cw_log("Host %s resolved to %d bytes: %s\n", bindname, e2->h_length, inet_ntoa(*(struct in_addr *)e2->h_addr));
 
-  struct sockaddr_in myaddr;
   myaddr.sin_family = AF_INET;
   /* Set IP address to resolved bindname */
   bcopy((char *)e2->h_addr,
@@ -516,20 +534,10 @@ int main(int argc, char *argv[]) {
   /* Set all bits of the padding field to 0 */
   memset(myaddr.sin_zero, '\0', sizeof(myaddr.sin_zero));
 
-  cw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr), myaddr.sin_port);
+  unsigned long thread_id = 0;
+  assert(pthread_create(&receiver[thread_id], NULL, thread_receiver, (void *)thread_id) == 0);
 
-  /*---- Bind the address struct to the socket ----*/
-  sys_check(bind(clientSocket, (struct sockaddr *) &myaddr, sizeof(myaddr)));
-
-  /*---- Connect the socket to the server using the address struct ----*/
-  addr_size = sizeof(serveraddr);
-  sys_check(connect(clientSocket, (struct sockaddr *) &serveraddr, addr_size));
-
-  assert(pthread_create(&receiver, NULL, thread_receiver, NULL) == 0);
-  assert(pthread_create(&sender, NULL, thread_sender, NULL) == 0);
-
-  pthread_join(sender, NULL);
-  pthread_join(receiver, NULL);
+  pthread_join(receiver[thread_id], NULL);
 
   cw_log("Joined sender and receiver threads, exiting\n");
 
