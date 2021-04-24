@@ -140,9 +140,17 @@ struct sockaddr_in serveraddr;
 socklen_t addr_size;
 
 int num_threads = 1;
+int num_sessions = 1;
+
+typedef struct {
+  int thread_id;
+  int first_pkt_id;
+} thread_data_t;
 
 void *thread_sender(void *data) {
-  unsigned long thread_id = (unsigned long) data;
+  thread_data_t *p = (thread_data_t *)data;
+  int thread_id = p->thread_id;
+  int first_pkt_id = p->first_pkt_id;
   unsigned char *send_buf = malloc(BUF_SIZE);
   check(send_buf != NULL);
   struct timespec ts_now;
@@ -151,18 +159,17 @@ void *thread_sender(void *data) {
   clock_gettime(clk_id, &ts_now);
   srand48_r(time(NULL), &rnd_buf);
 
-  // Remember in ts_start the abs start time of the experiment
-  ts_start = ts_now;
   int rate_start = rate;
 
-  for (int i = 0; i < num_pkts; i++) {
+  for (int i = 0; i < num_pkts / num_sessions; i++) {
     /* remember time of send relative to ts_start */
     struct timespec ts_send;
     clock_gettime(clk_id, &ts_send);
-    usecs_send[thread_id][i] = ts_sub_us(ts_send, ts_start);
+    int pkt_id = first_pkt_id + i;
+    usecs_send[thread_id][pkt_id] = ts_sub_us(ts_send, ts_start);
     /*---- Issue a request to the server ---*/
     message_t *m = (message_t *) send_buf;
-    m->req_id = i;
+    m->req_id = pkt_id;
 
     if (exp_pkt_size){
       m->req_size = exp_packet_size(pkt_size, MIN_SEND_SIZE, BUF_SIZE, &rnd_buf);
@@ -260,7 +267,7 @@ void *thread_sender(void *data) {
     }
   }
 
-  cw_log("Sender thread is over.\n");
+  cw_log("Sender thread terminating\n");
 
   return 0;
 }
@@ -270,25 +277,29 @@ void *thread_receiver(void *data) {
   unsigned char *recv_buf = malloc(BUF_SIZE);
   check(recv_buf != NULL);
 
-  /*---- Create the socket. The three arguments are: ----*/
-  /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
-  clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
-
-  sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP, TCP_NODELAY, (void *)&no_delay, sizeof(no_delay)));
-
-  cw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr), myaddr.sin_port);
-
-  /*---- Bind the address struct to the socket ----*/
-  sys_check(bind(clientSocket[thread_id], (struct sockaddr *) &myaddr, sizeof(myaddr)));
-
-  /*---- Connect the socket to the server using the address struct ----*/
-  addr_size = sizeof(serveraddr);
-  sys_check(connect(clientSocket[thread_id], (struct sockaddr *) &serveraddr, addr_size));
-
-  /* spawn sender once connection is established */
-  assert(pthread_create(&sender[thread_id], NULL, thread_sender, (void*)(unsigned long)thread_id) == 0);
-
   for (int i = 0; i < num_pkts; i++) {
+    if (i % (num_pkts / num_sessions) == 0) {
+      /*---- Create the socket. The three arguments are: ----*/
+      /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
+      clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
+
+      sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP, TCP_NODELAY, (void *)&no_delay, sizeof(no_delay)));
+
+      cw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr), myaddr.sin_port);
+
+      /*---- Bind the address struct to the socket ----*/
+      sys_check(bind(clientSocket[thread_id], (struct sockaddr *) &myaddr, sizeof(myaddr)));
+
+      /*---- Connect the socket to the server using the address struct ----*/
+      addr_size = sizeof(serveraddr);
+
+      cw_log("Connecting (i=%d) ...\n", i);
+      sys_check(connect(clientSocket[thread_id], (struct sockaddr *) &serveraddr, addr_size));
+      /* spawn sender once connection is established */
+      thread_data_t thr_data = { .thread_id = thread_id, .first_pkt_id = i };
+      assert(pthread_create(&sender[thread_id], NULL, thread_sender, (void*)&thr_data) == 0);
+    }
+
     /*---- Read the message from the server into the buffer ----*/
     // TODO: support receive of variable reply-size requests
     cw_log("Receiving %lu bytes (header)\n", sizeof(message_t));
@@ -309,16 +320,20 @@ void *thread_receiver(void *data) {
       + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
     usecs_elapsed[thread_id][pkt_id] = usecs - usecs_send[thread_id][pkt_id];
     cw_log("req_id %lu elapsed %ld us\n", pkt_id, usecs_elapsed[thread_id][pkt_id]);
+
+    if ((i+1) % (num_pkts / num_sessions) == 0) {
+      cw_log("Session is over (after receive of pkt %d), closing socket\n", i);
+      close(clientSocket[thread_id]);
+      cw_log("Joining sender thread\n");
+      pthread_join(sender[thread_id], NULL);
+    }
   }
 
   for (int i = 0; i < num_pkts; i++) {
     printf("t: %ld us, elapsed: %ld us\n", usecs_send[thread_id][i], usecs_elapsed[thread_id][i]);
   }
-  cw_log("receiver thread is over, closing socket\n");
-  close(clientSocket[thread_id]);
 
-  pthread_join(receiver[thread_id], NULL);
-
+  cw_log("Receiver thread terminating\n");
   return 0;
 }
 
@@ -328,7 +343,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight n] [-Sw|--store-weight n] [-Lw|--load-weight n] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] [-nt|--num-threads threads]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight n] [-Sw|--store-weight n] [-Lw|--load-weight n] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] [-nt|--num-threads threads] [-ns|--num-sessions]\n");
       printf("Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n");
       exit(0);
     } else if (strcmp(argv[0], "-sn") == 0) {
@@ -437,6 +452,10 @@ int main(int argc, char *argv[]) {
       assert(argc >= 2);
       num_threads = atoi(argv[1]);
       argc--;  argv++;
+    } else if (strcmp(argv[0], "-ns") == 0 || strcmp(argv[0], "--num-sessions") == 0) {
+      assert(argc >= 2);
+      num_sessions = atoi(argv[1]);
+      argc--;  argv++;
     } else {
       printf("Unrecognized option: %s\n", argv[0]);
       exit(-1);
@@ -539,6 +558,12 @@ int main(int argc, char *argv[]) {
   myaddr.sin_port = bind_port;
   /* Set all bits of the padding field to 0 */
   memset(myaddr.sin_zero, '\0', sizeof(myaddr.sin_zero));
+
+  for (int i = 0; i < MAX_THREADS; i++)
+    clientSocket[i] = -1;
+
+  // Remember in ts_start the abs start time of the experiment
+  clock_gettime(clk_id, &ts_start);
 
   for (int i = 0; i < num_threads; i++)
     assert(pthread_create(&receiver[i], NULL, thread_receiver, (void *)(unsigned long)i) == 0);
