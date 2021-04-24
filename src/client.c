@@ -296,7 +296,7 @@ void *thread_receiver(void *data) {
       cw_log("Connecting (i=%d) ...\n", i);
       sys_check(connect(clientSocket[thread_id], (struct sockaddr *) &serveraddr, addr_size));
       /* spawn sender once connection is established */
-      thread_data_t thr_data = { .thread_id = thread_id, .first_pkt_id = i };
+      thread_data_t thr_data = { .thread_id = thread_id, .first_pkt_id = i + thread_id * num_pkts };
       assert(pthread_create(&sender[thread_id], NULL, thread_sender, (void*)&thr_data) == 0);
     }
 
@@ -330,7 +330,8 @@ void *thread_receiver(void *data) {
   }
 
   for (int i = 0; i < num_pkts; i++) {
-    printf("t: %ld us, elapsed: %ld us\n", usecs_send[thread_id][i], usecs_elapsed[thread_id][i]);
+    int pkt_id = i + thread_id * num_pkts;
+    printf("t: %ld us, elapsed: %ld us\n", usecs_send[thread_id][pkt_id], usecs_elapsed[thread_id][pkt_id]);
   }
 
   cw_log("Receiver thread terminating\n");
@@ -476,8 +477,8 @@ int main(int argc, char *argv[]) {
         assert(num_pkts == n_compute + n_store + n_load);
     }
   }
-  assert(num_pkts <= MAX_PKTS);
-  
+  assert(num_pkts * num_threads <= MAX_PKTS);
+
   if (ramp_step_secs != 0) {
     if (ramp_fname != NULL) {
       check(ramp_delta_rate == 0);
