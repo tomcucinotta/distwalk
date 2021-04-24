@@ -44,7 +44,7 @@ int exp_resp_size = 0;
 
 int no_delay = 1;
 
-#define MAX_THREADS 1024
+#define MAX_THREADS 32
 pthread_t sender[MAX_THREADS];
 pthread_t receiver[MAX_THREADS];
 
@@ -118,8 +118,8 @@ uint32_t exp_packet_size(uint32_t avg, uint32_t min, uint32_t max, struct drand4
 
 clockid_t clk_id = CLOCK_REALTIME;
 int clientSocket[MAX_THREADS];
-long usecs_send[MAX_PKTS];
-long usecs_elapsed[MAX_PKTS];
+long usecs_send[MAX_THREADS][MAX_PKTS];
+long usecs_elapsed[MAX_THREADS][MAX_PKTS];
 // abs start-time of the experiment
 struct timespec ts_start;
 unsigned int rate = 1000;	// pkt/s rate (period is its inverse)
@@ -139,6 +139,8 @@ struct sockaddr_in myaddr;
 struct sockaddr_in serveraddr;
 socklen_t addr_size;
 
+int num_threads = 1;
+
 void *thread_sender(void *data) {
   unsigned long thread_id = (unsigned long) data;
   unsigned char *send_buf = malloc(BUF_SIZE);
@@ -157,7 +159,7 @@ void *thread_sender(void *data) {
     /* remember time of send relative to ts_start */
     struct timespec ts_send;
     clock_gettime(clk_id, &ts_send);
-    usecs_send[i] = ts_sub_us(ts_send, ts_start);
+    usecs_send[thread_id][i] = ts_sub_us(ts_send, ts_start);
     /*---- Issue a request to the server ---*/
     message_t *m = (message_t *) send_buf;
     m->req_id = i;
@@ -246,8 +248,8 @@ void *thread_sender(void *data) {
     }
 
     if (ramp_step_secs != 0 && i > 0) {
-      int step = usecs_send[i] / 1000000 / ramp_step_secs;
-      int old_step = usecs_send[i-1] / 1000000 / ramp_step_secs;
+      int step = usecs_send[thread_id][i] / 1000000 / ramp_step_secs;
+      int old_step = usecs_send[thread_id][i-1] / 1000000 / ramp_step_secs;
       if (step > old_step) {
         if (ramp_fname != NULL)
           rate = rates[(step < ramp_num_steps) ? step : (ramp_num_steps - 1)];
@@ -264,7 +266,7 @@ void *thread_sender(void *data) {
 }
 
 void *thread_receiver(void *data) {
-  unsigned long thread_id = (unsigned long) data;
+  int thread_id = (int)(unsigned long) data;
   unsigned char *recv_buf = malloc(BUF_SIZE);
   check(recv_buf != NULL);
 
@@ -284,7 +286,7 @@ void *thread_receiver(void *data) {
   sys_check(connect(clientSocket[thread_id], (struct sockaddr *) &serveraddr, addr_size));
 
   /* spawn sender once connection is established */
-  assert(pthread_create(&sender[thread_id], NULL, thread_sender, (void*)thread_id) == 0);
+  assert(pthread_create(&sender[thread_id], NULL, thread_sender, (void*)(unsigned long)thread_id) == 0);
 
   for (int i = 0; i < num_pkts; i++) {
     /*---- Read the message from the server into the buffer ----*/
@@ -305,12 +307,12 @@ void *thread_receiver(void *data) {
     clock_gettime(clk_id, &ts_now);
     unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
       + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
-    usecs_elapsed[pkt_id] = usecs - usecs_send[pkt_id];
-    cw_log("req_id %lu elapsed %ld us\n", pkt_id, usecs_elapsed[pkt_id]);
+    usecs_elapsed[thread_id][pkt_id] = usecs - usecs_send[thread_id][pkt_id];
+    cw_log("req_id %lu elapsed %ld us\n", pkt_id, usecs_elapsed[thread_id][pkt_id]);
   }
 
   for (int i = 0; i < num_pkts; i++) {
-    printf("t: %ld us, elapsed: %ld us\n", usecs_send[i], usecs_elapsed[i]);
+    printf("t: %ld us, elapsed: %ld us\n", usecs_send[thread_id][i], usecs_elapsed[thread_id][i]);
   }
   cw_log("receiver thread is over, closing socket\n");
   close(clientSocket[thread_id]);
@@ -326,7 +328,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight n] [-Sw|--store-weight n] [-Lw|--load-weight n] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight n] [-Sw|--store-weight n] [-Lw|--load-weight n] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] [-nt|--num-threads threads]\n");
       printf("Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n");
       exit(0);
     } else if (strcmp(argv[0], "-sn") == 0) {
@@ -431,6 +433,10 @@ int main(int argc, char *argv[]) {
       assert(argc >= 2);
       no_delay = atoi(argv[1]);
       argc--;  argv++;
+    } else if (strcmp(argv[0], "-nt") == 0 || strcmp(argv[0], "--num-threads") == 0) {
+      assert(argc >= 2);
+      num_threads = atoi(argv[1]);
+      argc--;  argv++;
     } else {
       printf("Unrecognized option: %s\n", argv[0]);
       exit(-1);
@@ -534,10 +540,11 @@ int main(int argc, char *argv[]) {
   /* Set all bits of the padding field to 0 */
   memset(myaddr.sin_zero, '\0', sizeof(myaddr.sin_zero));
 
-  unsigned long thread_id = 0;
-  assert(pthread_create(&receiver[thread_id], NULL, thread_receiver, (void *)thread_id) == 0);
+  for (int i = 0; i < num_threads; i++)
+    assert(pthread_create(&receiver[i], NULL, thread_receiver, (void *)(unsigned long)i) == 0);
 
-  pthread_join(receiver[thread_id], NULL);
+  for (int i = 0; i < num_threads; i++)
+    pthread_join(receiver[i], NULL);
 
   cw_log("Joined sender and receiver threads, exiting\n");
 
