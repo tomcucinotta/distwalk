@@ -116,6 +116,7 @@ uint32_t exp_packet_size(uint32_t avg, uint32_t min, uint32_t max, struct drand4
 }
 
 #define MAX_PKTS 1000000
+#define MAX_RATES 1000000
 
 clockid_t clk_id = CLOCK_REALTIME;
 int clientSocket[MAX_THREADS];
@@ -127,7 +128,7 @@ unsigned int rate = 1000;	// pkt/s rate (period is its inverse)
 
 unsigned long num_pkts = MAX_PKTS;
 
-unsigned int rates[MAX_PKTS];
+unsigned int rates[MAX_RATES];
 unsigned int ramp_step_secs = 0;	// if non-zero, supersedes num_pkts
 unsigned int ramp_delta_rate = 0;	// added to rate every ramp_secs
 unsigned int ramp_num_steps = 0;	// number of ramp-up steps
@@ -497,9 +498,12 @@ int main(int argc, char *argv[]) {
       check(ramp_fid != NULL);
       int cnt = 0;
       for (ramp_num_steps = 0; !feof(ramp_fid);) {
-        int read_fields = fscanf(ramp_fid, "%u", &rates[ramp_num_steps]);
+        unsigned int r;
+        int read_fields = fscanf(ramp_fid, "%u", &r);
         if (read_fields == 1) {
-          cnt += rates[ramp_num_steps] * ramp_step_secs;
+          check(ramp_num_steps < MAX_RATES);
+          rates[ramp_num_steps] = r;
+          cnt += r * ramp_step_secs;
           ramp_num_steps++;
         }
       }
