@@ -144,15 +144,29 @@ socklen_t addr_size;
 int num_threads = 1;
 int num_sessions = 1;
 
+unsigned long pkts_per_session;
+
 typedef struct {
   int thread_id;
   int first_pkt_id;
+  int num_send_pkts;
 } thread_data_t;
+
+unsigned long curr_period_us() {
+  return 1000000 / rate;
+}
+
+int idx(int pkt_id) {
+  int val = per_session_output ? pkt_id % pkts_per_session : pkt_id;
+  assert(val < MAX_PKTS);
+  return val;
+}
 
 void *thread_sender(void *data) {
   thread_data_t *p = (thread_data_t *)data;
   int thread_id = p->thread_id;
   int first_pkt_id = p->first_pkt_id;
+  int num_send_pkts = p->num_send_pkts;
   unsigned char *send_buf = malloc(BUF_SIZE);
   check(send_buf != NULL);
   struct timespec ts_now;
@@ -163,12 +177,12 @@ void *thread_sender(void *data) {
 
   int rate_start = rate;
 
-  for (int i = 0; i < num_pkts / num_sessions; i++) {
+  for (int i = 0; i < num_send_pkts; i++) {
     /* remember time of send relative to ts_start */
     struct timespec ts_send;
     clock_gettime(clk_id, &ts_send);
     int pkt_id = first_pkt_id + i;
-    usecs_send[thread_id][pkt_id] = ts_sub_us(ts_send, ts_start);
+    usecs_send[thread_id][idx(pkt_id)] = ts_sub_us(ts_send, ts_start);
     /*---- Issue a request to the server ---*/
     message_t *m = (message_t *) send_buf;
     m->req_id = pkt_id;
@@ -236,7 +250,7 @@ void *thread_sender(void *data) {
     assert(m->req_size <= BUF_SIZE);
     safe_send(clientSocket[thread_id], send_buf, m->req_size);
 
-    unsigned long period_us = 1000000 / rate;
+    unsigned long period_us = curr_period_us();
     unsigned long period_ns;
     if (exp_arrivals) {
       period_ns = lround(expon(1.0 / period_us, &rnd_buf) * 1000.0);
@@ -257,8 +271,10 @@ void *thread_sender(void *data) {
     }
 
     if (ramp_step_secs != 0 && i > 0) {
-      int step = usecs_send[thread_id][i] / 1000000 / ramp_step_secs;
-      int old_step = usecs_send[thread_id][i-1] / 1000000 / ramp_step_secs;
+      int pkt_id = (per_session_output ? i % pkts_per_session : i);
+      assert(pkt_id < MAX_PKTS);
+      int step = usecs_send[thread_id][pkt_id] / 1000000 / ramp_step_secs;
+      int old_step = (usecs_send[thread_id][pkt_id] - curr_period_us()) / 1000000 / ramp_step_secs;
       if (step > old_step) {
         if (ramp_fname != NULL)
           rate = rates[(step < ramp_num_steps) ? step : (ramp_num_steps - 1)];
@@ -280,7 +296,7 @@ void *thread_receiver(void *data) {
   check(recv_buf != NULL);
 
   for (int i = 0; i < num_pkts; i++) {
-    if (i % (num_pkts / num_sessions) == 0) {
+    if (i % pkts_per_session == 0) {
       /*---- Create the socket. The three arguments are: ----*/
       /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
       clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
@@ -298,7 +314,11 @@ void *thread_receiver(void *data) {
       cw_log("Connecting (i=%d) ...\n", i);
       sys_check(connect(clientSocket[thread_id], (struct sockaddr *) &serveraddr, addr_size));
       /* spawn sender once connection is established */
-      thread_data_t thr_data = { .thread_id = thread_id, .first_pkt_id = i + thread_id * num_pkts };
+      thread_data_t thr_data = {
+        .thread_id = thread_id,
+        .first_pkt_id = i,
+        .num_send_pkts = pkts_per_session
+      };
       assert(pthread_create(&sender[thread_id], NULL, thread_sender, (void*)&thr_data) == 0);
     }
 
@@ -320,17 +340,19 @@ void *thread_receiver(void *data) {
     clock_gettime(clk_id, &ts_now);
     unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
       + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
-    usecs_elapsed[thread_id][pkt_id] = usecs - usecs_send[thread_id][pkt_id];
-    cw_log("req_id %lu elapsed %ld us\n", pkt_id, usecs_elapsed[thread_id][pkt_id]);
+    assert(pkt_id < MAX_PKTS);
+    usecs_elapsed[thread_id][idx(pkt_id)] = usecs - usecs_send[thread_id][idx(pkt_id)];
+    cw_log("req_id %lu elapsed %ld us\n", pkt_id, usecs_elapsed[thread_id][idx(pkt_id)]);
 
-    if ((i+1) % (num_pkts / num_sessions) == 0) {
+    if ((i+1) % pkts_per_session == 0) {
       cw_log("Session is over (after receive of pkt %d), closing socket\n", i);
       close(clientSocket[thread_id]);
       if (per_session_output) {
-        int first_sess_pkt = i - (num_pkts / num_sessions - 1);
-        for (int j = first_sess_pkt; j <= i; j++) {
-          int pkt_id = j + thread_id * num_pkts;
-          printf("t: %ld us, elapsed: %ld us\n", usecs_send[thread_id][pkt_id], usecs_elapsed[thread_id][pkt_id]);
+        int first_sess_pkt = i - (pkts_per_session - 1);
+        int sess_id = i / pkts_per_session;
+        for (int j = 0; j < pkts_per_session; j++) {
+          int pkt_id = first_sess_pkt + j;
+          printf("t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n", usecs_send[thread_id][idx(pkt_id)], usecs_elapsed[thread_id][idx(pkt_id)], pkt_id, thread_id, sess_id);
         }
       }
       cw_log("Joining sender thread\n");
@@ -340,8 +362,8 @@ void *thread_receiver(void *data) {
 
   if (!per_session_output) {
     for (int i = 0; i < num_pkts; i++) {
-      int pkt_id = i + thread_id * num_pkts;
-      printf("t: %ld us, elapsed: %ld us\n", usecs_send[thread_id][pkt_id], usecs_elapsed[thread_id][pkt_id]);
+      int sess_id = i / pkts_per_session;
+      printf("t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n", usecs_send[thread_id][i], usecs_elapsed[thread_id][idx(i)], i, thread_id, sess_id);
     }
   }
 
@@ -469,6 +491,7 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(argv[0], "-ns") == 0 || strcmp(argv[0], "--num-sessions") == 0) {
       assert(argc >= 2);
       num_sessions = atoi(argv[1]);
+      check(num_sessions >= 1);
       argc--;  argv++;
     } else {
       printf("Unrecognized option: %s\n", argv[0]);
@@ -521,13 +544,15 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  assert(num_pkts * num_threads <= MAX_PKTS);
-
   num_pkts = (num_pkts + num_sessions - 1) / num_sessions * num_sessions;
+  pkts_per_session = num_pkts / num_sessions;
+
+  assert(num_pkts <= MAX_PKTS || (per_session_output && pkts_per_session <= MAX_PKTS));
 
   printf("Configuration:\n");
   printf("  bind=%s:%d\n", bindname, bind_port);
   printf("  hostname=%s:%d\n", hostname, server_port);
+  printf("  num_threads: %d\n", num_threads);
   printf("  num_pkts=%lu (COMPUTE:%d, STORE:%d, LOAD:%d)\n", num_pkts, n_compute, n_store, n_load);
   printf("  rate=%d, exp_arrivals=%d\n",
 	 rate, exp_arrivals);
@@ -543,6 +568,8 @@ int main(int argc, char *argv[]) {
   printf("  min packet size due to header: send=%lu, reply=%lu\n", MIN_SEND_SIZE, MIN_REPLY_SIZE);
   printf("  max packet size: %d\n", BUF_SIZE);
   printf("  no_delay: %d\n", no_delay);
+  printf("  num_sessions: %d\n", num_sessions);
+  printf("  per_session_output: %d\n", per_session_output);
 
   assert(pkt_size >= MIN_SEND_SIZE);
   assert(pkt_size <= BUF_SIZE);
