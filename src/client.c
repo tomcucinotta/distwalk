@@ -489,7 +489,6 @@ int main(int argc, char *argv[]) {
         assert(num_pkts == n_compute + n_store + n_load);
     }
   }
-  assert(num_pkts * num_threads <= MAX_PKTS);
 
   if (ramp_step_secs != 0) {
     if (ramp_fname != NULL) {
@@ -517,6 +516,8 @@ int main(int argc, char *argv[]) {
       }
     }
   }
+
+  assert(num_pkts * num_threads <= MAX_PKTS);
 
   printf("Configuration:\n");
   printf("  bind=%s:%d\n", bindname, bind_port);
