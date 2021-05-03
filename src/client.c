@@ -43,6 +43,7 @@ unsigned long resp_size = 128;
 int exp_resp_size = 0;
 
 int no_delay = 1;
+int per_session_output = 0;
 
 #define MAX_THREADS 32
 pthread_t sender[MAX_THREADS];
@@ -324,14 +325,23 @@ void *thread_receiver(void *data) {
     if ((i+1) % (num_pkts / num_sessions) == 0) {
       cw_log("Session is over (after receive of pkt %d), closing socket\n", i);
       close(clientSocket[thread_id]);
+      if (per_session_output) {
+        int first_sess_pkt = i - (num_pkts / num_sessions - 1);
+        for (int j = first_sess_pkt; j <= i; j++) {
+          int pkt_id = j + thread_id * num_pkts;
+          printf("t: %ld us, elapsed: %ld us\n", usecs_send[thread_id][pkt_id], usecs_elapsed[thread_id][pkt_id]);
+        }
+      }
       cw_log("Joining sender thread\n");
       pthread_join(sender[thread_id], NULL);
     }
   }
 
-  for (int i = 0; i < num_pkts; i++) {
-    int pkt_id = i + thread_id * num_pkts;
-    printf("t: %ld us, elapsed: %ld us\n", usecs_send[thread_id][pkt_id], usecs_elapsed[thread_id][pkt_id]);
+  if (!per_session_output) {
+    for (int i = 0; i < num_pkts; i++) {
+      int pkt_id = i + thread_id * num_pkts;
+      printf("t: %ld us, elapsed: %ld us\n", usecs_send[thread_id][pkt_id], usecs_elapsed[thread_id][pkt_id]);
+    }
   }
 
   cw_log("Receiver thread terminating\n");
@@ -344,7 +354,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight n] [-Sw|--store-weight n] [-Lw|--load-weight n] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] [-nt|--num-threads threads] [-ns|--num-sessions]\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight n] [-Sw|--store-weight n] [-Lw|--load-weight n] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] [-nt|--num-threads threads] [-ns|--num-sessions] [-pso|--per-session-output]\n");
       printf("Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n");
       exit(0);
     } else if (strcmp(argv[0], "-sn") == 0) {
@@ -433,6 +443,8 @@ int main(int argc, char *argv[]) {
       exp_comptimes = 1;
     } else if (strcmp(argv[0], "-ws") == 0 || strcmp(argv[0], "--waitspin") == 0) {
       wait_spinning = 1;
+    } else if (strcmp(argv[0], "-pso") == 0 || strcmp(argv[0], "--per-session-output") == 0) {
+      per_session_output = 1;
     } else if (strcmp(argv[0], "-ps") == 0 || strcmp(argv[0], "--pkt-size") == 0) {
       assert(argc >= 2);
       pkt_size = atol(argv[1]);
