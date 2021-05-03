@@ -377,8 +377,42 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight n] [-Sw|--store-weight n] [-Lw|--load-weight n] [-ec|--exp-comp] [-ws|--wait-spin] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] [-nt|--num-threads threads] [-ns|--num-sessions] [-pso|--per-session-output]\n");
-      printf("Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n");
+      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-ws|--wait-spin] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-ec|--exp-comp] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight w] [-Sw|--store-weight w] [-Lw|--load-weight w] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] [-nt|--num-threads threads] [-ns|--num-sessions] [-pso|--per-session-output]\n"
+             "\n"
+             "Options:\n"
+             "  -h|--help ....................... This help message\n"
+             "  -b .............................. Client-side bind name/IP (defaults to 0.0.0.0)\n"
+             "  -bp ............................. Client-side bind port\n"
+             "  -sn ............................. Server name or IP (defaults to 127.0.0.1)\n"
+             "  -n num_pkts ..................... Set number of packets sent by each thread (across all sessions)\n"
+             "  -c num_compute .................. Set number of compute operations\n"
+             "  -s num_store .................... Set number of store operations to disk\n"
+             "  -l num_load ..................... Set number of load operations from disk\n"
+             "  -p period(us) ................... Set inter-send period for each thread (average, if -ea is specified)\n"
+             "  -r rate ......................... Set sending rate for each rate (average, if -ea is specified)\n"
+             "  -ws|--wait-spin ................. Spin-wait instead of sleeping till next sending time\n"
+             "  -ea|--exp-arrivals .............. Set exponentially distributed inter-send times for each thread\n"
+             "  -rss|--ramp-step-secs secs ...... Set duration of each rate-step\n"
+             "  -rfn|--rate-file-name fname ..... Load rates from specified file\n"
+             "  -C|--comp-time time(us) ......... Set per-request processing time (average, if -ec is specified)\n"
+             "  -ec|--exp-comp .................. Set exponentially distributed per-request processing times\n"
+             "  -S|--store-data bytes ........... Set per-store data size\n"
+             "  -L|--load-data bytes ............ Set per-load data size\n"
+             "  -Cw|--comp-weight w ............. Set weight of COMPUTE in weighted random choice of operation\n"
+             "  -Sw|--store-weight w ............ Set weight of STORE in weighted random choice of operation\n"
+             "  -Lw|--load-weight w ............. Set weight of LOAD in weighted random choice of operation\n"
+             "  -ps bytes ....................... Set size of sent requests (average, if -eps is specified)\n"
+             "  -eps|--exp-req-size ............. Set exponentially distributed size of sent requests\n"
+             "  -rs bytes ....................... Set size of received responses (average, if -ers is specified)\n"
+             "  -ers|--exp-resp-size ............ Set exponentially distributed size of received responses\n"
+             "  -nd|--no-delay [0|1] ............ Set value of TCP_NO_DELAY socket option\n"
+             "  -nt|--num-threads threads ....... Set number of threads\n"
+             "  -ns|--num-sessions .............. Set number of sessions each thread establishes with the server\n"
+             "  -pso|--per-session-output ....... Output response times at end of each session (implies some delay between sessions but saves memory)\n"
+             "\n"
+             "  Notes:\n"
+             "    Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n"
+      );
       exit(0);
     } else if (strcmp(argv[0], "-sn") == 0) {
       assert(argc >= 2);
