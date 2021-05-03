@@ -523,6 +523,8 @@ int main(int argc, char *argv[]) {
 
   assert(num_pkts * num_threads <= MAX_PKTS);
 
+  num_pkts = (num_pkts + num_sessions - 1) / num_sessions * num_sessions;
+
   printf("Configuration:\n");
   printf("  bind=%s:%d\n", bindname, bind_port);
   printf("  hostname=%s:%d\n", hostname, server_port);
