@@ -270,18 +270,15 @@ void *thread_sender(void *data) {
       sys_check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
     }
 
-    if (ramp_step_secs != 0 && i > 0) {
-      int pkt_id = (per_session_output ? i % pkts_per_session : i);
-      assert(pkt_id < MAX_PKTS);
-      int step = usecs_send[thread_id][pkt_id] / 1000000 / ramp_step_secs;
-      int old_step = (usecs_send[thread_id][pkt_id] - curr_period_us()) / 1000000 / ramp_step_secs;
-      if (step > old_step) {
-        if (ramp_fname != NULL)
-          rate = rates[(step < ramp_num_steps) ? step : (ramp_num_steps - 1)];
-        else
-          rate = rate_start + step * ramp_delta_rate;
-        cw_log("rate: %d\n", rate);
-      }
+    if (ramp_step_secs != 0 && pkt_id > 0) {
+      int step = usecs_send[thread_id][idx(pkt_id)] / 1000000 / ramp_step_secs;
+      int old_rate = rate;
+      if (ramp_fname != NULL)
+        rate = rates[(step < ramp_num_steps) ? step : (ramp_num_steps - 1)];
+      else
+        rate = rate_start + step * ramp_delta_rate;
+      if (old_rate != rate)
+        cw_log("old_rate: %d, rate: %d\n", old_rate, rate);
     }
   }
 
