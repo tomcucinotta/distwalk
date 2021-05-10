@@ -337,7 +337,6 @@ void *thread_receiver(void *data) {
     clock_gettime(clk_id, &ts_now);
     unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000
       + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
-    assert(pkt_id < MAX_PKTS);
     usecs_elapsed[thread_id][idx(pkt_id)] = usecs - usecs_send[thread_id][idx(pkt_id)];
     cw_log("req_id %lu elapsed %ld us\n", pkt_id, usecs_elapsed[thread_id][idx(pkt_id)]);
 
