@@ -183,6 +183,8 @@ void *thread_sender(void *data) {
     clock_gettime(clk_id, &ts_send);
     int pkt_id = first_pkt_id + i;
     usecs_send[thread_id][idx(pkt_id)] = ts_sub_us(ts_send, ts_start);
+    // mark corresponding elapsed value as 0, i.e., non-valid (in case we don't receive all packets back)
+    usecs_elapsed[thread_id][idx(pkt_id)] = 0;
     /*---- Issue a request to the server ---*/
     message_t *m = (message_t *) send_buf;
     m->req_id = pkt_id;
@@ -323,7 +325,13 @@ void *thread_receiver(void *data) {
     // TODO: support receive of variable reply-size requests
     cw_log("Receiving %lu bytes (header)\n", sizeof(message_t));
     unsigned long read = safe_recv(clientSocket[thread_id], recv_buf, sizeof(message_t));
-    assert(read == sizeof(message_t));
+    if (read != sizeof(message_t)) {
+      printf("ERROR: read %lu bytes while expecting %lu! Forcing premature end of session!\n", read, sizeof(message_t));
+      unsigned long skip_pkts = pkts_per_session - ((i + 1) % pkts_per_session);
+      printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
+      i += skip_pkts;
+      goto skip;
+    }
     message_t *m = (message_t *) recv_buf;
     unsigned long pkt_id = m->req_id;
     cw_log("Received %lu bytes, req_id=%lu, pkt_size=%u, ops=%d\n",
@@ -340,6 +348,7 @@ void *thread_receiver(void *data) {
     usecs_elapsed[thread_id][idx(pkt_id)] = usecs - usecs_send[thread_id][idx(pkt_id)];
     cw_log("req_id %lu elapsed %ld us\n", pkt_id, usecs_elapsed[thread_id][idx(pkt_id)]);
 
+    skip:
     if ((i+1) % pkts_per_session == 0) {
       cw_log("Session is over (after receive of pkt %d), closing socket\n", i);
       close(clientSocket[thread_id]);
