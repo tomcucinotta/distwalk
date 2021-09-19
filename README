@@ -10,21 +10,26 @@ DistWalk is a simple command-line tool useful to emulate distributed
 processing scenarios, where a client submits requests to be processed
 by one or more server nodes, in a distributed environment. The client
 can be configured to send requests according to a pre-defined pattern
-(e.g., periodically or exponentially distributed), and the server may
-be configured to perform processing for a time that is configurable
+(e.g., periodically or exponentially distributed), where requests may
+ask the server to perform processing for a time that is configurable
 according to a pre-defined pattern (e.g., constant or exponentially
-distributed processing time). The client provides, at the end of the
-experiment, all the end-to-end processing times for all submitted
-requests.
+distributed processing time), or performing disk operations by reading
+or writing a configurable amount of data.
 
-At the moment, the client establishes a TCP connection to the server,
+The client provides, at the end of the experiment, all the end-to-end
+processing times for all submitted requests.
+
+The client establishes one or more TCP connections to the server,
 which is capable of handling multiple client connections via epoll(7).
+The client can submit concurrent traffic by spawning multiple threads.
+Furthermore, each thread can emulate different sessions where the
+connection is closed and re-established for each new session.
 
 
 COMPILING
 ----------------------------------------------------------------------
 This program has been developed and tested on a Linux Ubuntu system,
-versions 16.xx and 17.xx. Therefore, please, use Linux.
+versions from 16.xx to 21.xx. Therefore, please, use Linux.
 
 In order to compile the client and the server, just type, from the
 root folder:
