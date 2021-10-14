@@ -492,7 +492,7 @@ void* epoll_worker_loop(void* args) {
 
 void epoll_main_loop(int listen_sock) {
   struct epoll_event ev, events[MAX_EVENTS];
-  
+
   /* Code to set up listening socket, 'listen_sock',
      (socket(), bind(), listen()) omitted */
 
@@ -501,10 +501,10 @@ void epoll_main_loop(int listen_sock) {
     perror("epoll_create1");
     exit(EXIT_FAILURE);
   }
-  
+
   ev.events = EPOLLIN;
-  ev.data.fd = -1;	// Special value denoting listen_sock
-  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listen_sock, &ev) == -1) {
+  ev.data.fd = -1; // Special value denoting listen_sock
+  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listen_sock, & ev) == -1) {
     perror("epoll_ctl: listen_sock");
     exit(EXIT_FAILURE);
   }
@@ -513,90 +513,93 @@ void epoll_main_loop(int listen_sock) {
     cw_log("epoll_wait()ing...\n");
     int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
     if (nfds == -1) {
-        perror("epoll_wait");
+      perror("epoll_wait");
 
-	if (errno == EINTR) {
-          node_running = 0;
-	} else {
-          exit(EXIT_FAILURE);
-	}
+      if (errno == EINTR) {
+        node_running = 0;
+      } else {
+        exit(EXIT_FAILURE);
+      }
     }
 
     for (int i = 0; i < nfds; i++) {
       if (events[i].data.fd == -1) {
-	struct sockaddr_in addr;
-	socklen_t addr_size = sizeof(addr);
-	int conn_sock = accept(listen_sock,
-			   (struct sockaddr *) &addr, &addr_size);
-	if (conn_sock == -1) {
-	  perror("accept");
-	  exit(EXIT_FAILURE);
-	}
-	cw_log("Accepted connection from: %s:%d\n", inet_ntoa(addr.sin_addr), addr.sin_port);
-	//setnonblocking(conn_sock);
-	int val = 1;
-	sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY, (void *)&val, sizeof(val)));
+        struct sockaddr_in addr;
+        socklen_t addr_size = sizeof(addr);
+        int conn_sock = accept(listen_sock,
+          (struct sockaddr * ) & addr, & addr_size);
+
+        if (conn_sock == -1) {
+          perror("accept");
+          exit(EXIT_FAILURE);
+        }
+
+        cw_log("Accepted connection from: %s:%d\n", inet_ntoa(addr.sin_addr), addr.sin_port);
+        //setnonblocking(conn_sock);
+        int val = 1;
+        sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY, (void * ) & val, sizeof(val)));
 
         int orig_sock_id = sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock);
         check(orig_sock_id != -1);
 
-        unsigned char *new_buf = 0;
-        unsigned char *new_reply_buf = 0;
-        unsigned char *new_fwd_buf = 0;
-        unsigned char *new_store_buf = 0;
+        unsigned char * new_buf = 0;
+        unsigned char * new_reply_buf = 0;
+        unsigned char * new_fwd_buf = 0;
+        unsigned char * new_store_buf = 0;
 
         new_buf = malloc(BUF_SIZE);
         new_reply_buf = malloc(BUF_SIZE);
         new_fwd_buf = malloc(BUF_SIZE);
-	if (storage_path)
+        
+        if (storage_path)
           new_store_buf = (use_odirect ? aligned_alloc(blk_size, BUF_SIZE + blk_size) : malloc(BUF_SIZE));
 
         if (new_buf == 0 || new_reply_buf == 0 || new_fwd_buf == 0 || (storage_path && new_store_buf == 0)) {
-	  close_and_forget(epollfd, conn_sock);
+          close_and_forget(epollfd, conn_sock);
           goto continue_free;
         }
 
-	int buf_id;
-	for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
-	  pthread_mutex_lock(&bufs[buf_id].mtx);
-	  if (bufs[buf_id].buf == 0){
-	    break; //unlock mutex above after mallocs
-	  }
-	  pthread_mutex_unlock(&bufs[buf_id].mtx);
-	}
-	if (buf_id == MAX_BUFFERS) {
-	  fprintf(stderr, "Not enough buffers for new connection, closing!\n");
-	  close_and_forget(epollfd, conn_sock);
-	  goto continue_free;
-	}
-	bufs[buf_id].buf = new_buf;
-	bufs[buf_id].reply_buf = new_reply_buf;
-	bufs[buf_id].fwd_buf = new_fwd_buf;
-	if (storage_path)
-	  bufs[buf_id].store_buf = new_store_buf;
+        int buf_id;
+        for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
+          pthread_mutex_lock( & bufs[buf_id].mtx);
+          if (bufs[buf_id].buf == 0) {
+            break; //unlock mutex above after mallocs
+          }
+          pthread_mutex_unlock( & bufs[buf_id].mtx);
+        }
+        if (buf_id == MAX_BUFFERS) {
+          fprintf(stderr, "Not enough buffers for new connection, closing!\n");
+          close_and_forget(epollfd, conn_sock);
+          goto continue_free;
+        }
+        bufs[buf_id].buf = new_buf;
+        bufs[buf_id].reply_buf = new_reply_buf;
+        bufs[buf_id].fwd_buf = new_fwd_buf;
+        if (storage_path)
+          bufs[buf_id].store_buf = new_store_buf;
 
-        pthread_mutex_unlock(&bufs[buf_id].mtx);
-     	
-	// From here, safe to assume that bufs[buf_id] is thread-safe
-	cw_log("Connection assigned to worker %d\n", buf_id);
-	bufs[buf_id].buf_size = BUF_SIZE;
-	bufs[buf_id].curr_buf = bufs[buf_id].buf;
-	bufs[buf_id].curr_size = BUF_SIZE;
-	bufs[buf_id].sock = conn_sock;
+        pthread_mutex_unlock( & bufs[buf_id].mtx);
+
+        // From here, safe to assume that bufs[buf_id] is thread-safe
+        cw_log("Connection assigned to worker %d\n", buf_id);
+        bufs[buf_id].buf_size = BUF_SIZE;
+        bufs[buf_id].curr_buf = bufs[buf_id].buf;
+        bufs[buf_id].curr_size = BUF_SIZE;
+        bufs[buf_id].sock = conn_sock;
         bufs[buf_id].status = RECEIVING;
         bufs[buf_id].orig_sock_id = orig_sock_id;
-      
+
         ev.events = EPOLLIN | EPOLLOUT;
         // Use the data.u32 field to store the buf_id in bufs[]
         ev.data.u32 = buf_id;
-        
-	//add client fd to the worker epoll
-	//(which, at this point, is already up and running)
-        sys_check(epoll_ctl(thread_infos[buf_id].epollfd, EPOLL_CTL_ADD, conn_sock, &ev));
+
+        //add client fd to the worker epoll
+        //(which, at this point, is already up and running)
+        sys_check(epoll_ctl(thread_infos[buf_id].epollfd, EPOLL_CTL_ADD, conn_sock, & ev));
 
         continue;
 
-      continue_free:
+        continue_free:
 
         if (new_buf)
           free(new_buf);
@@ -719,7 +722,7 @@ int main(int argc, char *argv[]) {
   epoll_main_loop(welcomeSocket);
 
   //Clean-ups
-  
+
   //Join worker threads
   for (int i = 0; i < MAX_BUFFERS; i++) {
     sys_check(pthread_join(workers[i], NULL));
