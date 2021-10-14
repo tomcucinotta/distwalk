@@ -718,13 +718,15 @@ int main(int argc, char *argv[]) {
 
   epoll_main_loop(welcomeSocket);
 
+  //Clean-ups
+  
   //Join worker threads
   for (int i = 0; i < MAX_BUFFERS; i++) {
     sys_check(pthread_join(workers[i], NULL));
     close(thread_infos[i].terminationfd);
   }
 
-  // Init bufs mutexs
+  // Destroy bufs mutexs
   for (int i = 0; i < MAX_BUFFERS; i++) {
     sys_check(pthread_mutex_destroy(&bufs[i].mtx));
   }
