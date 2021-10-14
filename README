@@ -10,21 +10,26 @@ DistWalk is a simple command-line tool useful to emulate distributed
 processing scenarios, where a client submits requests to be processed
 by one or more server nodes, in a distributed environment. The client
 can be configured to send requests according to a pre-defined pattern
-(e.g., periodically or exponentially distributed), and the server may
-be configured to perform processing for a time that is configurable
+(e.g., periodically or exponentially distributed), where requests may
+ask the server to perform processing for a time that is configurable
 according to a pre-defined pattern (e.g., constant or exponentially
-distributed processing time). The client provides, at the end of the
-experiment, all the end-to-end processing times for all submitted
-requests.
+distributed processing time), or performing disk operations by reading
+or writing a configurable amount of data.
 
-At the moment, the client establishes a TCP connection to the server,
+The client provides, at the end of the experiment, all the end-to-end
+processing times for all submitted requests.
+
+The client establishes one or more TCP connections to the server,
 which is capable of handling multiple client connections via epoll(7).
+The client can submit concurrent traffic by spawning multiple threads.
+Furthermore, each thread can emulate different sessions where the
+connection is closed and re-established for each new session.
 
 
 COMPILING
 ----------------------------------------------------------------------
 This program has been developed and tested on a Linux Ubuntu system,
-versions 16.xx and 17.xx. Therefore, please, use Linux.
+versions from 16.xx to 21.xx. Therefore, please, use Linux.
 
 In order to compile the client and the server, just type, from the
 root folder:
@@ -36,7 +41,7 @@ two executables are created:
 - src/node: the server program, try typing ./server -h
 
 
-EXAMPLE OF USE
+EXAMPLES OF USE
 ----------------------------------------------------------------------
 The classic and simplest scenario is the one of a client-server
 scenario with client submitting periodically packets of a given
@@ -50,27 +55,45 @@ command:
 then launching on the client the following command, with which we are
 submitting 10 packets at a rate of 1000 pkt/s
 
-  [myuser@myclient distwalk/src]$ ./client -c 10 -r 1000 -C 1000 -s -ps 512 myserver
+  [myuser@myclient distwalk/src]$ ./src/client -n 10 -r 1000 -C 1000 -ps 512 -sn myserver
 Configuration:
   bind=0.0.0.0:0
-  hostname=theoden.retis:7891
-  num_pkts=10
+  hostname=127.0.0.1:7891
+  num_threads: 1
+  num_pkts=10 (COMPUTE:0, STORE:0, LOAD:0)
   rate=1000, exp_arrivals=0
   waitspin=0
-  ramp_num_steps=10, ramp_delta_rate=100, ramp_step_secs=0
+  ramp_num_steps=0, ramp_delta_rate=0, ramp_step_secs=0
   comptime_us=1000, exp_comptimes=0
-  pkt_size=512, exp_pkt_size=0
-  resp_size=128, exp_resp_size=0
-  min packet size due to header: 12
-  max packet size: 16384
+  pkt_size=512 (578 with headers), exp_pkt_size=0
+  resp_size=128 (194 with headers), exp_resp_size=0
+  min packet size due to header: send=44, reply=12
+  max packet size: 16777216
   no_delay: 1
-t: 1 us, elapsed: 1476 us
-t: 1053 us, elapsed: 1292 us
-t: 2225 us, elapsed: 1296 us
-t: 3054 us, elapsed: 1626 us
-t: 4082 us, elapsed: 1567 us
-t: 5116 us, elapsed: 1542 us
-t: 6220 us, elapsed: 1461 us
-t: 7252 us, elapsed: 1415 us
-t: 8225 us, elapsed: 1536 us
-t: 9218 us, elapsed: 1375 us
+  num_sessions: 1
+  pkts_per_session: 10
+  per_session_output: 0
+t: 635 us, elapsed: 1259 us, req_id: 0, thr_id: 0, sess_id: 0
+t: 1756 us, elapsed: 1224 us, req_id: 1, thr_id: 0, sess_id: 0
+t: 2749 us, elapsed: 1265 us, req_id: 2, thr_id: 0, sess_id: 0
+t: 3754 us, elapsed: 1293 us, req_id: 3, thr_id: 0, sess_id: 0
+t: 4749 us, elapsed: 1307 us, req_id: 4, thr_id: 0, sess_id: 0
+t: 5752 us, elapsed: 1312 us, req_id: 5, thr_id: 0, sess_id: 0
+t: 6720 us, elapsed: 1361 us, req_id: 6, thr_id: 0, sess_id: 0
+t: 7723 us, elapsed: 1363 us, req_id: 7, thr_id: 0, sess_id: 0
+t: 8724 us, elapsed: 1391 us, req_id: 8, thr_id: 0, sess_id: 0
+t: 9720 us, elapsed: 1402 us, req_id: 9, thr_id: 0, sess_id: 0
+
+The following command spawns 4 threads submitting concurrently
+requests to the same server (each thread submits 5000 requests needing
+a 1ms of processing time each, at a rate of 250 pkt/s):
+
+  [myuser@myclient distwalk/src]$ ./client -nt 4 -c 5000 -r 250 -C 1000
+
+The following command spawns 3 threads, with each of them using 10
+sessions to submit the 5000 packets as in the above command, so each
+session will send 500 requests at a rate of 250 pkt/s (at the end of
+each session, each client thread closes the connection and establishes
+a new connection for the subsequent session)
+
+  [myuser@myclient distwalk/src]$ ./client -nt 3 -ns 10 -c 5000 -r 250 -C 1000

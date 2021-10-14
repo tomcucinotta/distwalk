@@ -323,8 +323,8 @@ int process_messages(int sock, int buf_id) {
     cw_log("Got EAGAIN or EWOULDBLOCK, ignoring...\n");
     return 1;
   } else if (received == -1) {
-    perror("Unexpected error!");
-    exit(-1);
+    fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
+    return 0;
   }
   bufs[buf_id].curr_buf += received;
   bufs[buf_id].curr_size -= received;
