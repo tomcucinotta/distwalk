@@ -439,18 +439,18 @@ void setnonblocking(int fd) {
    assert(fcntl(fd, F_SETFL, flags) == 0);
 }
 
-void* epoll_worker_loop(void* args) {
-  thread_info* infos = (thread_info*) args;
+void * epoll_worker_loop(void * args) {
+  thread_info * infos = (thread_info * ) args;
   struct epoll_event ev;
   int worker_running = 1;
 
   // Add terminationfd
   ev.events = EPOLLIN;
-  ev.data.fd = infos->terminationfd;
-  sys_check(epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev)); 
+  ev.data.fd = infos -> terminationfd;
+  sys_check(epoll_ctl(infos -> epollfd, EPOLL_CTL_ADD, infos -> terminationfd, & ev));
 
   while (worker_running) {
-    int nfds = epoll_wait(infos->epollfd, infos->events, MAX_EVENTS, -1);
+    int nfds = epoll_wait(infos -> epollfd, infos -> events, MAX_EVENTS, -1);
     if (nfds == -1) {
       perror("epoll_wait");
 
@@ -462,32 +462,31 @@ void* epoll_worker_loop(void* args) {
     }
 
     for (int i = 0; i < nfds; i++) {
-      if (infos->events[i].data.fd == infos->terminationfd) {
+      if (infos -> events[i].data.fd == infos -> terminationfd) {
         worker_running = 0;
-	break;
+        break;
       } else {
-        int buf_id = infos->events[i].data.u32;
+        int buf_id = infos -> events[i].data.u32;
 
-        if ((infos->events[i].events | EPOLLIN) && bufs[buf_id].status == RECEIVING) {
+        if ((infos -> events[i].events | EPOLLIN) && bufs[buf_id].status == RECEIVING) {
           int ret = process_messages(bufs[buf_id].sock, buf_id);
 
-	  if (!ret) {
-            close_and_forget(infos->epollfd, bufs[buf_id].sock); 
-	  }
-        } 
-        else if ((infos->events[i].events | EPOLLOUT) && bufs[buf_id].status == SENDING)
+          if (!ret) {
+            close_and_forget(infos -> epollfd, bufs[buf_id].sock);
+          }
+        } else if ((infos -> events[i].events | EPOLLOUT) && bufs[buf_id].status == SENDING)
           send_messages(buf_id);
-        else if ((infos->events[i].events | EPOLLOUT) && bufs[buf_id].status == CONNECTING)
+        else if ((infos -> events[i].events | EPOLLOUT) && bufs[buf_id].status == CONNECTING)
           finalize_conn(buf_id);
         else {
-          fprintf(stderr, "unexpected status: event=%d, %d\n", infos->events[i].events, bufs[buf_id].status);
+          fprintf(stderr, "unexpected status: event=%d, %d\n", infos -> events[i].events, bufs[buf_id].status);
           exit(EXIT_FAILURE);
-	}
+        }
       }
     }
   }
 
-  return (void*) 1;
+  return (void * ) 1;
 }
 
 void epoll_main_loop(int listen_sock) {
@@ -550,7 +549,7 @@ void epoll_main_loop(int listen_sock) {
         new_buf = malloc(BUF_SIZE);
         new_reply_buf = malloc(BUF_SIZE);
         new_fwd_buf = malloc(BUF_SIZE);
-        
+
         if (storage_path)
           new_store_buf = (use_odirect ? aligned_alloc(blk_size, BUF_SIZE + blk_size) : malloc(BUF_SIZE));
 
