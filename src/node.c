@@ -92,7 +92,8 @@ int sock_find_addr(in_addr_t inaddr, int port) {
     }
   }
 
-  pthread_mutex_unlock(&socks_mtx);
+  eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx), (per_client_thread == 1));
+  
   return -1;
 }
 
@@ -119,10 +120,12 @@ void sigint_cleanup(int _) {
   (void)_; //to avoid unused var warnings
   node_running = 0;
 
-  //terminate workers by sending a notificaiton
+  //terminate workers by sending a notification
   //on their terminationfd
-  for (int i = 0; i < MAX_BUFFERS; i++) {
-    eventfd_write(thread_infos[i].terminationfd, 1);
+  if (per_client_thread) {
+    for (int i = 0; i < MAX_BUFFERS; i++) {
+      eventfd_write(thread_infos[i].terminationfd, 1);
+    }
   }
 }
 
@@ -132,6 +135,7 @@ void sigint_cleanup(int _) {
 int sock_add(in_addr_t inaddr, int port, int sock) {
   eventually_ignore_sys(pthread_mutex_lock(&socks_mtx), (per_client_thread == 1));
   int sock_id = sock_find_addr(inaddr, port);
+  
   if (sock_id != -1){
     eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx), (per_client_thread == 1));
     return sock_id;
@@ -546,7 +550,7 @@ void epoll_main_loop(int listen_sock) {
 
         int orig_sock_id = sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock);
         check(orig_sock_id != -1);
-
+        
         unsigned char * new_buf = 0;
         unsigned char * new_reply_buf = 0;
         unsigned char * new_fwd_buf = 0;
@@ -675,27 +679,29 @@ int main(int argc, char *argv[]) {
   for (int i = 0; i < MAX_SOCKETS; i++) {
     socks[i].sock = -1;
   }
- 
-  // Init worker threads
-  for (int i = 0; i < MAX_BUFFERS; i++) {
-    thread_infos[i].terminationfd = eventfd(0, 0);  
-    sys_check(thread_infos[i].epollfd = epoll_create1(0));
-    sys_check(pthread_create(&workers[i], NULL, epoll_worker_loop, (void*) &thread_infos[i]));
-  }
 
-  // Init bufs mutexs
-  for (int i = 0; i < MAX_BUFFERS; i++) {
-    sys_check(pthread_mutex_init(&bufs[i].mtx, NULL));
-  }
+  if (per_client_thread) {
+    // Init worker threads
+    for (int i = 0; i < MAX_BUFFERS; i++) {
+      thread_infos[i].terminationfd = eventfd(0, 0);  
+      sys_check(thread_infos[i].epollfd = epoll_create1(0));
+      sys_check(pthread_create(&workers[i], NULL, epoll_worker_loop, (void*) &thread_infos[i]));
+    }
 
-  // Init socks mutex
-  //TODO: change sock_add and sock_dell's logic to avoid lock re-entrancy
-  pthread_mutexattr_t attr;
+    // Init bufs mutexs
+  	for (int i = 0; i < MAX_BUFFERS; i++) {
+      sys_check(pthread_mutex_init(&bufs[i].mtx, NULL));
+    }
 
-  pthread_mutexattr_init(&attr);
-  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE); 
+    // Init socks mutex
+    //TODO: change sock_add and sock_dell's logic to avoid lock re-entrancy
+    pthread_mutexattr_t attr;
+
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE); 
   
-  sys_check(pthread_mutex_init(&socks_mtx, &attr));
+    sys_check(pthread_mutex_init(&socks_mtx, &attr));
+  }
 
   // Open storage file, if any
   if (storage_path) {
@@ -737,19 +743,20 @@ int main(int argc, char *argv[]) {
   epoll_main_loop(welcomeSocket);
 
   //Clean-ups
+  if (per_client_thread) {
+    //Join worker threads
+    for (int i = 0; i < MAX_BUFFERS; i++) {
+      sys_check(pthread_join(workers[i], NULL));
+      close(thread_infos[i].terminationfd);
+    }
 
-  //Join worker threads
-  for (int i = 0; i < MAX_BUFFERS; i++) {
-    sys_check(pthread_join(workers[i], NULL));
-    close(thread_infos[i].terminationfd);
+    // Destroy bufs mutexs
+    for (int i = 0; i < MAX_BUFFERS; i++) {
+      sys_check(pthread_mutex_destroy(&bufs[i].mtx));
+    }
+
+    sys_check(pthread_mutex_destroy(&socks_mtx));
   }
-
-  // Destroy bufs mutexs
-  for (int i = 0; i < MAX_BUFFERS; i++) {
-    sys_check(pthread_mutex_destroy(&bufs[i].mtx));
-  }
-
-  sys_check(pthread_mutex_destroy(&socks_mtx));
 
   //termination clean-ups
   if (storage_fd >= 0) {
