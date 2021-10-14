@@ -9,7 +9,7 @@ fi
 
 for i in $(seq 1 1 $1)
 do
-        ../src/client -l 10 -L 10000 &
+        ../src/client -n 10 -l 10 -L 10000 &
 done
 
 sleep 2
