@@ -77,6 +77,7 @@ int bind_port = 7891;
 int no_delay = 1;
 
 int use_odirect = 0;
+int per_client_thread = 0;
 
 int epollfd;
 
@@ -439,6 +440,26 @@ void setnonblocking(int fd) {
    assert(fcntl(fd, F_SETFL, flags) == 0);
 }
 
+
+void exec_request(int epollfd, struct epoll_event ev) {
+  int buf_id = ev.data.u32;
+  
+  if ((ev.events | EPOLLIN) && bufs[buf_id].status == RECEIVING) {
+    int ret = process_messages(bufs[buf_id].sock, buf_id);
+
+    if (!ret) {
+      close_and_forget(epollfd, bufs[buf_id].sock);
+    }
+  } else if ((ev.events | EPOLLOUT) && bufs[buf_id].status == SENDING)
+    send_messages(buf_id);
+  else if ((ev.events | EPOLLOUT) && bufs[buf_id].status == CONNECTING)
+    finalize_conn(buf_id);
+  else {
+    fprintf(stderr, "unexpected status: event=%d, %d\n", ev.events, bufs[buf_id].status);
+    exit(EXIT_FAILURE);
+  }
+}
+
 void * epoll_worker_loop(void * args) {
   thread_info * infos = (thread_info * ) args;
   struct epoll_event ev;
@@ -466,22 +487,7 @@ void * epoll_worker_loop(void * args) {
         worker_running = 0;
         break;
       } else {
-        int buf_id = infos -> events[i].data.u32;
-
-        if ((infos -> events[i].events | EPOLLIN) && bufs[buf_id].status == RECEIVING) {
-          int ret = process_messages(bufs[buf_id].sock, buf_id);
-
-          if (!ret) {
-            close_and_forget(infos -> epollfd, bufs[buf_id].sock);
-          }
-        } else if ((infos -> events[i].events | EPOLLOUT) && bufs[buf_id].status == SENDING)
-          send_messages(buf_id);
-        else if ((infos -> events[i].events | EPOLLOUT) && bufs[buf_id].status == CONNECTING)
-          finalize_conn(buf_id);
-        else {
-          fprintf(stderr, "unexpected status: event=%d, %d\n", infos -> events[i].events, bufs[buf_id].status);
-          exit(EXIT_FAILURE);
-        }
+        exec_request(infos -> epollfd, infos -> events[i]);
       }
     }
   }
@@ -592,9 +598,14 @@ void epoll_main_loop(int listen_sock) {
         // Use the data.u32 field to store the buf_id in bufs[]
         ev.data.u32 = buf_id;
 
-        //add client fd to the worker epoll
-        //(which, at this point, is already up and running)
-        sys_check(epoll_ctl(thread_infos[buf_id].epollfd, EPOLL_CTL_ADD, conn_sock, & ev));
+        //add client fd
+        if (per_client_thread){
+          //to the worker epoll
+          //(which, at this point, is already up and running)
+          sys_check(epoll_ctl(thread_infos[buf_id].epollfd, EPOLL_CTL_ADD, conn_sock, & ev));
+        } else { //to main thread
+          sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev));
+        }
 
         continue;
 
@@ -608,6 +619,8 @@ void epoll_main_loop(int listen_sock) {
           free(new_fwd_buf);
         if (storage_path && new_store_buf)
           free(new_store_buf);
+      } else { //NOTE: unused if --per-client-thread
+        exec_request(epollfd, events[i]);
       }
     }
   }
@@ -620,7 +633,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: node [-h|--help] [-b bindname] [-bp bindport] [-s|--storage path/to/storage/file] [--odirect]\n");
+      printf("Usage: node [-h|--help] [-b bindname] [-bp bindport] [-s|--storage path/to/storage/file] [--per-client-thread] [--odirect]\n");
       exit(0);
     } else if (strcmp(argv[0], "-b") == 0) {
       assert(argc >= 2);
@@ -637,6 +650,9 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(argv[0], "-s") == 0 || strcmp(argv[0], "--storage") == 0) {
       assert(argc >= 2);
       storage_path = argv[1];
+      argc--;  argv++;
+    } else if (strcmp(argv[0], "--per-client-thread") == 0) {
+      per_client_thread = 1;
       argc--;  argv++; 
     } else if (strcmp(argv[0], "--odirect") == 0) {
       use_odirect = 1;
