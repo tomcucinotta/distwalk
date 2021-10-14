@@ -9,3 +9,4 @@ src/node.o
 src/node_debug
 src/node_tsan
 src/test.data
+.vscode
