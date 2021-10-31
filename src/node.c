@@ -657,7 +657,6 @@ int main(int argc, char *argv[]) {
       argc--;  argv++;
     } else if (strcmp(argv[0], "--per-client-thread") == 0) {
       per_client_thread = 1;
-      argc--;  argv++; 
     } else if (strcmp(argv[0], "--odirect") == 0) {
       use_odirect = 1;
     } else {
