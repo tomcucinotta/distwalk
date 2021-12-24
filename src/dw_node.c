@@ -637,7 +637,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: node [-h|--help] [-b bindname] [-bp bindport] [-s|--storage path/to/storage/file] [--per-client-thread] [--odirect]\n");
+      printf("Usage: dw_node [-h|--help] [-b bindname] [-bp bindport] [-s|--storage path/to/storage/file] [--per-client-thread] [--odirect]\n");
       exit(0);
     } else if (strcmp(argv[0], "-b") == 0) {
       assert(argc >= 2);

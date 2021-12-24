@@ -382,7 +382,7 @@ int main(int argc, char *argv[]) {
   argc--;  argv++;
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-      printf("Usage: client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-ws|--wait-spin] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-ec|--exp-comp] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight w] [-Sw|--store-weight w] [-Lw|--load-weight w] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] [-nt|--num-threads threads] [-ns|--num-sessions] [-pso|--per-session-output]\n"
+      printf("Usage: dw_client [-h|--help] [-b bindname] [-bp bindport] [-sn servername] [-sb serverport] [-n num_pkts] [-c num_compute] [-s num_store] [-l num_load] [-p period(us)] [-r|--rate rate] [-ea|--exp-arrivals] [-ws|--wait-spin] [-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] [-rns|--ramp-num-steps n] [-rfn|--rate-file-name rates_file.dat] [-C|--comp-time comp_time(us)] [-ec|--exp-comp] [-S|--store-data n(bytes)] [-L|--load-data n(bytes)] [-Cw|--comp-weight w] [-Sw|--store-weight w] [-Lw|--load-weight w] [-ps req_size] [-eps|--exp-req-size] [-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] [-nt|--num-threads threads] [-ns|--num-sessions] [-pso|--per-session-output]\n"
              "\n"
              "Options:\n"
              "  -h|--help ....................... This help message\n"
