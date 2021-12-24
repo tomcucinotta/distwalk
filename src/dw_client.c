@@ -326,7 +326,7 @@ void *thread_receiver(void *data) {
     cw_log("Receiving %lu bytes (header)\n", sizeof(message_t));
     unsigned long read = safe_recv(clientSocket[thread_id], recv_buf, sizeof(message_t));
     if (read != sizeof(message_t)) {
-      printf("ERROR: read %lu bytes while expecting %lu! Forcing premature end of session!\n", read, sizeof(message_t));
+      printf("Error: read %lu bytes while expecting %lu! Forcing premature end of session!\n", read, sizeof(message_t));
       unsigned long skip_pkts = pkts_per_session - ((i + 1) % pkts_per_session);
       printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
       i += skip_pkts;
