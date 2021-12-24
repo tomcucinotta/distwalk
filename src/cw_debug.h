@@ -22,7 +22,7 @@
     int __rv = (call);		 \
     if (__rv < 0) {		 \
       perror("Error: " #call);	 \
-      exit(-1);			 \
+      exit(EXIT_FAILURE);	 \
     }				 \
   } while (0)
 
@@ -30,7 +30,7 @@
 #define check(cond) do {	 \
     if (!(cond)) {		 \
       fprintf(stderr, "Error: " #cond);		\
-      exit(-1);			 \
+      exit(EXIT_FAILURE);	 \
     }				 \
   } while (0)
 

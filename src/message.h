@@ -19,7 +19,7 @@ const char* get_command_name(command_type_t cmd) {
     case REPLY: return "REPLY";
     default: 
       printf("Unknown command type\n");
-      exit(-1);
+      exit(EXIT_FAILURE);
   }
 }
 
