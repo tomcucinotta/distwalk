@@ -232,7 +232,7 @@ void *thread_sender(void *data) {
       m->cmds[0].u.load_nbytes = load_nbytes;
     } else {
       printf("Unexpected branch (2)\n");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     if (exp_resp_size){
@@ -418,7 +418,7 @@ int main(int argc, char *argv[]) {
              "  Notes:\n"
              "    Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n"
       );
-      exit(0);
+      exit(EXIT_SUCCESS);
     } else if (strcmp(argv[0], "-sn") == 0) {
       assert(argc >= 2);
       hostname = argv[1];
@@ -534,7 +534,7 @@ int main(int argc, char *argv[]) {
       argc--;  argv++;
     } else {
       printf("Unrecognized option: %s\n", argv[0]);
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
     argc--;  argv++;
   }

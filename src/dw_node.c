@@ -375,7 +375,7 @@ int process_messages(int sock, int buf_id) {
         data = load(m->cmds[i].u.load_nbytes);
       } else {
 	cw_log("Unknown cmd: %d\n", m->cmds[0].cmd);
-	exit(-1);
+	exit(EXIT_FAILURE);
       }
     }
 
@@ -638,7 +638,7 @@ int main(int argc, char *argv[]) {
   while (argc > 0) {
     if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
       printf("Usage: dw_node [-h|--help] [-b bindname] [-bp bindport] [-s|--storage path/to/storage/file] [--per-client-thread] [--odirect]\n");
-      exit(0);
+      exit(EXIT_SUCCESS);
     } else if (strcmp(argv[0], "-b") == 0) {
       assert(argc >= 2);
       bind_name = argv[1];
@@ -661,7 +661,7 @@ int main(int argc, char *argv[]) {
       use_odirect = 1;
     } else {
       printf("Unrecognized option: %s\n", argv[0]);
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
     argc--;  argv++;
   }
