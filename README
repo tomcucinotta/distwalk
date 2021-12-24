@@ -37,8 +37,8 @@ root folder:
   make
 
 two executables are created:
-- src/client: the client program, try typing ./client -h
-- src/node: the server program, try typing ./server -h
+- src/dw_client: the client program, try typing ./client -h
+- src/dw_node: the server program, try typing ./server -h
 
 
 EXAMPLES OF USE
@@ -50,12 +50,12 @@ size, and expecting back responses of a different fixed size.
 This example scenario is achieved launching on the server the simple
 command:
 
-  [myuser@myserver distwalk/src]$ ./node
+  [myuser@myserver distwalk/src]$ ./dw_node
 
 then launching on the client the following command, with which we are
 submitting 10 packets at a rate of 1000 pkt/s
 
-  [myuser@myclient distwalk/src]$ ./src/client -n 10 -r 1000 -C 1000 -ps 512 -sn myserver
+  [myuser@myclient distwalk/src]$ ./src/dw_client -n 10 -r 1000 -C 1000 -ps 512 -sn myserver
 Configuration:
   bind=0.0.0.0:0
   hostname=127.0.0.1:7891
@@ -88,7 +88,7 @@ The following command spawns 4 threads submitting concurrently
 requests to the same server (each thread submits 5000 requests needing
 a 1ms of processing time each, at a rate of 250 pkt/s):
 
-  [myuser@myclient distwalk/src]$ ./client -nt 4 -c 5000 -r 250 -C 1000
+  [myuser@myclient distwalk/src]$ ./dw_client -nt 4 -c 5000 -r 250 -C 1000
 
 The following command spawns 3 threads, with each of them using 10
 sessions to submit the 5000 packets as in the above command, so each
@@ -96,4 +96,4 @@ session will send 500 requests at a rate of 250 pkt/s (at the end of
 each session, each client thread closes the connection and establishes
 a new connection for the subsequent session)
 
-  [myuser@myclient distwalk/src]$ ./client -nt 3 -ns 10 -c 5000 -r 250 -C 1000
+  [myuser@myclient distwalk/src]$ ./dw_client -nt 3 -ns 10 -c 5000 -r 250 -C 1000
