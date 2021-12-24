@@ -414,29 +414,6 @@ void finalize_conn(int buf_id) {
   printf("finalize_conn()\n");
 }
 
-void *receive_thread(void *data) {
-  int sock = (int)(long) data;
-  unsigned char buf[1024];
-
-  while (1) {
-    size_t msg_size = recv_message(sock, buf, sizeof(buf));
-    if (msg_size == 0) {
-      cw_log("Connection closed by remote end\n");
-      break;
-    }
-    message_t *m = (message_t *) buf;
-    cw_log("Received %lu bytes, req_id=%u, req_size=%u, num=%d\n", msg_size, m->req_id, m->req_size, m->num);
-    if (m->num >= 1) {
-      if (m->cmds[0].cmd == COMPUTE) {
-	compute_for(m->cmds[0].u.comp_time_us);
-      }
-    }
-    safe_send(sock, buf, sizeof(message_t));
-  }
-  sys_check(close_and_forget(epollfd, sock));
-  return 0;
-}
-
 void setnonblocking(int fd) {
    int flags = fcntl(fd, F_GETFL, 0);
    assert(flags >= 0);
