@@ -349,6 +349,7 @@ void *thread_receiver(void *data) {
 
       cw_log("Connecting (i=%d) ...\n", i);
       sys_check(connect(clientSocket[thread_id], (struct sockaddr *) &serveraddr, addr_size));
+
       /* spawn sender once connection is established */
       thread_data_t thr_data = {
         .thread_id = thread_id,
@@ -401,8 +402,15 @@ void *thread_receiver(void *data) {
         int sess_id = i / pkts_per_session;
         for (int j = 0; j < pkts_per_session; j++) {
           int pkt_id = first_sess_pkt + j;
-          printf("t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n", usecs_send[thread_id][idx(pkt_id)], usecs_elapsed[thread_id][idx(pkt_id)], pkt_id, thread_id, sess_id);
+          // if we abruptly terminated the session, the send timestamp of packets never sent will stay at 0
+          if (usecs_send[thread_id][idx(pkt_id)] != 0)
+            printf("t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n",
+                   usecs_send[thread_id][idx(pkt_id)], usecs_elapsed[thread_id][idx(pkt_id)],
+                   pkt_id, thread_id, sess_id);
         }
+        // make sure we reset the send timestamp and elapsed array to zeros for the next session
+        bzero(&usecs_send[thread_id][0], sizeof(usecs_send[thread_id]));
+        bzero(&usecs_elapsed[thread_id][0], sizeof(usecs_elapsed[thread_id]));
       }
       cw_log("Joining sender thread\n");
       pthread_join(sender[thread_id], NULL);
