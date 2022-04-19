@@ -91,6 +91,23 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   return read_tot;
 }
 
+// return len, or -1 if an error occurred on read()
+size_t recv_all(int sock, unsigned char *buf, size_t len) {
+  size_t read_tot = 0;
+  while (len > 0) {
+    int read;
+    read = recv(sock, buf, len, 0);
+    if (read < 0)
+      return -1;
+    else if (read == 0)
+      return read_tot;
+    buf += read;
+    len -= read;
+    read_tot += read;
+  }
+  return read_tot;
+}
+
 //Weighted probabilities of executing a COMPUTE/STORE/LOAD request
 //(Used for randomly patterned messages)
 int sum_w = 0;
@@ -268,7 +285,8 @@ void *thread_sender(void *data) {
 	                                                                   return_bytes);
     assert(m->req_size <= BUF_SIZE);
     if (!send_all(clientSocket[thread_id], send_buf, m->req_size)) {
-      // TODO: re-establish connection for session?
+      fprintf(stderr, "Forcing premature termination of sender thread while attempting to send pkt %d\n", pkt_id);
+      break;
     }
 
     unsigned long period_us = curr_period_us();
@@ -343,7 +361,7 @@ void *thread_receiver(void *data) {
     /*---- Read the message from the server into the buffer ----*/
     // TODO: support receive of variable reply-size requests
     cw_log("Receiving %lu bytes (header)\n", sizeof(message_t));
-    unsigned long read = safe_recv(clientSocket[thread_id], recv_buf, sizeof(message_t));
+    unsigned long read = recv_all(clientSocket[thread_id], recv_buf, sizeof(message_t));
     if (read != sizeof(message_t)) {
       printf("Error: read %lu bytes while expecting %lu! Forcing premature end of session!\n", read, sizeof(message_t));
       unsigned long skip_pkts = pkts_per_session - ((i + 1) % pkts_per_session);
@@ -358,7 +376,14 @@ void *thread_receiver(void *data) {
     cw_log("Expecting further %lu bytes (total pkt_size %u bytes)\n",
 	   m->req_size - read, m->req_size);
     assert(m->req_size >= sizeof(message_t));
-    safe_recv(clientSocket[thread_id], recv_buf + read, m->req_size - read);
+    unsigned long read2 = recv_all(clientSocket[thread_id], recv_buf + read, m->req_size - read);
+    if (read2 != m->req_size - read) {
+      printf("Error: read %lu bytes while expecting %lu! Forcing premature end of session!\n", read2, m->req_size - read);
+      unsigned long skip_pkts = pkts_per_session - ((i + 1) % pkts_per_session);
+      printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
+      i += skip_pkts;
+      goto skip;
+    }
 
     struct timespec ts_now;
     clock_gettime(clk_id, &ts_now);
