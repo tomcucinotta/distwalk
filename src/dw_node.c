@@ -188,6 +188,21 @@ void safe_send(int sock, unsigned char *buf, size_t len) {
   }
 }
 
+// returns 1 if all bytes sent correctly, 0 if errors occurred
+int send_all(int sock, unsigned char *buf, size_t len) {
+  while (len > 0) {
+    int sent;
+    sent = send(sock, buf, len, 0);
+    if (sent < 0) {
+      fprintf(stderr, "send() failed: %s\n", strerror(errno));
+      return 0;
+    }
+    buf += sent;
+    len -= sent;
+  }
+  return 1;
+}
+
 void safe_write(int fd, unsigned char *buf, size_t len) {
   while (len > 0) {
     int sent;
@@ -211,6 +226,22 @@ size_t safe_recv(int sock, unsigned char *buf, size_t len) {
   return read_tot;
 }
 
+size_t recv_all(int sock, unsigned char *buf, size_t len) {
+  size_t read_tot = 0;
+  while (len > 0) {
+    int read;
+    read = recv(sock, buf, len, 0);
+    if (read < 0)
+      return -1;
+    else if (read == 0)
+      return read_tot;
+    buf += read;
+    len -= read;
+    read_tot += read;
+  }
+  return read_tot;
+}
+
 // Copy m header into m_dst, skipping the first cmd_id elems in m_dst->cmds[]
 void copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
   // copy message header
@@ -225,7 +256,9 @@ void copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
 // cmd_id is the index of the FORWARD item within m->cmds[] here, we
 // remove the first (cmd_id+1) commands from cmds[], and forward the
 // rest to the next hop
-void forward(int buf_id, message_t *m, int cmd_id) {
+//
+// returns 1 if forward message sent correctly, 0 otherwise
+int forward(int buf_id, message_t *m, int cmd_id) {
   int sock = sock_find_addr(m->cmds[cmd_id].u.fwd.fwd_host, m->cmds[cmd_id].u.fwd.fwd_port);
   assert(sock != -1);
   message_t *m_dst = (message_t *) bufs[buf_id].fwd_buf;
@@ -234,13 +267,14 @@ void forward(int buf_id, message_t *m, int cmd_id) {
   cw_log("Forwarding req %u to %s:%d\n", m->req_id,
 	 inet_ntoa((struct in_addr) { m->cmds[cmd_id].u.fwd.fwd_host }),
 	 m->cmds[cmd_id].u.fwd.fwd_port);
-  cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num, m_dst->req_size);
+  cw_log("  f: cmds[] has %d items, pkt_size is %u\n", m_dst->num, m_dst->req_size);
   // TODO: return to epoll loop to handle sending of long packets
   // (here I'm blocking the thread)
-  safe_send(sock, bufs[buf_id].fwd_buf, m_dst->req_size);
+  return send_all(sock, bufs[buf_id].fwd_buf, m_dst->req_size);
 }
 
-void reply(int sock, int buf_id, message_t *m, int cmd_id) {
+// returns 1 if reply sent correctly, 0 otherwise
+int reply(int sock, int buf_id, message_t *m, int cmd_id) {
   message_t *m_dst = (message_t *) bufs[buf_id].reply_buf;
 
   copy_tail(m, m_dst, cmd_id + 1);
@@ -249,17 +283,22 @@ void reply(int sock, int buf_id, message_t *m, int cmd_id) {
   cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num, m_dst->req_size);
   // TODO: return to epoll loop to handle sending of long packets
   // (here I'm blocking the thread)
-  safe_send(sock, bufs[buf_id].reply_buf, m_dst->req_size);
+  return send_all(sock, bufs[buf_id].reply_buf, m_dst->req_size);
 }
 
 size_t recv_message(int sock, unsigned char *buf, size_t len) {
   assert(len >= 8);
-  size_t read = safe_recv(sock, buf, 8);
-  if (read == 0)
+  size_t read = recv_all(sock, buf, 8);
+  if (read < 0)
+    return -1;
+  else if (read == 0)
     return read;
   message_t *m = (message_t *) buf;
   assert(len >= m->req_size - 8);
-  assert(safe_recv(sock, buf + 8, m->req_size - 8) == m->req_size - 8);
+  read = recv_all(sock, buf + 8, m->req_size - 8);
+  if (read < 0)
+    return -1;
+  assert(read == m->req_size - 8);
   return m->req_size;
 }
 
@@ -300,7 +339,7 @@ ssize_t load(size_t bytes) {
 int close_and_forget(int epollfd, int sock) {
   cw_log("removing sock=%d from epollfd\n", sock);
   if (epoll_ctl(epollfd, EPOLL_CTL_DEL, sock, NULL) == -1) {
-    perror("epoll_ctl: deleting socket");
+    perror("epoll_ctl() failed while deleting socket");
     exit(EXIT_FAILURE);
   }
   cw_log("removing sock=%d from socks[]\n", sock);
@@ -366,7 +405,10 @@ int process_messages(int sock, int buf_id) {
           m->cmds[i].u.fwd.pkt_size += data;
 	  data = -1;
 	}
-	reply(sock, buf_id, m, i);
+	if (!reply(sock, buf_id, m, i)) {
+          fprintf(stderr, "reply() failed\n");
+          close_and_forget(epollfd, bufs[buf_id].sock);
+        }
 	// any further cmds[] for replied-to hop, not me
 	break;
       } else if (m->cmds[i].cmd == STORE && storage_path) {
@@ -374,7 +416,7 @@ int process_messages(int sock, int buf_id) {
       } else if (m->cmds[i].cmd == LOAD && storage_path) {
         data = load(m->cmds[i].u.load_nbytes);
       } else {
-	cw_log("Unknown cmd: %d\n", m->cmds[0].cmd);
+	cw_log("Error: Unknown cmd: %d\n", m->cmds[0].cmd);
 	exit(EXIT_FAILURE);
       }
     }
@@ -459,6 +501,7 @@ void * epoll_worker_loop(void * args) {
       if (errno == EINTR) {
         worker_running = 0;
       } else {
+        fprintf(stderr, "Error: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
       }
     }
@@ -504,6 +547,7 @@ void epoll_main_loop(int listen_sock) {
       if (errno == EINTR) {
         node_running = 0;
       } else {
+        perror("epoll_wait() failed: ");
         exit(EXIT_FAILURE);
       }
     }
@@ -516,7 +560,7 @@ void epoll_main_loop(int listen_sock) {
           (struct sockaddr * ) & addr, & addr_size);
 
         if (conn_sock == -1) {
-          perror("accept");
+          perror("accept() failed: ");
           exit(EXIT_FAILURE);
         }
 
@@ -554,7 +598,7 @@ void epoll_main_loop(int listen_sock) {
           eventually_ignore_sys(pthread_mutex_unlock(&bufs[buf_id].mtx), (per_client_thread == 1));
         }
         if (buf_id == MAX_BUFFERS) {
-          fprintf(stderr, "Not enough buffers for new connection, closing!\n");
+          fprintf(stderr, "Error: Not enough buffers for new connection, closing!\n");
           close_and_forget(epollfd, conn_sock);
           goto continue_free;
         }
@@ -637,7 +681,7 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(argv[0], "--odirect") == 0) {
       use_odirect = 1;
     } else {
-      printf("Unrecognized option: %s\n", argv[0]);
+      fprintf(stderr, "Error: Unrecognized option: %s\n", argv[0]);
       exit(EXIT_FAILURE);
     }
     argc--;  argv++;
