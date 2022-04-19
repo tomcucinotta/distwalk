@@ -15,6 +15,8 @@
 #include <pthread.h>
 #include <netdb.h>
 
+#include <errno.h>
+
 #include "message.h"
 #include "timespec.h"
 
@@ -57,6 +59,21 @@ void safe_send(int sock, unsigned char *buf, size_t len) {
     buf += sent;
     len -= sent;
   }
+}
+
+// returns 1 if all bytes sent correctly, 0 if errors occurred
+int send_all(int sock, unsigned char *buf, size_t len) {
+  while (len > 0) {
+    int sent;
+    sent = send(sock, buf, len, 0);
+    if (sent < 0) {
+      fprintf(stderr, "send() failed: %s\n", strerror(errno));
+      return 0;
+    }
+    buf += sent;
+    len -= sent;
+  }
+  return 1;
 }
 
 size_t safe_recv(int sock, unsigned char *buf, size_t len) {
@@ -250,7 +267,9 @@ void *thread_sender(void *data) {
     cw_log("%s: sending %u bytes (will expect %u bytes in response)...\n", get_command_name(next_cmd), m->req_size,
 	                                                                   return_bytes);
     assert(m->req_size <= BUF_SIZE);
-    safe_send(clientSocket[thread_id], send_buf, m->req_size);
+    if (!send_all(clientSocket[thread_id], send_buf, m->req_size)) {
+      // TODO: re-establish connection for session?
+    }
 
     unsigned long period_us = curr_period_us();
     unsigned long period_ns;
