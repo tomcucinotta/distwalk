@@ -10,4 +10,15 @@ src/dw_node_debug
 src/dw_node_debug.o
 src/dw_node_tsan
 src/test.data
+
+src/dw_client
+src/dw_client.o
+src/dw_client_debug
+src/dw_client_debug.o
+src/dw_node
+src/dw_node.o
+src/dw_node_debug
+src/dw_node_debug.o
+src/dw_node_tsan
+
 .vscode
