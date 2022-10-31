@@ -25,12 +25,10 @@ int server_port = 7891;
 int bind_port = 0;
 
 unsigned int n_store = 0;  // Number of STORE requests
-unsigned long store_nbytes =
-    10;  // Number of bytes to be written to the server's storage
+unsigned long store_nbytes = 10;  // Number of bytes to be written to the server's storage
 
 unsigned int n_load = 0;  // Number of LOAD requests
-unsigned long load_nbytes =
-    10;  // Number of bytes to be read from the server's storage
+unsigned long load_nbytes = 10;  // Number of bytes to be read from the server's storage
 
 unsigned int n_compute = 0;        // Number of COMPUTE requests
 unsigned long comptimes_us = 100;  // defaults to 100us
