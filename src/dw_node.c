@@ -428,10 +428,22 @@ int process_messages(int sock, int buf_id) {
                 }
                 // any further cmds[] for replied-to hop, not me
                 break;
-            } else if (m->cmds[i].cmd == STORE && storage_path) {
-                store(buf_id, m->cmds[i].u.store_nbytes);
-            } else if (m->cmds[i].cmd == LOAD && storage_path) {
-                data = load(m->cmds[i].u.load_nbytes);
+            } else if (m->cmds[i].cmd == STORE) {
+                if (!storage_path) {
+                    cw_log("Error: Cannot execute STORE cmd because no storage path has been defined\n");
+                    close_and_forget(epollfd, sock);
+                    exit(EXIT_FAILURE);
+                } else {
+                    store(buf_id, m->cmds[i].u.store_nbytes);
+                }
+            } else if (m->cmds[i].cmd == LOAD) {
+                if (!storage_path) {
+                    cw_log("Error: Cannot execute LOAD cmd because no storage path has been defined\n");
+                    close_and_forget(epollfd, sock);
+                    exit(EXIT_FAILURE);
+                } else {
+                    data = load(m->cmds[i].u.load_nbytes);
+                }
             } else {
                 cw_log("Error: Unknown cmd: %d\n", m->cmds[0].cmd);
                 exit(EXIT_FAILURE);
