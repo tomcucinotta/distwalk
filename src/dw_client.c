@@ -240,8 +240,15 @@ void *thread_sender(void *data) {
             } else if (n_load > 0) {
                 n_load--;
                 next_cmd = LOAD;
-            } else {  // COMPUTE by default
+            } else if (comptimes_us > 0) {
                 next_cmd = COMPUTE;
+            } else if (store_nbytes > 0) {
+                next_cmd = STORE;
+            } else if (load_nbytes > 0) {
+                next_cmd = LOAD;
+            } else {
+                fprintf(stderr, "Unspecified operation!\n");
+                exit(EXIT_FAILURE);
             }
         }
 
