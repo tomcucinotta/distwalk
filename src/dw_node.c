@@ -332,7 +332,7 @@ ssize_t store(int buf_id, size_t bytes) {
     cw_log("STORE: storing %lu bytes\n", bytes);
 
     safe_write(storage_fd, bufs[buf_id].store_buf, bytes);
-    fsync(storage_fd);
+    sys_check(fsync(storage_fd));
 
     return bytes;
 }
