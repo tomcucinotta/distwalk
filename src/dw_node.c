@@ -116,6 +116,8 @@ int sock_find_sock(int sock) {
 
 char *storage_path = NULL;
 int storage_fd = -1;
+size_t max_storage_size = -1;
+size_t total_written = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
 
 void sigint_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
@@ -331,7 +333,13 @@ ssize_t store(int buf_id, size_t bytes) {
     if (use_odirect) bytes = (bytes + blk_size - 1) / blk_size * blk_size;
     cw_log("STORE: storing %lu bytes\n", bytes);
 
-    safe_write(storage_fd, bufs[buf_id].store_buf, bytes);
+    //write, otherwise over-write
+    if (total_written < max_storage_size) {
+        safe_write(storage_fd, bufs[buf_id].store_buf, bytes);
+    } else {
+        sys_check(bytes = pread(storage_fd, bufs[buf_id].store_buf, bytes, 0));
+    }
+
     sys_check(fsync(storage_fd));
 
     return bytes;
@@ -435,6 +443,7 @@ int process_messages(int sock, int buf_id) {
                     exit(EXIT_FAILURE);
                 } else {
                     store(buf_id, m->cmds[i].u.store_nbytes);
+                    total_written += m->cmds[i].u.store_nbytes;
                 }
             } else if (m->cmds[i].cmd == LOAD) {
                 if (!storage_path) {
@@ -701,6 +710,7 @@ int main(int argc, char *argv[]) {
             printf(
                 "Usage: dw_node [-h|--help] [-b bindname] [-bp bindport] "
                 "[-s|--storage path/to/storage/file] [--per-client-thread] "
+                "[-m|--max-storage-size bytes"
                 "[--odirect]\n");
             exit(EXIT_SUCCESS);
         } else if (strcmp(argv[0], "-b") == 0) {
@@ -723,6 +733,12 @@ int main(int argc, char *argv[]) {
                    strcmp(argv[0], "--storage") == 0) {
             assert(argc >= 2);
             storage_path = argv[1];
+            argc--;
+            argv++;
+        } else if (strcmp(argv[0], "-m") == 0 ||
+                   strcmp(argv[0], "--max-storage-size") == 0) {
+            assert(argc >= 2);
+            max_storage_size = atoi(argv[1]);
             argc--;
             argv++;
         } else if (strcmp(argv[0], "--per-client-thread") == 0) {
