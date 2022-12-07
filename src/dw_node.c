@@ -116,7 +116,7 @@ int sock_find_sock(int sock) {
 
 char *storage_path = NULL;
 int storage_fd = -1;
-size_t max_storage_size = -1;
+size_t max_storage_size = SIZE_MAX;
 size_t total_written = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
 
 void sigint_cleanup(int _) {
