@@ -117,7 +117,7 @@ int sock_find_sock(int sock) {
 char *storage_path = NULL;
 int storage_fd = -1;
 size_t max_storage_size = SIZE_MAX;
-size_t total_written = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
+size_t storage_offset = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
 
 void sigint_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
@@ -225,6 +225,15 @@ void safe_write(int fd, unsigned char *buf, size_t len) {
     }
 }
 
+void safe_read(int fd, unsigned char *buf, size_t len) {
+    while (len > 0) {
+        int received;
+        sys_check(received = read(fd, buf, len));
+        buf += received;
+        len -= received;
+    }
+}
+
 size_t safe_recv(int sock, unsigned char *buf, size_t len) {
     size_t read_tot = 0;
     while (len > 0) {
@@ -328,32 +337,34 @@ void compute_for(unsigned long usecs) {
 
 unsigned long blk_size = 0;
 
-ssize_t store(int buf_id, size_t bytes) {
+void store(int buf_id, size_t bytes) {
     // generate the data to be stored
     if (use_odirect) bytes = (bytes + blk_size - 1) / blk_size * blk_size;
     cw_log("STORE: storing %lu bytes\n", bytes);
 
     //write, otherwise over-write
-    if (total_written + bytes > max_storage_size) {
+    if (storage_offset + bytes > max_storage_size) {
         lseek(storage_fd, 0, SEEK_SET);
-        total_written = 0;
+        storage_offset = 0;
     }
     safe_write(storage_fd, bufs[buf_id].store_buf, bytes);
+    storage_offset += bytes;
 
     sys_check(fsync(storage_fd));
-
-    return bytes;
 }
 
-ssize_t load(size_t bytes) {
-    char *tmp = (char *)malloc(bytes + 1);
-    ssize_t read;
+void load(size_t bytes) {
+    unsigned char *tmp = (unsigned char *)malloc(bytes + 1);
     cw_log("LOAD: loading %lu bytes\n", bytes);
 
-    sys_check(read = pread(storage_fd, tmp, bytes, 0));
+    if (storage_offset + bytes > max_storage_size) {
+        lseek(storage_fd, 0, SEEK_SET);
+        storage_offset = 0;
+    }
+    safe_read(storage_fd, tmp, bytes);
+    storage_offset += bytes;
 
     free(tmp);
-    return read;
 }
 
 int close_and_forget(int epollfd, int sock) {
@@ -443,7 +454,6 @@ int process_messages(int sock, int buf_id) {
                     exit(EXIT_FAILURE);
                 } else {
                     store(buf_id, m->cmds[i].u.store_nbytes);
-                    total_written += m->cmds[i].u.store_nbytes;
                 }
             } else if (m->cmds[i].cmd == LOAD) {
                 if (!storage_path) {
@@ -451,7 +461,7 @@ int process_messages(int sock, int buf_id) {
                     close_and_forget(epollfd, sock);
                     exit(EXIT_FAILURE);
                 } else {
-                    data = load(m->cmds[i].u.load_nbytes);
+                    load(m->cmds[i].u.load_nbytes);
                 }
             } else {
                 cw_log("Error: Unknown cmd: %d\n", m->cmds[0].cmd);
