@@ -353,18 +353,15 @@ void store(int buf_id, size_t bytes) {
     sys_check(fsync(storage_fd));
 }
 
-void load(size_t bytes) {
-    unsigned char *tmp = (unsigned char *)malloc(bytes + 1);
+void load(int buf_id, size_t bytes) {
     cw_log("LOAD: loading %lu bytes\n", bytes);
 
     if (storage_offset + bytes > max_storage_size) {
         lseek(storage_fd, 0, SEEK_SET);
         storage_offset = 0;
     }
-    safe_read(storage_fd, tmp, bytes);
+    safe_read(storage_fd, bufs[buf_id].store_buf, bytes);
     storage_offset += bytes;
-
-    free(tmp);
 }
 
 int close_and_forget(int epollfd, int sock) {
@@ -461,7 +458,7 @@ int process_messages(int sock, int buf_id) {
                     close_and_forget(epollfd, sock);
                     exit(EXIT_FAILURE);
                 } else {
-                    load(m->cmds[i].u.load_nbytes);
+                    load(buf_id, m->cmds[i].u.load_nbytes);
                 }
             } else {
                 cw_log("Error: Unknown cmd: %d\n", m->cmds[0].cmd);
