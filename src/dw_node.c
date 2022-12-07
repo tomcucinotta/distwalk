@@ -334,11 +334,11 @@ ssize_t store(int buf_id, size_t bytes) {
     cw_log("STORE: storing %lu bytes\n", bytes);
 
     //write, otherwise over-write
-    if (total_written < max_storage_size) {
-        safe_write(storage_fd, bufs[buf_id].store_buf, bytes);
-    } else {
-        sys_check(bytes = pread(storage_fd, bufs[buf_id].store_buf, bytes, 0));
+    if (total_written + bytes > max_storage_size) {
+        lseek(storage_fd, 0, SEEK_SET);
+        total_written = 0;
     }
+    safe_write(storage_fd, bufs[buf_id].store_buf, bytes);
 
     sys_check(fsync(storage_fd));
 
