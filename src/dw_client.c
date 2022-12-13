@@ -156,7 +156,7 @@ long usecs_elapsed[MAX_THREADS][MAX_PKTS];
 struct timespec ts_start;
 unsigned int rate = 1000;  // pkt/s rate (period is its inverse)
 
-unsigned long num_pkts = MAX_PKTS;
+unsigned long num_pkts = -1;
 
 unsigned int rates[MAX_RATES];
 unsigned int ramp_step_secs = 0;   // if non-zero, supersedes num_pkts
@@ -729,11 +729,31 @@ int main(int argc, char *argv[]) {
     }
 
     // check input args consistency
-    if (num_pkts == 0) {  //-n option has not been used
-        num_pkts = n_compute + n_store + n_load;
+    if (num_pkts == -1) {  //-n option has not been used
+        if (n_compute > 0 || n_store > 0 || n_load > 0) {
+            num_pkts = n_compute + n_store + n_load;
+        } else {
+            if (comptimes_us > 0)
+                num_pkts = n_compute = MAX_PKTS;
+            else if (store_nbytes > 0)
+                num_pkts = n_store = MAX_PKTS;
+            else if (load_nbytes > 0)
+                num_pkts = n_load = MAX_PKTS;
+            else
+                num_pkts = n_compute = MAX_PKTS;
+        }
     } else {
         if (n_compute > 0 || n_store > 0 || n_load > 0) {
             assert(num_pkts == n_compute + n_store + n_load);
+        } else {
+            if (comptimes_us > 0)
+                n_compute = num_pkts;
+            else if (store_nbytes > 0)
+                n_store = num_pkts;
+            else if (load_nbytes > 0)
+                n_load = num_pkts;
+            else
+                n_compute = num_pkts;
         }
     }
 
