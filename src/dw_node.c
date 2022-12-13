@@ -192,15 +192,6 @@ int sock_del(int sock) {
     return id;
 }
 
-void safe_send(int sock, unsigned char *buf, size_t len) {
-    while (len > 0) {
-        int sent;
-        sys_check(sent = send(sock, buf, len, 0));
-        buf += sent;
-        len -= sent;
-    }
-}
-
 // returns 1 if all bytes sent correctly, 0 if errors occurred
 int send_all(int sock, unsigned char *buf, size_t len) {
     while (len > 0) {
