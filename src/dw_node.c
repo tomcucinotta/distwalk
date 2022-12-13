@@ -207,7 +207,7 @@ int send_all(int sock, unsigned char *buf, size_t len) {
         int sent;
         sent = send(sock, buf, len, 0);
         if (sent < 0) {
-            fprintf(stderr, "send() failed: %s\n", strerror(errno));
+            perror("send() failed");
             return 0;
         }
         buf += sent;
@@ -219,7 +219,10 @@ int send_all(int sock, unsigned char *buf, size_t len) {
 void safe_write(int fd, unsigned char *buf, size_t len) {
     while (len > 0) {
         int sent;
-        sys_check(sent = write(fd, buf, len));
+        if ((sent = write(fd, buf, len)) < 0) {
+            perror("write() failed");
+            return;
+        }
         buf += sent;
         len -= sent;
     }
@@ -460,7 +463,7 @@ int process_messages(int sock, int buf_id) {
                 }
             } else {
                 cw_log("Error: Unknown cmd: %d\n", m->cmds[0].cmd);
-                exit(EXIT_FAILURE);
+                close_and_forget(epollfd, sock);
             }
         }
 
