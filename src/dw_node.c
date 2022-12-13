@@ -228,19 +228,6 @@ void safe_read(int fd, unsigned char *buf, size_t len) {
     }
 }
 
-size_t safe_recv(int sock, unsigned char *buf, size_t len) {
-    size_t read_tot = 0;
-    while (len > 0) {
-        int read;
-        sys_check(read = recv(sock, buf, len, 0));
-        if (read == 0) return read_tot;
-        buf += read;
-        len -= read;
-        read_tot += read;
-    }
-    return read_tot;
-}
-
 // return len, or -1 if an error occurred on read()
 size_t recv_all(int sock, unsigned char *buf, size_t len) {
     size_t read_tot = 0;
