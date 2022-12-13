@@ -478,7 +478,7 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
             printf(
                 "Usage: dw_client [-h|--help] [-b bindname] [-bp bindport] "
-                "[-sn servername] [-sb serverport] [-n num_pkts] [-c "
+                "[-sn servername] [-sp serverport] [-n num_pkts] [-c "
                 "num_compute] [-s num_store] [-l num_load] [-p period(us)] "
                 "[-r|--rate rate] [-ea|--exp-arrivals] [-ws|--wait-spin] "
                 "[-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] "
@@ -498,6 +498,7 @@ int main(int argc, char *argv[]) {
                 "  -bp ............................. Client-side bind port\n"
                 "  -sn ............................. Server name or IP "
                 "(defaults to 127.0.0.1)\n"
+                "  -sp ............................. Server port (defaults to 7891)\n"
                 "  -n num_pkts ..................... Set number of packets "
                 "sent by each thread (across all sessions)\n"
                 "  -c num_compute .................. Set number of compute "
