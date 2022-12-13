@@ -364,15 +364,13 @@ void load(int buf_id, size_t bytes) {
     storage_offset += bytes;
 }
 
-int close_and_forget(int epollfd, int sock) {
+void close_and_forget(int epollfd, int sock) {
     cw_log("removing sock=%d from epollfd\n", sock);
-    if (epoll_ctl(epollfd, EPOLL_CTL_DEL, sock, NULL) == -1) {
+    if (epoll_ctl(epollfd, EPOLL_CTL_DEL, sock, NULL) == -1)
         perror("epoll_ctl() failed while deleting socket");
-        exit(EXIT_FAILURE);
-    }
     cw_log("removing sock=%d from socks[]\n", sock);
     sock_del(sock);
-    return close(sock);
+    close(sock);
 }
 
 int process_messages(int sock, int buf_id) {
