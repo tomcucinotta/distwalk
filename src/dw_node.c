@@ -196,7 +196,7 @@ int sock_del(int sock) {
 int send_all(int sock, unsigned char *buf, size_t len) {
     while (len > 0) {
         int sent;
-        sent = send(sock, buf, len, 0);
+        sent = send(sock, buf, len, MSG_NOSIGNAL);
         if (sent < 0) {
             perror("send() failed");
             return 0;
@@ -222,7 +222,10 @@ void safe_write(int fd, unsigned char *buf, size_t len) {
 void safe_read(int fd, unsigned char *buf, size_t len) {
     while (len > 0) {
         int received;
-        sys_check(received = read(fd, buf, len));
+        if ((received = read(fd, buf, len)) < 0) {
+            perror("read() failed");
+            return;
+        }
         buf += received;
         len -= received;
     }
@@ -331,7 +334,7 @@ void store(int buf_id, size_t bytes) {
     safe_write(storage_fd, bufs[buf_id].store_buf, bytes);
     storage_offset += bytes;
 
-    sys_check(fsync(storage_fd));
+    fsync(storage_fd);
 }
 
 void load(int buf_id, size_t bytes) {
@@ -514,8 +517,8 @@ void *epoll_worker_loop(void *args) {
     // Add terminationfd
     ev.events = EPOLLIN;
     ev.data.fd = infos->terminationfd;
-    sys_check(
-        epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev));
+    if (epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
+        perror("epoll_ctl() failed");
 
     while (worker_running) {
         int nfds = epoll_wait(infos->epollfd, infos->events, MAX_EVENTS, -1);
@@ -663,11 +666,11 @@ void epoll_main_loop(int listen_sock) {
                 if (per_client_thread) {
                     // to the worker epoll
                     //(which, at this point, is already up and running)
-                    sys_check(epoll_ctl(thread_infos[buf_id].epollfd,
-                                        EPOLL_CTL_ADD, conn_sock, &ev));
+                    if (epoll_ctl(thread_infos[buf_id].epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
+                        perror("epoll_ctl() failed");
                 } else {  // to main thread
-                    sys_check(
-                        epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev));
+                    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
+                        perror("epoll_ctl() failed");
                 }
 
                 continue;
