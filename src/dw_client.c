@@ -92,9 +92,10 @@ size_t recv_all(int sock, unsigned char *buf, size_t len) {
     while (len > 0) {
         int read;
         read = recv(sock, buf, len, 0);
-        if (read < 0)
+        if (read < 0) {
+            perror("recv() failed: ");
             return -1;
-        else if (read == 0)
+        } else if (read == 0)
             return read_tot;
         buf += read;
         len -= read;
