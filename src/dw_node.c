@@ -699,7 +699,7 @@ int main(int argc, char *argv[]) {
             printf(
                 "Usage: dw_node [-h|--help] [-b bindname] [-bp bindport] "
                 "[-s|--storage path/to/storage/file] [--per-client-thread] "
-                "[-m|--max-storage-size bytes"
+                "[-m|--max-storage-size bytes] "
                 "[--odirect]\n");
             exit(EXIT_SUCCESS);
         } else if (strcmp(argv[0], "-b") == 0) {
