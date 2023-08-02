@@ -1,3 +1,5 @@
+dw_client
+dw_node
 src/dw_client
 src/dw_client.o
 src/dw_client_debug
