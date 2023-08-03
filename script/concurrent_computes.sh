@@ -5,11 +5,11 @@ if [ "$1" = "" ]; then
     exit -1
 fi
 
-../src/node &
+../src/dw_node &
 
 for i in $(seq 1 1 $1)
 do
-	../src/client -n 10 -c 10 &
+	../src/dw_client -n 10 -c 10 &
 done
 
 sleep 2
