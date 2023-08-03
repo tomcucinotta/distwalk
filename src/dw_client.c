@@ -21,8 +21,6 @@
 
 int exp_arrivals = 0;
 int wait_spinning = 0;
-int server_port = 7891;
-int bind_port = 0;
 
 unsigned int n_store = 0;  // Number of STORE requests
 unsigned long store_nbytes = 10;  // Number of bytes to be written to the server's storage
@@ -109,6 +107,52 @@ size_t recv_all(int sock, unsigned char *buf, size_t len) {
 int sum_w = 0;
 int weights[3] = {0, 0, 0};  // 0 compute, 1 store, 2 load
 
+
+//TODO: dw_client connects even if ip is different (as long as the first quartet corresponds to server ip)
+void host_net_config(char* host_str, struct sockaddr_in* addr) {
+    char* hostname;
+    char* port_str;
+    int port;
+
+    // Parse host:port string
+    hostname = host_str;
+
+    // Get port
+    port_str = strchr(host_str, ':');
+    if (!port_str) {
+        fprintf(stderr, "Missing ':' in <host>:<port>!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // Now host containts hostname (or ip) only
+    *port_str = '\0';
+    port_str++;
+
+    // Convert port string in integer
+    char* end_ptr = NULL;
+    port = strtol(port_str, &end_ptr, 10);
+    if (*end_ptr) {
+        fprintf(stderr, "Port '%s' is not a numeric value!\n", port_str);
+        exit(EXIT_FAILURE);
+    }
+
+    // Hostname Resolve
+    cw_log("Resolving %s...\n", hostname);
+    struct hostent *e = gethostbyname(hostname);
+    check(e != NULL);
+    cw_log("Host %s resolved to %d bytes: %s\n", hostname, e->h_length,
+           inet_ntoa(*(struct in_addr *)e->h_addr));
+
+    // Build Internet address
+    bzero((char *) addr, sizeof(struct sockaddr_in));
+    addr->sin_family = AF_INET;
+    bcopy((char *)e->h_addr, (char *) &addr->sin_addr.s_addr, e->h_length);
+    addr->sin_port = htons(port);
+
+    // Restore original string (which was manipulated in-place)
+    *(port_str - 1) = ':';
+}
+
 // Weighted command type picker
 command_type_t pick_next_cmd() {
     int r = rand() % sum_w;
@@ -165,11 +209,12 @@ unsigned int ramp_delta_rate = 0;  // added to rate every ramp_secs
 unsigned int ramp_num_steps = 0;   // number of ramp-up steps
 char *ramp_fname = NULL;
 
-char *hostname = "127.0.0.1";
-char *bindname = "0.0.0.0";
+#define MAX_HOST_STRING 31
+char serverhost[MAX_HOST_STRING] = "127.0.0.1:7891";
+char clienthost[MAX_HOST_STRING] = "0.0.0.0:0";
 
-struct sockaddr_in myaddr;
 struct sockaddr_in serveraddr;
+struct sockaddr_in myaddr;
 socklen_t addr_size;
 
 int num_threads = 1;
@@ -478,8 +523,8 @@ int main(int argc, char *argv[]) {
     while (argc > 0) {
         if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
             printf(
-                "Usage: dw_client [-h|--help] [-b bindname] [-bp bindport] "
-                "[-sn servername] [-sp serverport] [-n num_pkts] [-c "
+                "Usage: dw_client [-h|--help] [-cl hostname:port] "
+                "[-sv hostname:port] [-n num_pkts] [-c "
                 "num_compute] [-s num_store] [-l num_load] [-p period(us)] "
                 "[-r|--rate rate] [-ea|--exp-arrivals] [-ws|--wait-spin] "
                 "[-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] "
@@ -494,12 +539,8 @@ int main(int argc, char *argv[]) {
                 "\n"
                 "Options:\n"
                 "  -h|--help ....................... This help message\n"
-                "  -b .............................. Client-side bind name/IP "
-                "(defaults to 0.0.0.0)\n"
-                "  -bp ............................. Client-side bind port\n"
-                "  -sn ............................. Server name or IP "
-                "(defaults to 127.0.0.1)\n"
-                "  -sp ............................. Server port (defaults to 7891)\n"
+                "  -sv hostname:port ............... Set Server host\n"
+                "  -cl hostname:port ............... Set Client host\n"
                 "  -n num_pkts ..................... Set number of packets "
                 "sent by each thread (across all sessions)\n"
                 "  -c num_compute .................. Set number of compute "
@@ -556,24 +597,16 @@ int main(int argc, char *argv[]) {
                 "    Packet sizes are in bytes and do not consider headers "
                 "added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n");
             exit(EXIT_SUCCESS);
-        } else if (strcmp(argv[0], "-sn") == 0) {
+        } else if (strcmp(argv[0], "-sv") == 0) {
             assert(argc >= 2);
-            hostname = argv[1];
+            strncpy(serverhost, argv[1], MAX_HOST_STRING-1);
+            serverhost[MAX_HOST_STRING-1] = '\0';
             argc--;
             argv++;
-        } else if (strcmp(argv[0], "-sp") == 0) {
+        } else if (strcmp(argv[0], "-cl") == 0) {
             assert(argc >= 2);
-            server_port = atoi(argv[1]);
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "-b") == 0) {
-            assert(argc >= 2);
-            bindname = argv[1];
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "-bp") == 0) {
-            assert(argc >= 2);
-            bind_port = atoi(argv[1]);
+            strncpy(clienthost, argv[1], MAX_HOST_STRING-1);
+            clienthost[MAX_HOST_STRING-1] = '\0';
             argc--;
             argv++;
         } else if (strcmp(argv[0], "-n") == 0) {
@@ -787,6 +820,12 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    host_net_config(serverhost, &serveraddr);
+    host_net_config(clienthost, &myaddr);
+
+    /* Set all bits of the padding field to 0 */
+    memset(myaddr.sin_zero, '\0', sizeof(myaddr.sin_zero));
+
     num_pkts = (num_pkts + num_sessions - 1) / num_sessions * num_sessions;
     pkts_per_session = num_pkts / num_sessions;
 
@@ -794,8 +833,8 @@ int main(int argc, char *argv[]) {
            (per_session_output && pkts_per_session <= MAX_PKTS));
 
     printf("Configuration:\n");
-    printf("  bind=%s:%d\n", bindname, bind_port);
-    printf("  hostname=%s:%d\n", hostname, server_port);
+    printf("  clienthost=%s\n", clienthost);
+    printf("  serverhost=%s\n", serverhost);
     printf("  num_threads: %d\n", num_threads);
     printf("  num_pkts=%lu (COMPUTE:%d, STORE:%d, LOAD:%d)\n", num_pkts,
            n_compute, n_store, n_load);
@@ -825,32 +864,7 @@ int main(int argc, char *argv[]) {
     // Init random number generator
     srand(time(NULL));
 
-    cw_log("Resolving %s...\n", hostname);
-    struct hostent *e = gethostbyname(hostname);
-    check(e != NULL);
-    cw_log("Host %s resolved to %d bytes: %s\n", hostname, e->h_length,
-           inet_ntoa(*(struct in_addr *)e->h_addr));
 
-    /* build the server's Internet address */
-    bzero((char *)&serveraddr, sizeof(serveraddr));
-    serveraddr.sin_family = AF_INET;
-    bcopy((char *)e->h_addr, (char *)&serveraddr.sin_addr.s_addr, e->h_length);
-    serveraddr.sin_port = htons(server_port);
-
-    cw_log("Resolving %s...\n", bindname);
-    struct hostent *e2 = gethostbyname(bindname);
-    check(e2 != NULL);
-    cw_log("Host %s resolved to %d bytes: %s\n", bindname, e2->h_length,
-           inet_ntoa(*(struct in_addr *)e2->h_addr));
-
-    myaddr.sin_family = AF_INET;
-    /* Set IP address to resolved bindname */
-    bcopy((char *)e2->h_addr, (char *)&myaddr.sin_addr.s_addr, e2->h_length);
-    /* Set port to zero, requesting allocation of any available ephemeral port
-     */
-    myaddr.sin_port = bind_port;
-    /* Set all bits of the padding field to 0 */
-    memset(myaddr.sin_zero, '\0', sizeof(myaddr.sin_zero));
 
     for (int i = 0; i < MAX_THREADS; i++) clientSocket[i] = -1;
 
