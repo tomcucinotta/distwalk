@@ -114,9 +114,10 @@ int sock_find_sock(int sock) {
     return -1;
 }
 
+#define MAX_STORAGE_SIZE 1000000
 char *storage_path = NULL;
 int storage_fd = -1;
-size_t max_storage_size = SIZE_MAX;
+size_t max_storage_size = MAX_STORAGE_SIZE;
 size_t storage_offset = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
 
 void sigint_cleanup(int _) {
@@ -219,16 +220,26 @@ void safe_write(int fd, unsigned char *buf, size_t len) {
     }
 }
 
-void safe_read(int fd, unsigned char *buf, size_t len) {
-    while (len > 0) {
+size_t safe_read(int fd, unsigned char *buf, size_t len) {
+    size_t leftovers = len;
+
+    while (leftovers > 0) {
         int received;
-        if ((received = read(fd, buf, len)) < 0) {
+        if ((received = read(fd, buf, leftovers)) < 0) {
             perror("read() failed");
-            return;
+            return leftovers;
         }
+
+        if (received == 0) {
+            printf("read() EoF\n");
+            break;
+        }
+
         buf += received;
-        len -= received;
+        leftovers -= received;
     }
+
+    return leftovers;
 }
 
 // return len, or -1 if an error occurred on read()
@@ -331,20 +342,24 @@ void store(int buf_id, size_t bytes) {
         lseek(storage_fd, 0, SEEK_SET);
         storage_offset = 0;
     }
+
     safe_write(storage_fd, bufs[buf_id].store_buf, bytes);
+
     storage_offset += bytes;
 
     fsync(storage_fd);
 }
 
-void load(int buf_id, size_t bytes) {
+void load(int buf_id, size_t bytes, size_t* leftovers) {
+    lseek(storage_fd, 0, SEEK_SET); //TODO: Check if it's okay to seek to the start everytime
     cw_log("LOAD: loading %lu bytes\n", bytes);
 
-    if (storage_offset + bytes > max_storage_size) {
+    if (storage_offset + bytes > max_storage_size){
         lseek(storage_fd, 0, SEEK_SET);
         storage_offset = 0;
     }
-    safe_read(storage_fd, bufs[buf_id].store_buf, bytes);
+
+    *leftovers = safe_read(storage_fd, bufs[buf_id].store_buf, bytes);
     storage_offset += bytes;
 }
 
@@ -389,7 +404,7 @@ int process_messages(int sock, int buf_id) {
     unsigned char *buf = bufs[buf_id].buf;
     unsigned long msg_size = bufs[buf_id].curr_buf - buf;
 
-    ssize_t data = -1;
+    size_t loaded_data = -1;
 
     // batch processing of multiple messages, if received more than 1
     do {
@@ -416,9 +431,9 @@ int process_messages(int sock, int buf_id) {
                 break;
             } else if (m->cmds[i].cmd == REPLY) {
                 // simulate data retrieve
-                if (data >= 0) {
-                    m->cmds[i].u.fwd.pkt_size += data;
-                    data = -1;
+                if (loaded_data >= 0) {
+                    m->cmds[i].u.fwd.pkt_size += loaded_data;
+                    loaded_data = -1;
                 }
                 if (!reply(sock, buf_id, m, i)) {
                     fprintf(stderr, "reply() failed\n");
@@ -440,7 +455,9 @@ int process_messages(int sock, int buf_id) {
                     close_and_forget(epollfd, sock);
                     exit(EXIT_FAILURE);
                 } else {
-                    load(buf_id, m->cmds[i].u.load_nbytes);
+                    size_t leftovers;
+                    load(buf_id, m->cmds[i].u.load_nbytes, &leftovers);
+                    loaded_data = m->cmds[i].u.load_nbytes - leftovers;
                 }
             } else {
                 cw_log("Error: Unknown cmd: %d\n", m->cmds[0].cmd);
