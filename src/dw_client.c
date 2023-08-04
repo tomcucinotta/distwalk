@@ -14,6 +14,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <oml_map.h>
+#include <oml_debug.h>
+
 #include "cw_debug.h"
 #include "expon.h"
 #include "message.h"
