@@ -119,6 +119,7 @@ char *storage_path = NULL;
 int storage_fd = -1;
 size_t max_storage_size = MAX_STORAGE_SIZE;
 size_t storage_offset = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
+size_t storage_eof = 0; //TODO: same here
 
 void sigint_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
@@ -348,13 +349,20 @@ void store(int buf_id, size_t bytes) {
     storage_offset += bytes;
 
     fsync(storage_fd);
+
+    if (storage_offset > storage_eof) {
+        storage_eof = storage_offset;
+
+        if (storage_eof > max_storage_size) {
+            storage_eof = max_storage_size;
+        }
+    }
 }
 
 void load(int buf_id, size_t bytes, size_t* leftovers) {
-    lseek(storage_fd, 0, SEEK_SET); //TODO: Check if it's okay to seek to the start everytime
     cw_log("LOAD: loading %lu bytes\n", bytes);
 
-    if (storage_offset + bytes > max_storage_size){
+    if (storage_offset + bytes > storage_eof){
         lseek(storage_fd, 0, SEEK_SET);
         storage_offset = 0;
     }
