@@ -59,7 +59,7 @@ thread_info thread_infos[MAX_BUFFERS];
 typedef struct {
     in_addr_t inaddr;  // target IP
     uint16_t port;     // target port (for multiple nodes on same host)
-    int sock;  // socket handling messages from/to inaddr:port (0=unused)
+    int sock;  // socket handling messages from/to inaddr:port (-1 = unused)
 } sock_info;
 
 #define MAX_SOCKETS 16
@@ -76,16 +76,16 @@ int per_client_thread = 0;
 
 int epollfd;
 
-// return sock associated to inaddr:port
+// return index in socks[] of sock_info associated to inaddr:port, or -1 if not found
 int sock_find_addr(in_addr_t inaddr, int port) {
     eventually_ignore_sys(pthread_mutex_lock(&socks_mtx),
                           (per_client_thread == 1));
 
     for (int i = 0; i < MAX_SOCKETS; i++) {
-        if (socks[i].inaddr == inaddr && socks[i].port == port) {
+        if (socks[i].sock != -1 && socks[i].inaddr == inaddr && socks[i].port == port) {
             eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
                                   (per_client_thread == 1));
-            return socks[i].sock;
+            return i;
         }
     }
 
@@ -137,6 +137,9 @@ void sigint_cleanup(int _) {
 // add the IP/port into the socks[] map to allow FORWARD finding an
 // already set-up socket, through sock_find()
 // FIXME: bad complexity with many sockets
+//
+// return index of sock_info in socks[] where info has been added (or where it was already found),
+//        or -1 if no unused entry were found in socks[]
 int sock_add(in_addr_t inaddr, int port, int sock) {
     eventually_ignore_sys(pthread_mutex_lock(&socks_mtx),
                           (per_client_thread == 1));
@@ -260,28 +263,59 @@ size_t recv_all(int sock, unsigned char *buf, size_t len) {
     return read_tot;
 }
 
-// Copy m header into m_dst, skipping the first cmd_id elems in m_dst->cmds[]
-void copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
+// Copy req id from m into m_dst, and commands up to the matching REPLY (or the end of m),
+// skipping the first cmd_id elems in m->cmds[].
+//
+// Return the number of copied commands
+int copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
     // copy message header
-    *m_dst = *m;
+    m_dst->req_id = m->req_id;
+    m_dst->req_size = 0;
+    int nested_fwd = 0;
     // left-shift m->cmds[] into m_dst->cmds[], removing m->cmds[cmd_id]
-    for (int i = cmd_id; i < m->num; i++) {
+    int i = cmd_id;
+    for (; i < m->num; i++) {
         m_dst->cmds[i - cmd_id] = m->cmds[i];
+        if (m->cmds[i].cmd == REPLY) {
+            if (nested_fwd == 0)
+                break;
+            else
+                nested_fwd--;
+        } else if (m->cmds[i].cmd == FORWARD)
+            nested_fwd++;
     }
-    m_dst->num = m->num - cmd_id;
+    m_dst->num = i - cmd_id;
+    return m_dst->num;
 }
 
 // cmd_id is the index of the FORWARD item within m->cmds[] here, we
 // remove the first (cmd_id+1) commands from cmds[], and forward the
 // rest to the next hop
 //
-// returns 1 if forward message sent correctly, 0 otherwise
+// returns number of forwarded commands as found in m, or 0 if a problem occurred
 int forward(int buf_id, message_t *m, int cmd_id) {
-    int sock = sock_find_addr(m->cmds[cmd_id].u.fwd.fwd_host,
-                              m->cmds[cmd_id].u.fwd.fwd_port);
+    int sock_id = sock_find_addr(m->cmds[cmd_id].u.fwd.fwd_host,
+                                 m->cmds[cmd_id].u.fwd.fwd_port);
+    if (sock_id == -1) {
+        int no_delay = 1;
+        int clientSocket = socket(PF_INET, SOCK_STREAM, 0);
+        sys_check(setsockopt(clientSocket, IPPROTO_TCP,
+                             TCP_NODELAY, (void *)&no_delay,
+                             sizeof(no_delay)));
+        cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {m->cmds[cmd_id].u.fwd.fwd_host}),
+               m->cmds[cmd_id].u.fwd.fwd_port);
+        struct sockaddr_in addr;
+        bzero((char *) &addr, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = m->cmds[cmd_id].u.fwd.fwd_host;
+        addr.sin_port = m->cmds[cmd_id].u.fwd.fwd_port;
+        sys_check(connect(clientSocket, &addr, sizeof(addr)));
+        sock_id = sock_add(m->cmds[cmd_id].u.fwd.fwd_host, m->cmds[cmd_id].u.fwd.fwd_port, clientSocket);
+    }
+    int sock = socks[sock_id].sock;
     assert(sock != -1);
     message_t *m_dst = (message_t *)bufs[buf_id].fwd_buf;
-    copy_tail(m, m_dst, cmd_id + 1);
+    int forwarded = copy_tail(m, m_dst, cmd_id + 1);
     m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
     cw_log("Forwarding req %u to %s:%d\n", m->req_id,
            inet_ntoa((struct in_addr){m->cmds[cmd_id].u.fwd.fwd_host}),
@@ -290,7 +324,9 @@ int forward(int buf_id, message_t *m, int cmd_id) {
            m_dst->req_size);
     // TODO: return to epoll loop to handle sending of long packets
     // (here I'm blocking the thread)
-    return send_all(sock, bufs[buf_id].fwd_buf, m_dst->req_size);
+    if (!send_all(sock, bufs[buf_id].fwd_buf, m_dst->req_size))
+        return 0;
+    return forwarded;
 }
 
 // returns 1 if reply sent correctly, 0 otherwise
@@ -434,9 +470,14 @@ int process_messages(int sock, int buf_id) {
             if (m->cmds[i].cmd == COMPUTE) {
                 compute_for(m->cmds[i].u.comp_time_us);
             } else if (m->cmds[i].cmd == FORWARD) {
-                forward(buf_id, m, i);
+                int to_skip = forward(buf_id, m, i);
+                if (to_skip == 0) {
+                    cw_log("Error: could not execute FORWARD\n");
+                    close_and_forget(epollfd, sock);
+                    break;
+                }
                 // rest of cmds[] are for next hop, not me
-                break;
+                i += to_skip - 1;
             } else if (m->cmds[i].cmd == REPLY) {
                 // simulate data retrieve
                 if (loaded_data >= 0) {
