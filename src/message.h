@@ -10,7 +10,7 @@
 
 typedef enum { COMPUTE, STORE, LOAD, FORWARD, REPLY } command_type_t;
 
-const char* get_command_name(command_type_t cmd) {
+static inline const char* get_command_name(command_type_t cmd) {
   switch (cmd) {
     case COMPUTE: return "COMPUTE";
     case STORE: return "STORE";
