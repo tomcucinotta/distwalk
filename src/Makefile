@@ -1,7 +1,7 @@
-CFLAGS=-Wall -O3
+CFLAGS=-Wall -O3 
 CFLAGS_DEBUG=-g -DCW_DEBUG
 CFLAGS_TSAN=-g -O2 -fsanitize=thread
-LDLIBS=-pthread -lm
+LDLIBS=-pthread -lm 
 
 PROGRAMS=dw_client dw_node dw_client_debug dw_node_debug dw_node_tsan
 
@@ -10,8 +10,8 @@ all: $(PROGRAMS)
 clean:
 	rm -f *.o *~ $(PROGRAMS)
 
-dw_client: dw_client.o expon.o
-dw_client_debug: dw_client_debug.o expon_debug.o
+dw_client: ccmd.o dw_client.o expon.o
+dw_client_debug: ccmd.o dw_client_debug.o expon_debug.o 
 dw_node: dw_node.o
 dw_node_debug: dw_node_debug.o
 test_expon: test_expon.o expon.o
@@ -30,6 +30,7 @@ dep:
 
 # DO NOT DELETE
 
+ccmd.o: message.h
 dw_client.o: message.h timespec.h cw_debug.h expon.h
 dw_node.o: message.h timespec.h cw_debug.h
 test_expon.o: expon.h
