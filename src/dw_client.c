@@ -398,7 +398,7 @@ void *thread_receiver(void *data) {
              * ----*/
             addr_size = sizeof(serveraddr);
 
-            cw_log("Connecting (i=%d) ...\n", i);
+            cw_log("Connecting to %s:%d (i=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i);
             sys_check(connect(clientSocket[thread_id],
                               (struct sockaddr *)&serveraddr, addr_size));
 
