@@ -280,14 +280,14 @@ void *thread_sender(void *data) {
         m->req_id = pkt_id;
 
         //TODO: Change this
-        if (m->cmds[0].cmd == COMPUTE) {
+        /*if (m->cmds[0].cmd == COMPUTE) {
             if (exp_comptimes) {
                 m->cmds[0].u.comp_time_us =
                     lround(expon(1.0 / comptimes_us, &rnd_buf));
             } else {
                 m->cmds[0].u.comp_time_us = comptimes_us;
             }
-        }
+        }*/
 
 
         //TODO: Do something similar for every reply
