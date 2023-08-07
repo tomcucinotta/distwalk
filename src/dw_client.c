@@ -18,9 +18,14 @@
 #include "expon.h"
 #include "message.h"
 #include "timespec.h"
+#include "ccmd.h"
 
 int exp_arrivals = 0;
 int wait_spinning = 0;
+
+ccmd_t* ccmd = NULL; // Ordered chain of commands
+command_t template_cmds[255];
+int ncmd = 0;
 
 unsigned int n_store = 0;  // Number of STORE requests
 unsigned long store_nbytes = 10;  // Number of bytes to be written to the server's storage
@@ -108,7 +113,6 @@ int sum_w = 0;
 int weights[3] = {0, 0, 0};  // 0 compute, 1 store, 2 load
 
 
-//TODO: dw_client connects even if ip is different (as long as the first quartet corresponds to server ip)
 void host_net_config(char* host_str, struct sockaddr_in* addr) {
     char* hostname;
     char* port_str;
@@ -153,6 +157,7 @@ void host_net_config(char* host_str, struct sockaddr_in* addr) {
     *(port_str - 1) = ':';
 }
 
+//TODO: Deprecated with recent client interface update
 // Weighted command type picker
 command_type_t pick_next_cmd() {
     int r = rand() % sum_w;
@@ -201,7 +206,7 @@ long usecs_elapsed[MAX_THREADS][MAX_PKTS];
 struct timespec ts_start;
 unsigned int rate = 1000;  // pkt/s rate (period is its inverse)
 
-unsigned long num_pkts = -1;
+unsigned long num_pkts = 0;
 
 unsigned int rates[MAX_RATES];
 unsigned int ramp_step_secs = 0;   // if non-zero, supersedes num_pkts
@@ -251,6 +256,17 @@ void *thread_sender(void *data) {
 
     int rate_start = rate;
 
+    message_t *m = (message_t *)send_buf;
+
+    if (exp_pkt_size) {
+        m->req_size =
+            exp_packet_size(pkt_size, MIN_SEND_SIZE, BUF_SIZE, &rnd_buf);
+    } else {
+        m->req_size = pkt_size;
+    }
+
+    ccmd_dump(ccmd, m);
+
     for (int i = 0; i < num_send_pkts; i++) {
         /* remember time of send relative to ts_start */
         struct timespec ts_send;
@@ -261,47 +277,9 @@ void *thread_sender(void *data) {
         // don't receive all packets back)
         usecs_elapsed[thread_id][idx(pkt_id)] = 0;
         /*---- Issue a request to the server ---*/
-        message_t *m = (message_t *)send_buf;
         m->req_id = pkt_id;
 
-        if (exp_pkt_size) {
-            m->req_size =
-                exp_packet_size(pkt_size, MIN_SEND_SIZE, BUF_SIZE, &rnd_buf);
-        } else {
-            m->req_size = pkt_size;
-        }
-
-        m->num = 2;
-        command_type_t next_cmd;
-
-        if (sum_w > 0) {  // weighted pick
-            next_cmd = pick_next_cmd();
-        } else {  // request prioritY: COMPUTE>STORE>LOAD
-            if (n_compute > 0) {
-                n_compute--;
-                next_cmd = COMPUTE;
-            } else if (n_store > 0) {
-                n_store--;
-                next_cmd = STORE;
-            } else if (n_load > 0) {
-                n_load--;
-                next_cmd = LOAD;
-            } else if (comptimes_us > 0) {
-                next_cmd = COMPUTE;
-            } else if (store_nbytes > 0) {
-                next_cmd = STORE;
-            } else if (load_nbytes > 0) {
-                next_cmd = LOAD;
-            } else {
-                fprintf(stderr, "Unspecified operation!\n");
-                exit(EXIT_FAILURE);
-            }
-        }
-
-        m->cmds[0].cmd = next_cmd;
-        // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
-        m->cmds[1].cmd = REPLY;
-
+        //TODO: Change this
         if (m->cmds[0].cmd == COMPUTE) {
             if (exp_comptimes) {
                 m->cmds[0].u.comp_time_us =
@@ -309,31 +287,41 @@ void *thread_sender(void *data) {
             } else {
                 m->cmds[0].u.comp_time_us = comptimes_us;
             }
-        } else if (m->cmds[0].cmd == STORE) {
-            m->cmds[0].u.store_nbytes = store_nbytes;
-            m->req_size += store_nbytes;
-        } else if (m->cmds[0].cmd == LOAD) {
-            m->cmds[0].u.load_nbytes = load_nbytes;
-        } else {
-            printf("Unexpected branch (2)\n");
-            exit(EXIT_FAILURE);
         }
 
+
+        //TODO: Do something similar for every reply
+        // Last REPLY resp_size
         if (exp_resp_size) {
-            m->cmds[1].u.fwd.pkt_size =
+            m->cmds[m->num-1].u.fwd.pkt_size =
                 exp_packet_size(resp_size, MIN_REPLY_SIZE, BUF_SIZE, &rnd_buf);
         } else {
             assert(resp_size <= BUF_SIZE);
-            m->cmds[1].u.fwd.pkt_size = resp_size;
+            m->cmds[m->num-1].u.fwd.pkt_size = resp_size;
         }
 
-        uint32_t return_bytes = m->cmds[1].u.fwd.pkt_size;
-        if (m->cmds[0].cmd == LOAD) {
-            return_bytes += load_nbytes;
+
+        // TODO: Compute the return bytes properly
+        uint32_t return_bytes = m->cmds[m->num-1].u.fwd.pkt_size;
+        for (int i=0; i<m->num; i++) {
+            if (m->cmds[i].cmd == LOAD) {
+                return_bytes += load_nbytes;
+            }
+        }
+        
+
+        // Prints
+        for(int i=0; i<m->num; i++){
+            if (i < m->num-1) {
+                printf("%s->", get_command_name(m->cmds[i].cmd));
+            }
+            else {
+                printf("%s", get_command_name(m->cmds[i].cmd));
+            }
         }
 
-        cw_log("%s: sending %u bytes (will expect %u bytes in response)...\n",
-               get_command_name(next_cmd), m->req_size, return_bytes);
+        cw_log(":sending %u bytes (will expect %u bytes in response)...\n",
+               m->req_size, return_bytes);
         assert(m->req_size <= BUF_SIZE);
         if (!send_all(clientSocket[thread_id], send_buf, m->req_size)) {
             fprintf(stderr,
@@ -518,14 +506,19 @@ void *thread_receiver(void *data) {
 int main(int argc, char *argv[]) {
     check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
 
+    ccmd_init(&ccmd);
+
+    uint32_t return_bytes = resp_size;
+
     argc--;
     argv++;
     while (argc > 0) {
+        //TODO: Remove all weight parameters, as they do not work with the new
+        //client interface
         if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
             printf(
                 "Usage: dw_client [-h|--help] [-cl hostname:port] "
-                "[-sv hostname:port] [-n num_pkts] [-c "
-                "num_compute] [-s num_store] [-l num_load] [-p period(us)] "
+                "[-sv hostname:port] [-n num_pkts] [-p period(us)] "
                 "[-r|--rate rate] [-ea|--exp-arrivals] [-ws|--wait-spin] "
                 "[-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] "
                 "[-rns|--ramp-num-steps n] [-rfn|--rate-file-name "
@@ -543,12 +536,6 @@ int main(int argc, char *argv[]) {
                 "  -cl hostname:port ............... Set Client host\n"
                 "  -n num_pkts ..................... Set number of packets "
                 "sent by each thread (across all sessions)\n"
-                "  -c num_compute .................. Set number of compute "
-                "operations\n"
-                "  -s num_store .................... Set number of store "
-                "operations to disk\n"
-                "  -l num_load ..................... Set number of load "
-                "operations from disk\n"
                 "  -p period(us) ................... Set inter-send period for "
                 "each thread (average, if -ea is specified)\n"
                 "  -r rate ......................... Set sending rate for each "
@@ -570,6 +557,7 @@ int main(int argc, char *argv[]) {
                 "distributed per-request processing times\n"
                 "  -S|--store-data bytes ........... Set per-store data size\n"
                 "  -L|--load-data bytes ............ Set per-load data size\n"
+                "  -F|--forward hostname:port ...... FORWARD message \n"
                 "  -Cw|--comp-weight w ............. Set weight of COMPUTE in "
                 "weighted random choice of operation\n"
                 "  -Sw|--store-weight w ............ Set weight of STORE in "
@@ -614,21 +602,6 @@ int main(int argc, char *argv[]) {
             num_pkts = atoi(argv[1]);
             argc--;
             argv++;
-        } else if (strcmp(argv[0], "-c") == 0) {
-            assert(argc >= 2);
-            n_compute = atoi(argv[1]);
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "-s") == 0) {
-            assert(argc >= 2);
-            n_store = atoi(argv[1]);
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "-l") == 0) {
-            assert(argc >= 2);
-            n_load = atoi(argv[1]);
-            argc--;
-            argv++;
         } else if (strcmp(argv[0], "-p") == 0) {
             assert(argc >= 2);
             rate = 1000000 / atol(argv[1]);
@@ -671,18 +644,59 @@ int main(int argc, char *argv[]) {
                    strcmp(argv[0], "--comp-time") == 0) {
             assert(argc >= 2);
             comptimes_us = atoi(argv[1]);
+
+            template_cmds[ncmd].cmd = COMPUTE;
+            template_cmds[ncmd].u.comp_time_us = comptimes_us;
+
+            ccmd_add(ccmd, &template_cmds[ncmd++]);
+
+            n_compute++;
             argc--;
             argv++;
         } else if (strcmp(argv[0], "-S") == 0 ||
                    strcmp(argv[0], "--store-data") == 0) {
             assert(argc >= 2);
             store_nbytes = atoi(argv[1]);
+
+
+            template_cmds[ncmd].cmd = STORE;
+            template_cmds[ncmd].u.store_nbytes = store_nbytes;
+
+            ccmd_add(ccmd, &template_cmds[ncmd++]);
+
+            n_store++;
             argc--;
             argv++;
         } else if (strcmp(argv[0], "-L") == 0 ||
                    strcmp(argv[0], "--load-data") == 0) {
             assert(argc >= 2);
             load_nbytes = atoi(argv[1]);
+
+            template_cmds[ncmd].cmd = LOAD;
+            template_cmds[ncmd].u.load_nbytes = load_nbytes;
+
+            ccmd_add(ccmd, &template_cmds[ncmd++]);
+
+            return_bytes += load_nbytes;
+
+            n_load++;
+            argc--;
+            argv++;
+        } else if (strcmp(argv[0], "-F") == 0 ||
+                   strcmp(argv[0], "--forward") == 0) {
+            assert(argc >= 2);
+
+            struct sockaddr_in addr;
+            host_net_config(argv[1], &addr);
+
+            template_cmds[ncmd].cmd = FORWARD;
+            template_cmds[ncmd].u.fwd.fwd_port = ntohs(addr.sin_port);
+            template_cmds[ncmd].u.fwd.fwd_host = addr.sin_addr.s_addr;
+            ccmd_add(ccmd, &template_cmds[ncmd++]);
+
+            template_cmds[ncmd].cmd = REPLY;
+            ccmd_add(ccmd, &template_cmds[ncmd++]);
+
             argc--;
             argv++;
         } else if (strcmp(argv[0], "-Cw") == 0 ||
@@ -757,38 +771,18 @@ int main(int argc, char *argv[]) {
         argv++;
     }
 
+    // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
+    template_cmds[ncmd].cmd = REPLY;
+    template_cmds[ncmd].u.fwd.pkt_size = return_bytes;
+    ccmd_last_reply(ccmd, &template_cmds[ncmd++]);
+
     // globals
-    for (int i = 0; i < 3; i++) {
-        sum_w += weights[i];
+    if (n_compute + n_store + n_load > 0 && num_pkts <= 0){
+        num_pkts = 1;
     }
 
-    // check input args consistency
-    if (num_pkts == -1) {  //-n option has not been used
-        if (n_compute > 0 || n_store > 0 || n_load > 0) {
-            num_pkts = n_compute + n_store + n_load;
-        } else {
-            if (comptimes_us > 0)
-                num_pkts = n_compute = MAX_PKTS;
-            else if (store_nbytes > 0)
-                num_pkts = n_store = MAX_PKTS;
-            else if (load_nbytes > 0)
-                num_pkts = n_load = MAX_PKTS;
-            else
-                num_pkts = n_compute = MAX_PKTS;
-        }
-    } else {
-        if (n_compute > 0 || n_store > 0 || n_load > 0) {
-            assert(num_pkts == n_compute + n_store + n_load);
-        } else {
-            if (comptimes_us > 0)
-                n_compute = num_pkts;
-            else if (store_nbytes > 0)
-                n_store = num_pkts;
-            else if (load_nbytes > 0)
-                n_load = num_pkts;
-            else
-                n_compute = num_pkts;
-        }
+    for (int i = 0; i < 3; i++) {
+        sum_w += weights[i];
     }
 
     if (ramp_step_secs != 0) {
