@@ -690,7 +690,7 @@ int main(int argc, char *argv[]) {
             host_net_config(argv[1], &addr);
 
             template_cmds[ncmd].cmd = FORWARD;
-            template_cmds[ncmd].u.fwd.fwd_port = ntohs(addr.sin_port);
+            template_cmds[ncmd].u.fwd.fwd_port = addr.sin_port;
             template_cmds[ncmd].u.fwd.fwd_host = addr.sin_addr.s_addr;
             ccmd_add(ccmd, &template_cmds[ncmd++]);
 

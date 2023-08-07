@@ -303,7 +303,7 @@ int forward(int buf_id, message_t *m, int cmd_id) {
                              TCP_NODELAY, (void *)&no_delay,
                              sizeof(no_delay)));
         cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {m->cmds[cmd_id].u.fwd.fwd_host}),
-               m->cmds[cmd_id].u.fwd.fwd_port);
+               ntohs(m->cmds[cmd_id].u.fwd.fwd_port));
         struct sockaddr_in addr;
         bzero((char *) &addr, sizeof(addr));
         addr.sin_family = AF_INET;
