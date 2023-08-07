@@ -11,8 +11,8 @@
 typedef enum { COMPUTE, STORE, LOAD, FORWARD, REPLY } command_type_t;
 
 typedef struct {
-  in_addr_t fwd_host;   // target IP of host to forward to
-  uint16_t fwd_port;    // target port (for multiple nodes on same host)
+  in_addr_t fwd_host;   // target IP of host to forward to (network encoding)
+  uint16_t fwd_port;    // target port (network encoding, for multiple nodes on same host)
   uint32_t pkt_size;    // size of forwarded packet
 } fwd_opts_t;
 
