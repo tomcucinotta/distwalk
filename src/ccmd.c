@@ -1,7 +1,11 @@
 #include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "ccmd.h"
 #include "message.h"
+#include "cw_debug.h"
 
 void ccmd_init(ccmd_t** q) {
     *q = malloc(sizeof(ccmd_t));
@@ -122,4 +126,41 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
     }
 
     m->num = q->num;
+}
+
+void ccmd_log(ccmd_t* q) {
+    if (!q) {
+        printf("ccmd_dump() error - Initialize queue first\n");
+        exit(EXIT_FAILURE);
+    }
+
+    ccmd_node_t* curr = q->head_actions;
+
+    while (curr) {
+        char opts[32] = "";
+
+        switch (curr->cmd->cmd) {
+            case STORE:
+                sprintf(opts, "%db", curr->cmd->u.store_nbytes);
+                break;
+            case COMPUTE:
+                sprintf(opts, "%dus", curr->cmd->u.comp_time_us);
+                break;
+            case LOAD:
+                sprintf(opts, "%db", curr->cmd->u.load_nbytes);
+                break;
+            case FORWARD:
+                sprintf(opts, "%s:%d", inet_ntoa((struct in_addr) {curr->cmd->u.fwd.fwd_host}), ntohs(curr->cmd->u.fwd.fwd_port));
+                break;
+            case REPLY:
+                //sprintf(opts, "%dus", curr->cmd->u.pkt_size);
+                break;
+            default: 
+                printf("Unknown command type\n");
+                exit(EXIT_FAILURE);
+        }
+        cw_log("%s(%s)%s", get_command_name(curr->cmd->cmd), opts, curr->next ? "->" : "");
+        curr = curr->next;
+    }
+    cw_log("\n");
 }

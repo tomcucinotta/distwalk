@@ -266,6 +266,9 @@ void *thread_sender(void *data) {
     }
 
     ccmd_dump(ccmd, m);
+#ifdef CW_DEBUG
+    ccmd_log(ccmd);
+#endif
 
     for (int i = 0; i < num_send_pkts; i++) {
         /* remember time of send relative to ts_start */
@@ -308,7 +311,6 @@ void *thread_sender(void *data) {
                 return_bytes += load_nbytes;
             }
         }
-        
 
         // Prints
         for(int i=0; i<m->num; i++){

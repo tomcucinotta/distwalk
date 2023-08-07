@@ -11,7 +11,7 @@ clean:
 	rm -f *.o *~ $(PROGRAMS)
 
 dw_client: ccmd.o dw_client.o expon.o
-dw_client_debug: ccmd.o dw_client_debug.o expon_debug.o 
+dw_client_debug: ccmd_debug.o dw_client_debug.o expon_debug.o 
 dw_node: dw_node.o
 dw_node_debug: dw_node_debug.o
 test_expon: test_expon.o expon.o
@@ -30,7 +30,8 @@ dep:
 
 # DO NOT DELETE
 
-ccmd.o: message.h
-dw_client.o: message.h timespec.h cw_debug.h expon.h
-dw_node.o: message.h timespec.h cw_debug.h
+ccmd.o: ccmd.h message.h cw_debug.h
+dw_client.o: cw_debug.h expon.h message.h timespec.h ccmd.h
+dw_node.o: cw_debug.h message.h timespec.h
+node-fwd.o: message.h timespec.h cw_debug.h
 test_expon.o: expon.h
