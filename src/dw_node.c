@@ -664,10 +664,6 @@ void epoll_main_loop(int listen_sock) {
                 sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY,
                                      (void *)&val, sizeof(val)));
 
-                int orig_sock_id =
-                    sock_add(addr.sin_addr.s_addr, addr.sin_port, conn_sock);
-                check(orig_sock_id != -1);
-
                 unsigned char *new_buf = 0;
                 unsigned char *new_reply_buf = 0;
                 unsigned char *new_fwd_buf = 0;
@@ -722,7 +718,7 @@ void epoll_main_loop(int listen_sock) {
                 bufs[buf_id].curr_size = BUF_SIZE;
                 bufs[buf_id].sock = conn_sock;
                 bufs[buf_id].status = RECEIVING;
-                bufs[buf_id].orig_sock_id = orig_sock_id;
+                bufs[buf_id].orig_sock_id = -1;
 
                 ev.events = EPOLLIN | EPOLLOUT;
                 // Use the data.u32 field to store the buf_id in bufs[]
