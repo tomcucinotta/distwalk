@@ -130,7 +130,7 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
 
 void ccmd_log(ccmd_t* q) {
     if (!q) {
-        printf("ccmd_dump() error - Initialize queue first\n");
+        printf("ccmd_log() error - Initialize queue first\n");
         exit(EXIT_FAILURE);
     }
 

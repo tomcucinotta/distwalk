@@ -312,17 +312,7 @@ void *thread_sender(void *data) {
             }
         }
 
-        // Prints
-        for(int i=0; i<m->num; i++){
-            if (i < m->num-1) {
-                printf("%s->", get_command_name(m->cmds[i].cmd));
-            }
-            else {
-                printf("%s", get_command_name(m->cmds[i].cmd));
-            }
-        }
-
-        cw_log(":sending %u bytes (will expect %u bytes in response)...\n",
+        cw_log("sending %u bytes (will expect %u bytes in response)...\n",
                m->req_size, return_bytes);
         assert(m->req_size <= BUF_SIZE);
         if (!send_all(clientSocket[thread_id], send_buf, m->req_size)) {
