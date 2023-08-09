@@ -5,7 +5,6 @@
 
 #include "ccmd.h"
 #include "message.h"
-#include "cw_debug.h"
 
 void ccmd_init(ccmd_t** q) {
     *q = malloc(sizeof(ccmd_t));
@@ -128,6 +127,23 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
     m->num = q->num;
 }
 
+void ccmd_destroy(ccmd_t* q) {
+    if (!q) {
+        printf("ccmd_destroy() error - Initialize queue first\n");
+        exit(EXIT_FAILURE);
+    }
+
+    ccmd_node_t* curr = q->head_actions;
+    ccmd_node_t* tmp = NULL;
+    while (curr) {
+        tmp = curr->next;
+        free(curr);
+        curr = tmp;
+    }
+
+    free(q);
+}
+
 void ccmd_log(ccmd_t* q) {
     if (!q) {
         printf("ccmd_log() error - Initialize queue first\n");
@@ -159,8 +175,8 @@ void ccmd_log(ccmd_t* q) {
                 printf("Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
-        cw_log("%s(%s)%s", get_command_name(curr->cmd->cmd), opts, curr->next ? "->" : "");
+        printf("%s(%s)%s", get_command_name(curr->cmd->cmd), opts, curr->next ? "->" : "");
         curr = curr->next;
     }
-    cw_log("\n");
+    printf("\n");
 }

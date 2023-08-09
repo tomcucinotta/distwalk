@@ -25,6 +25,5 @@ void ccmd_init(ccmd_t** q);
 void ccmd_add(ccmd_t* q, command_t* cmd);
 void ccmd_last_reply(ccmd_t* q, command_t* cmd);
 void ccmd_dump(ccmd_t* q, message_t* m);
-#ifdef CW_DEBUG
+void ccmd_destroy(ccmd_t* q);
 void ccmd_log(ccmd_t* q);
-#endif
