@@ -881,6 +881,8 @@ int main(int argc, char *argv[]) {
     sys_check(bind(welcomeSocket, (struct sockaddr *)&serverAddr,
                    sizeof(serverAddr)));
 
+    cw_log("Node binded to %s:%d\n", bind_name, bind_port);
+
     /*---- Listen on the socket, with 5 max connection requests queued ----*/
     sys_check(listen(welcomeSocket, 5));
     cw_log("Accepting new connections...\n");
