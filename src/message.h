@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 
 #define BUF_SIZE (16*1024*1024)
 
@@ -57,4 +59,32 @@ static inline const char* get_command_name(command_type_t cmd) {
   }
 }
 
+static inline const void msg_log(message_t* m) {
+  for (int i=0; i<m->num; i++) {
+    char opts[32] = "";
+    switch (m->cmds[i].cmd) {
+        case STORE:
+            sprintf(opts, "%db", m->cmds[i].u.store_nbytes);
+            break;
+        case COMPUTE:
+            sprintf(opts, "%dus", m->cmds[i].u.comp_time_us);
+            break;
+        case LOAD:
+            sprintf(opts, "%db", m->cmds[i].u.load_nbytes);
+            break;
+        case FORWARD:
+            sprintf(opts, "%s:%d", inet_ntoa((struct in_addr) {m->cmds[i].u.fwd.fwd_host}), ntohs(m->cmds[i].u.fwd.fwd_port));
+            break;
+        case REPLY:
+            //sprintf(opts, "%dus", m->u.pkt_size);
+            break;
+        default: 
+            printf("Unknown command type\n");
+            exit(EXIT_FAILURE);
+    }
+    printf("%s(%s)%s", get_command_name(m->cmds[i].cmd), opts, i + 1 < m->num ? "->" : "");
+  }
+
+  printf("\n");
+}
 #endif
