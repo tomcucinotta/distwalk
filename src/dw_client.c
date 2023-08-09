@@ -27,20 +27,17 @@ ccmd_t* ccmd = NULL; // Ordered chain of commands
 command_t template_cmds[255];
 int ncmd = 0;
 
-unsigned int n_store = 0;  // Number of STORE requests
-unsigned long store_nbytes = 10;  // Number of bytes to be written to the server's storage
+// For print only
+unsigned int n_store = 0;    // Number of STORE requests
+unsigned int n_load = 0;     // Number of LOAD requests
+unsigned int n_compute = 0;  // Number of COMPUTE requests
 
-unsigned int n_load = 0;  // Number of LOAD requests
-unsigned long load_nbytes = 10;  // Number of bytes to be read from the server's storage
-
-unsigned int n_compute = 0;        // Number of COMPUTE requests
-unsigned long comptimes_us = 100;  // defaults to 100us
 int exp_comptimes = 0;
 
 unsigned long pkt_size = 128;
 int exp_pkt_size = 0;
 
-unsigned long resp_size = 128;
+unsigned long default_resp_size = 128;
 int exp_resp_size = 0;
 
 int no_delay = 1;
@@ -258,13 +255,6 @@ void *thread_sender(void *data) {
 
     message_t *m = (message_t *)send_buf;
 
-    if (exp_pkt_size) {
-        m->req_size =
-            exp_packet_size(pkt_size, MIN_SEND_SIZE, BUF_SIZE, &rnd_buf);
-    } else {
-        m->req_size = pkt_size;
-    }
-
     ccmd_dump(ccmd, m);
 #ifdef CW_DEBUG
     ccmd_log(ccmd);
@@ -282,38 +272,42 @@ void *thread_sender(void *data) {
         /*---- Issue a request to the server ---*/
         m->req_id = pkt_id;
 
-        //TODO: Change this
-        /*if (m->cmds[0].cmd == COMPUTE) {
-            if (exp_comptimes) {
-                m->cmds[0].u.comp_time_us =
-                    lround(expon(1.0 / comptimes_us, &rnd_buf));
-            } else {
-                m->cmds[0].u.comp_time_us = comptimes_us;
-            }
-        }*/
-
-
-        //TODO: Do something similar for every reply
-        // Last REPLY resp_size
-        if (exp_resp_size) {
-            m->cmds[m->num-1].u.fwd.pkt_size =
-                exp_packet_size(resp_size, MIN_REPLY_SIZE, BUF_SIZE, &rnd_buf);
+        if (exp_pkt_size) {
+            m->req_size =
+            exp_packet_size(pkt_size, MIN_SEND_SIZE, BUF_SIZE, &rnd_buf);
         } else {
-            assert(resp_size <= BUF_SIZE);
-            m->cmds[m->num-1].u.fwd.pkt_size = resp_size;
+            m->req_size = pkt_size;
         }
 
-
-        // TODO: Compute the return bytes properly
-        uint32_t return_bytes = m->cmds[m->num-1].u.fwd.pkt_size;
+        // Personalize commmand chain
         for (int i=0; i<m->num; i++) {
-            if (m->cmds[i].cmd == LOAD) {
-                return_bytes += load_nbytes;
+            switch (m->cmds[i].cmd) {
+                case STORE:
+                    break;
+                case COMPUTE:
+                    if (exp_comptimes) {
+                        m->cmds[i].u.comp_time_us =
+                            lround(expon(1.0 / m->cmds[i].u.comp_time_us, &rnd_buf));
+                    }
+                    break;
+                case LOAD:
+                    break;
+                case FORWARD:
+                    break;
+                case REPLY:
+                    if (exp_resp_size) {
+                        m->cmds[i].u.fwd.pkt_size =
+                            exp_packet_size(m->cmds[i].u.fwd.pkt_size, MIN_REPLY_SIZE, BUF_SIZE, &rnd_buf);
+                    }
+                    break;
+                default: 
+                    printf("Unknown command type\n");
+                    exit(EXIT_FAILURE);
             }
         }
 
         cw_log("sending %u bytes (will expect %u bytes in response)...\n",
-               m->req_size, return_bytes);
+               m->req_size, m->cmds[m->num-1].u.fwd.pkt_size);
         assert(m->req_size <= BUF_SIZE);
         if (!send_all(clientSocket[thread_id], send_buf, m->req_size)) {
             fprintf(stderr,
@@ -500,8 +494,6 @@ int main(int argc, char *argv[]) {
 
     ccmd_init(&ccmd);
 
-    uint32_t return_bytes = resp_size;
-
     argc--;
     argv++;
     while (argc > 0) {
@@ -635,10 +627,9 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[0], "-C") == 0 ||
                    strcmp(argv[0], "--comp-time") == 0) {
             assert(argc >= 2);
-            comptimes_us = atoi(argv[1]);
 
             template_cmds[ncmd].cmd = COMPUTE;
-            template_cmds[ncmd].u.comp_time_us = comptimes_us;
+            template_cmds[ncmd].u.comp_time_us = atoi(argv[1]);
 
             ccmd_add(ccmd, &template_cmds[ncmd++]);
 
@@ -648,11 +639,9 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[0], "-S") == 0 ||
                    strcmp(argv[0], "--store-data") == 0) {
             assert(argc >= 2);
-            store_nbytes = atoi(argv[1]);
-
 
             template_cmds[ncmd].cmd = STORE;
-            template_cmds[ncmd].u.store_nbytes = store_nbytes;
+            template_cmds[ncmd].u.store_nbytes = atoi(argv[1]);
 
             ccmd_add(ccmd, &template_cmds[ncmd++]);
 
@@ -662,14 +651,11 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[0], "-L") == 0 ||
                    strcmp(argv[0], "--load-data") == 0) {
             assert(argc >= 2);
-            load_nbytes = atoi(argv[1]);
 
             template_cmds[ncmd].cmd = LOAD;
-            template_cmds[ncmd].u.load_nbytes = load_nbytes;
+            template_cmds[ncmd].u.load_nbytes = atoi(argv[1]);
 
             ccmd_add(ccmd, &template_cmds[ncmd++]);
-
-            return_bytes += load_nbytes;
 
             n_load++;
             argc--;
@@ -687,6 +673,7 @@ int main(int argc, char *argv[]) {
             ccmd_add(ccmd, &template_cmds[ncmd++]);
 
             template_cmds[ncmd].cmd = REPLY;
+            template_cmds[ncmd].u.fwd.pkt_size = default_resp_size;
             ccmd_add(ccmd, &template_cmds[ncmd++]);
 
             argc--;
@@ -730,7 +717,13 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[0], "-rs") == 0 ||
                    strcmp(argv[0], "--resp-size") == 0) {
             assert(argc >= 2);
-            resp_size = atol(argv[1]);
+
+            //TODO: attach last -rs to original reply
+            unsigned long resp_size = atol(argv[1]);
+            assert(resp_size <= BUF_SIZE);
+            assert(resp_size >= MIN_REPLY_SIZE);
+            ccmd_attach_reply_size(ccmd, resp_size);
+
             argc--;
             argv++;
         } else if (strcmp(argv[0], "-ers") == 0 ||
@@ -764,9 +757,12 @@ int main(int argc, char *argv[]) {
     }
 
     // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
-    template_cmds[ncmd].cmd = REPLY;
-    template_cmds[ncmd].u.fwd.pkt_size = return_bytes;
-    ccmd_last_reply(ccmd, &template_cmds[ncmd++]);
+    // TODO: should be optional
+    if (!ccmd->last_reply_called) {
+        template_cmds[ncmd].cmd = REPLY;
+        template_cmds[ncmd].u.fwd.pkt_size = default_resp_size;
+        ccmd_last_reply(ccmd, &template_cmds[ncmd++]);
+    }
 
     // globals
     if (n_compute + n_store + n_load > 0 && num_pkts <= 0){
@@ -828,12 +824,12 @@ int main(int argc, char *argv[]) {
     printf("  waitspin=%d\n", wait_spinning);
     printf("  ramp_num_steps=%d, ramp_delta_rate=%d, ramp_step_secs=%d\n",
            ramp_num_steps, ramp_delta_rate, ramp_step_secs);
-    printf("  comptime_us=%lu, exp_comptimes=%d\n", comptimes_us,
-           exp_comptimes);
+    /*printf("  comptime_us=%lu, exp_comptimes=%d\n", comptimes_us,
+           exp_comptimes); TODO: Update */
     printf("  pkt_size=%lu (%lu with headers), exp_pkt_size=%d\n", pkt_size,
            pkt_size + TCPIP_HEADERS_SIZE, exp_pkt_size);
-    printf("  resp_size=%lu (%lu with headers), exp_resp_size=%d\n", resp_size,
-           resp_size + TCPIP_HEADERS_SIZE, exp_resp_size);
+    /*printf("  resp_size=%lu (%lu with headers), exp_resp_size=%d\n", resp_size,
+           resp_size + TCPIP_HEADERS_SIZE, exp_resp_size); TODO: Update */
     printf("  min packet size due to header: send=%lu, reply=%lu\n",
            MIN_SEND_SIZE, MIN_REPLY_SIZE);
     printf("  max packet size: %d\n", BUF_SIZE);
@@ -843,8 +839,6 @@ int main(int argc, char *argv[]) {
 
     assert(pkt_size >= MIN_SEND_SIZE);
     assert(pkt_size <= BUF_SIZE);
-    assert(resp_size >= MIN_REPLY_SIZE);
-    assert(resp_size <= BUF_SIZE);
     assert(no_delay == 0 || no_delay == 1);
 
     // Init random number generator

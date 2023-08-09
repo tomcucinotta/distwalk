@@ -9,11 +9,14 @@
 void ccmd_init(ccmd_t** q) {
     *q = malloc(sizeof(ccmd_t));
 
+    (*q)->num = 0;
+    (*q)->last_reply_called = 0;
+
     (*q)->head_actions = NULL;
     (*q)->tail_actions = NULL;
 
     (*q)->head_replies = NULL;
-    (*q)->num = 0;
+    (*q)->tail_replies = NULL;
 }
 
 void ccmd_add(ccmd_t* q, command_t* cmd) {
@@ -24,7 +27,8 @@ void ccmd_add(ccmd_t* q, command_t* cmd) {
 
     ccmd_node_t* new_node = malloc(sizeof(ccmd_node_t));
     new_node->cmd = malloc(sizeof(command_t));
-    memcpy(&(new_node->cmd), &cmd, sizeof(command_t));
+    new_node->cmd->cmd = cmd->cmd;
+    new_node->cmd->u = cmd->u;
 
     if (new_node->cmd->cmd != REPLY){ // FIFO
         if (!q->head_actions) {
@@ -52,6 +56,23 @@ void ccmd_add(ccmd_t* q, command_t* cmd) {
     q->num++;
 }
 
+void ccmd_attach_reply_size(ccmd_t* q, unsigned long resp_size) {
+    if (!q) {
+        printf("ccmd_attach_reply_size() error - Initialize queue first\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (!q->head_replies) {
+        command_t reply_cmd;
+        reply_cmd.cmd = REPLY;
+        reply_cmd.u.fwd.pkt_size = resp_size;
+        ccmd_last_reply(q, &reply_cmd);
+    }
+    else {
+        q->head_replies->cmd->u.fwd.pkt_size = resp_size;
+    }
+}
+
 // No LIFO for last reply of the command chain
 void ccmd_last_reply(ccmd_t* q, command_t* cmd) {
     if (!q) {
@@ -62,6 +83,11 @@ void ccmd_last_reply(ccmd_t* q, command_t* cmd) {
     if (cmd->cmd != REPLY) {
         printf("ccmd_last_reply() error - Wrong command type\n");
         exit(EXIT_FAILURE);
+    }
+
+    if (q->last_reply_called) {
+        printf("ccmd_last_reply() warning - you already called it, skipping...\n");
+        return;
     }
 
     if (!q->head_replies) {
@@ -80,6 +106,8 @@ void ccmd_last_reply(ccmd_t* q, command_t* cmd) {
 
         q->num++;
     }
+
+    q->last_reply_called = 1;
 }
 
 void ccmd_dump(ccmd_t* q, message_t* m) {
@@ -116,7 +144,7 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
             case REPLY: 
                 break;
             default: 
-                printf("Unknown command type\n");
+                printf("ccmd_dump() - Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
         //printf("%s\n", get_command_name(curr->cmd->cmd));
@@ -169,10 +197,10 @@ void ccmd_log(ccmd_t* q) {
                 sprintf(opts, "%s:%d", inet_ntoa((struct in_addr) {curr->cmd->u.fwd.fwd_host}), ntohs(curr->cmd->u.fwd.fwd_port));
                 break;
             case REPLY:
-                //sprintf(opts, "%dus", curr->cmd->u.pkt_size);
+                sprintf(opts, "%dus", curr->cmd->u.fwd.pkt_size);
                 break;
             default: 
-                printf("Unknown command type\n");
+                printf("ccmd_log() - Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
         printf("%s(%s)%s", get_command_name(curr->cmd->cmd), opts, curr->next ? "->" : "");
