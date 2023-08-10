@@ -29,7 +29,7 @@
 // Exit immediately if cond is violated
 #define check(cond) do {	 \
     if (!(cond)) {		 \
-      fprintf(stderr, "Error: " #cond);		\
+      fprintf(stderr, "Error: %s\n", #cond);     \
       exit(EXIT_FAILURE);	 \
     }				 \
   } while (0)
