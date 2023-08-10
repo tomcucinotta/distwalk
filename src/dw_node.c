@@ -366,7 +366,9 @@ int reply(int sock, int buf_id, message_t *m, int cmd_id) {
     cw_log("Replying to req %u\n", m->req_id);
     cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
+#ifdef CW_DEBUG
     msg_log(m_dst);
+#endif
     // TODO: return to epoll loop to handle sending of long packets
     // (here I'm blocking the thread)
     return start_send(buf_id, sock, bufs[buf_id].reply_buf, m_dst->req_size);
