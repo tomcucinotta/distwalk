@@ -280,6 +280,7 @@ int copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
     int nested_fwd = 0;
     // left-shift m->cmds[] into m_dst->cmds[], removing m->cmds[cmd_id]
     int i = cmd_id;
+
     for (; i < m->num; i++) {
         m_dst->cmds[i - cmd_id] = m->cmds[i];
         if (m->cmds[i].cmd == REPLY) {
@@ -323,11 +324,16 @@ int forward(int buf_id, message_t *m, int cmd_id) {
     message_t *m_dst = (message_t *)bufs[buf_id].fwd_buf;
     int forwarded = copy_tail(m, m_dst, cmd_id + 1);
     m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
+
+#ifdef CW_DEBUG
+    msg_log(m_dst);
+#endif
     cw_log("Forwarding req %u to %s:%d\n", m->req_id,
            inet_ntoa((struct in_addr){m->cmds[cmd_id].u.fwd.fwd_host}),
            m->cmds[cmd_id].u.fwd.fwd_port);
     cw_log("  f: cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
+
     // TODO: return to epoll loop to handle sending of long packets
     // (here I'm blocking the thread)
     if (!send_all(sock, bufs[buf_id].fwd_buf, m_dst->req_size))
@@ -443,6 +449,11 @@ int process_messages(int buf_id) {
             break;
         }
         assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
+
+#ifdef CW_DEBUG
+        msg_log(m);
+#endif
+
         for (int i = 0; i < m->num; i++) {
             if (m->cmds[i].cmd == COMPUTE) {
                 compute_for(m->cmds[i].u.comp_time_us);
