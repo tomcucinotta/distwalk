@@ -60,6 +60,7 @@ static inline const char* get_command_name(command_type_t cmd) {
 }
 
 static inline const void msg_log(message_t* m) {
+  printf("%d cmds: ", m->num);
   for (int i=0; i<m->num; i++) {
     char opts[32] = "";
     switch (m->cmds[i].cmd) {

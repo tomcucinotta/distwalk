@@ -670,6 +670,7 @@ int main(int argc, char *argv[]) {
             template_cmds[ncmd].cmd = FORWARD;
             template_cmds[ncmd].u.fwd.fwd_port = addr.sin_port;
             template_cmds[ncmd].u.fwd.fwd_host = addr.sin_addr.s_addr;
+            template_cmds[ncmd].u.fwd.pkt_size = default_resp_size;
             ccmd_add(ccmd, &template_cmds[ncmd++]);
 
             template_cmds[ncmd].cmd = REPLY;
