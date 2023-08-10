@@ -76,7 +76,7 @@ static inline const void msg_log(message_t* m) {
             sprintf(opts, "%s:%d", inet_ntoa((struct in_addr) {m->cmds[i].u.fwd.fwd_host}), ntohs(m->cmds[i].u.fwd.fwd_port));
             break;
         case REPLY:
-            //sprintf(opts, "%dus", m->u.pkt_size);
+            sprintf(opts, "%dus", m->cmds[i].u.fwd.pkt_size);
             break;
         default: 
             printf("Unknown command type\n");

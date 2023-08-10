@@ -97,7 +97,8 @@ void ccmd_last_reply(ccmd_t* q, command_t* cmd) {
         ccmd_node_t* new_node = malloc(sizeof(ccmd_node_t));
         new_node->next = NULL;
         new_node->cmd = malloc(sizeof(command_t));
-        memcpy(&(new_node->cmd), &cmd, sizeof(command_t));
+        new_node->cmd->cmd = cmd->cmd;
+        new_node->cmd->u = cmd->u;
 
         ccmd_node_t* tmp = q->tail_replies;
         q->tail_replies = new_node;
