@@ -28,17 +28,19 @@ typedef struct {
   uint32_t pkt_size;    // size of forwarded packet
 } reply_opts_t;*/
 
+// TODO: Here we need all quantities to be network-ordered
 typedef struct {
   command_type_t cmd;
   union {
     uint32_t comp_time_us;  // COMPUTE time (usecs)
     uint32_t store_nbytes;  // STORE data size
     uint32_t load_nbytes;   // LOAD data size
-    fwd_opts_t fwd;     // FORWARD host+port and pkt size
-    //reply_opts_t reply;   // REPLY pkt size
+    fwd_opts_t fwd;         // FORWARD host+port and pkt size
+    uint32_t resp_size;     // REPLY pkt size
   } u;
 } command_t;
 
+// TODO: Here we need all quantities to be network-ordered
 typedef struct {
   uint32_t req_id;
   uint32_t req_size;    // Overall message size in bytes, including commands and payload
@@ -74,10 +76,10 @@ static inline const void msg_log(message_t* m) {
             sprintf(opts, "%db", m->cmds[i].u.load_nbytes);
             break;
         case FORWARD:
-            sprintf(opts, "%s:%d", inet_ntoa((struct in_addr) {m->cmds[i].u.fwd.fwd_host}), ntohs(m->cmds[i].u.fwd.fwd_port));
+            sprintf(opts, "%s:%d,%ul", inet_ntoa((struct in_addr) {m->cmds[i].u.fwd.fwd_host}), ntohs(m->cmds[i].u.fwd.fwd_port), m->cmds[i].u.fwd.pkt_size);
             break;
         case REPLY:
-            sprintf(opts, "%dus", m->cmds[i].u.fwd.pkt_size);
+            sprintf(opts, "%db", m->cmds[i].u.resp_size);
             break;
         default: 
             printf("Unknown command type\n");

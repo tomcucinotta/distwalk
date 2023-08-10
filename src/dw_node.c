@@ -355,7 +355,7 @@ int reply(int sock, int buf_id, message_t *m, int cmd_id) {
     message_t *m_dst = (message_t *)bufs[buf_id].reply_buf;
 
     copy_tail(m, m_dst, cmd_id + 1);
-    m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
+    m_dst->req_size = m->cmds[cmd_id].u.resp_size;
     cw_log("Replying to req %u\n", m->req_id);
     cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);

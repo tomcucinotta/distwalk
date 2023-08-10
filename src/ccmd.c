@@ -65,11 +65,11 @@ void ccmd_attach_reply_size(ccmd_t* q, unsigned long resp_size) {
     if (!q->head_replies) {
         command_t reply_cmd;
         reply_cmd.cmd = REPLY;
-        reply_cmd.u.fwd.pkt_size = resp_size;
+        reply_cmd.u.resp_size = resp_size;
         ccmd_last_reply(q, &reply_cmd);
     }
     else {
-        q->head_replies->cmd->u.fwd.pkt_size = resp_size;
+        q->head_replies->cmd->u.resp_size = resp_size;
     }
 }
 
@@ -195,10 +195,10 @@ void ccmd_log(ccmd_t* q) {
                 sprintf(opts, "%db", curr->cmd->u.load_nbytes);
                 break;
             case FORWARD:
-                sprintf(opts, "%s:%d", inet_ntoa((struct in_addr) {curr->cmd->u.fwd.fwd_host}), ntohs(curr->cmd->u.fwd.fwd_port));
+                sprintf(opts, "%s:%d,%ul", inet_ntoa((struct in_addr) {curr->cmd->u.fwd.fwd_host}), ntohs(curr->cmd->u.fwd.fwd_port), curr->cmd->u.fwd.pkt_size);
                 break;
             case REPLY:
-                sprintf(opts, "%dus", curr->cmd->u.fwd.pkt_size);
+                sprintf(opts, "%db", curr->cmd->u.resp_size);
                 break;
             default: 
                 printf("ccmd_log() - Unknown command type\n");

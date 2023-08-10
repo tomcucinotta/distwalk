@@ -296,7 +296,7 @@ void *thread_sender(void *data) {
                     break;
                 case REPLY:
                     if (exp_resp_size) {
-                        m->cmds[i].u.fwd.pkt_size =
+                        m->cmds[i].u.resp_size =
                             exp_packet_size(m->cmds[i].u.fwd.pkt_size, MIN_REPLY_SIZE, BUF_SIZE, &rnd_buf);
                     }
                     break;
@@ -307,7 +307,7 @@ void *thread_sender(void *data) {
         }
 
         cw_log("sending %u bytes (will expect %u bytes in response)...\n",
-               m->req_size, m->cmds[m->num-1].u.fwd.pkt_size);
+               m->req_size, m->cmds[m->num-1].u.resp_size);
         assert(m->req_size <= BUF_SIZE);
         if (!send_all(clientSocket[thread_id], send_buf, m->req_size)) {
             fprintf(stderr,
@@ -674,7 +674,7 @@ int main(int argc, char *argv[]) {
             ccmd_add(ccmd, &template_cmds[ncmd++]);
 
             template_cmds[ncmd].cmd = REPLY;
-            template_cmds[ncmd].u.fwd.pkt_size = default_resp_size;
+            template_cmds[ncmd].u.resp_size = default_resp_size;
             ccmd_add(ccmd, &template_cmds[ncmd++]);
 
             argc--;
@@ -761,7 +761,7 @@ int main(int argc, char *argv[]) {
     // TODO: should be optional
     if (!ccmd->last_reply_called) {
         template_cmds[ncmd].cmd = REPLY;
-        template_cmds[ncmd].u.fwd.pkt_size = default_resp_size;
+        template_cmds[ncmd].u.resp_size = default_resp_size;
         ccmd_last_reply(ccmd, &template_cmds[ncmd++]);
     }
 
