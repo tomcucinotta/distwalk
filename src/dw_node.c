@@ -23,17 +23,21 @@
 
 #define MAX_EVENTS 10
 
-typedef enum { RECEIVING, SENDING, LOADING, STORING, CONNECTING } req_status;
+// I could be doing 0, 1, 2 or more of these at the same time => bitmask
+typedef enum { RECEIVING = 1, SENDING = 2, LOADING = 4, STORING = 8, CONNECTING = 16 } req_status;
 
 typedef struct {
-    unsigned char *buf;  // NULL for unused buf_info
-    unsigned long buf_size;
-    unsigned char *curr_buf;
-    unsigned long curr_size;
+    unsigned char *buf;           // receive buffer, NULL for unused buf_info
+    unsigned long buf_size;       // receive buffer size
+    unsigned char *curr_buf;      // current pointer within receive buffer while RECEIVING
+    unsigned long curr_size;      // leftover space in receive buffer
 
-    unsigned char *reply_buf;
-    unsigned char *fwd_buf;
+    unsigned char *curr_send_buf; // curr ptr in reply/fwd buffer while SENDING
+    unsigned long curr_send_size; // size of leftover data to send
+    unsigned long curr_send_sock; // sock we're sending to (reply vs forwarding)
 
+    unsigned char *fwd_buf;       // forwarding buffer
+    unsigned char *reply_buf;     // forwarding buffer
     unsigned char *store_buf;
 
     int sock;
@@ -263,6 +267,8 @@ size_t recv_all(int sock, unsigned char *buf, size_t len) {
     return read_tot;
 }
 
+int start_send(int buf_id, int sock, unsigned char *buf, size_t size);
+
 // Copy req id from m into m_dst, and commands up to the matching REPLY (or the end of m),
 // skipping the first cmd_id elems in m->cmds[].
 //
@@ -340,7 +346,7 @@ int reply(int sock, int buf_id, message_t *m, int cmd_id) {
            m_dst->req_size);
     // TODO: return to epoll loop to handle sending of long packets
     // (here I'm blocking the thread)
-    return send_all(sock, bufs[buf_id].reply_buf, m_dst->req_size);
+    return start_send(buf_id, sock, bufs[buf_id].reply_buf, m_dst->req_size);
 }
 
 size_t recv_message(int sock, unsigned char *buf, size_t len) {
@@ -416,35 +422,8 @@ void close_and_forget(int epollfd, int sock) {
     close(sock);
 }
 
-int process_messages(int sock, int buf_id) {
-    size_t received =
-        recv(sock, bufs[buf_id].curr_buf, bufs[buf_id].curr_size, 0);
-    cw_log("recv() returned: %d\n", (int)received);
-    if (received == 0) {
-        cw_log("Connection closed by remote end\n");
-        free(bufs[buf_id].buf);
-        free(bufs[buf_id].reply_buf);
-        free(bufs[buf_id].fwd_buf);
-        free(bufs[buf_id].store_buf);
-
-        eventually_ignore_sys(pthread_mutex_lock(&bufs[buf_id].mtx),
-                              (per_client_thread == 1));
-        bufs[buf_id].buf = NULL;
-        bufs[buf_id].reply_buf = NULL;
-        eventually_ignore_sys(pthread_mutex_unlock(&bufs[buf_id].mtx),
-                              (per_client_thread == 1));
-
-        return 0;
-    } else if (received == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        cw_log("Got EAGAIN or EWOULDBLOCK, ignoring...\n");
-        return 1;
-    } else if (received == -1) {
-        fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
-        return 0;
-    }
-    bufs[buf_id].curr_buf += received;
-    bufs[buf_id].curr_size -= received;
-
+int process_messages(int buf_id) {
+    int sock = bufs[buf_id].sock;
     unsigned char *buf = bufs[buf_id].buf;
     unsigned long msg_size = bufs[buf_id].curr_buf - buf;
 
@@ -544,7 +523,80 @@ int process_messages(int sock, int buf_id) {
     return 1;
 }
 
-void send_messages(int buf_id) { printf("send_messages()\n"); }
+void free_buf(int buf_id) {
+    free(bufs[buf_id].buf);
+    free(bufs[buf_id].reply_buf);
+    free(bufs[buf_id].fwd_buf);
+    free(bufs[buf_id].store_buf);
+
+    eventually_ignore_sys(pthread_mutex_lock(&bufs[buf_id].mtx),
+                          (per_client_thread == 1));
+    bufs[buf_id].buf = NULL;
+    bufs[buf_id].reply_buf = NULL;
+    eventually_ignore_sys(pthread_mutex_unlock(&bufs[buf_id].mtx),
+                          (per_client_thread == 1));
+}
+
+int recv_messages(int buf_id) {
+    int sock = bufs[buf_id].sock;
+    size_t received =
+        recv(sock, bufs[buf_id].curr_buf, bufs[buf_id].curr_size, 0);
+    cw_log("recv() returned: %d\n", (int)received);
+    if (received == 0) {
+        cw_log("Connection closed by remote end\n");
+        return 0;
+    } else if (received == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        cw_log("Got EAGAIN or EWOULDBLOCK, ignoring...\n");
+        return 1;
+    } else if (received == -1) {
+        fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
+        return 0;
+    }
+    bufs[buf_id].curr_buf += received;
+    bufs[buf_id].curr_size -= received;
+
+    return 1;
+}
+
+// used during REPLYING or FORWARDING
+int send_messages(int buf_id) {
+    int sock = bufs[buf_id].curr_send_sock;
+    cw_log("send_messages(): buf_id=%d, status=%d, sock=%d\n", buf_id, bufs[buf_id].status, sock);
+    size_t sent =
+        send(sock, bufs[buf_id].curr_send_buf, bufs[buf_id].curr_send_size, 0);
+    cw_log("send() returned: %d\n", (int)sent);
+    if (sent == 0) {
+        // TODO: should not even be possible, ignoring
+        cw_log("send() returned 0\n");
+        return 1;
+    } else if (sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        cw_log("Got EAGAIN or EWOULDBLOCK, ignoring...\n");
+        return 1;
+    } else if (sent == -1) {
+        fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
+        bufs[buf_id].status &= ~SENDING;
+        return 0;
+    }
+    bufs[buf_id].curr_send_buf += sent;
+    bufs[buf_id].curr_send_size -= sent;
+    if (bufs[buf_id].curr_send_size == 0) {
+        bufs[buf_id].status &= ~SENDING;
+        cw_log("send_messages(): buf_id=%d, status=%d\n", buf_id, bufs[buf_id].status);
+    }
+
+    return 1;
+}
+
+int start_send(int buf_id, int sock, unsigned char *buf, size_t size) {
+    cw_log("buf_id: %d, status: %d\n", buf_id, bufs[buf_id].status);
+    check(!(bufs[buf_id].status & SENDING));
+    bufs[buf_id].status |= SENDING;
+    cw_log("buf_id: %d, status: %d\n", buf_id, bufs[buf_id].status);
+    bufs[buf_id].curr_send_buf = buf;
+    bufs[buf_id].curr_send_size = size;
+    bufs[buf_id].curr_send_sock = sock;
+    return send_messages(buf_id);
+}
 
 void finalize_conn(int buf_id) { printf("finalize_conn()\n"); }
 
@@ -558,21 +610,24 @@ void setnonblocking(int fd) {
 void exec_request(int epollfd, struct epoll_event ev) {
     int buf_id = ev.data.u32;
 
-    if ((ev.events | EPOLLIN) && bufs[buf_id].status == RECEIVING) {
-        int ret = process_messages(bufs[buf_id].sock, buf_id);
-
-        if (!ret) {
+    if ((ev.events | EPOLLIN) && (bufs[buf_id].status & RECEIVING)) {
+        if (!recv_messages(buf_id)) {
             close_and_forget(epollfd, bufs[buf_id].sock);
+            return;
         }
-    } else if ((ev.events | EPOLLOUT) && bufs[buf_id].status == SENDING)
-        send_messages(buf_id);
-    else if ((ev.events | EPOLLOUT) && bufs[buf_id].status == CONNECTING)
-        finalize_conn(buf_id);
-    else {
-        fprintf(stderr, "unexpected status: event=%d, %d\n", ev.events,
-                bufs[buf_id].status);
-        exit(EXIT_FAILURE);
     }
+    if ((ev.events | EPOLLOUT) && (bufs[buf_id].status & SENDING)) {
+        if (!send_messages(buf_id)) {
+            close_and_forget(epollfd, bufs[buf_id].sock);
+            return;
+        }
+    }
+    if ((ev.events | EPOLLOUT) && (bufs[buf_id].status & CONNECTING)) {
+        finalize_conn(buf_id);
+    }
+    // check whether we have new or leftover messages to process
+    if (!process_messages(buf_id))
+        close_and_forget(epollfd, buf_id);
 }
 
 void *epoll_worker_loop(void *args) {
@@ -716,6 +771,8 @@ void epoll_main_loop(int listen_sock) {
                 bufs[buf_id].buf_size = BUF_SIZE;
                 bufs[buf_id].curr_buf = bufs[buf_id].buf;
                 bufs[buf_id].curr_size = BUF_SIZE;
+                bufs[buf_id].curr_send_buf = NULL;
+                bufs[buf_id].curr_send_size = 0;
                 bufs[buf_id].sock = conn_sock;
                 bufs[buf_id].status = RECEIVING;
                 bufs[buf_id].orig_sock_id = -1;
