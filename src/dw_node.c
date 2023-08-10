@@ -24,7 +24,14 @@
 #define MAX_EVENTS 10
 
 // I could be doing 0, 1, 2 or more of these at the same time => bitmask
-typedef enum { RECEIVING = 1, SENDING = 2, LOADING = 4, STORING = 8, CONNECTING = 16 } req_status;
+typedef enum {
+    RECEIVING = 1,      // receiving on bufs[].sock
+    SENDING = 2,        // sending data for REPLY or FORWARD
+    LOADING = 4,        // loading data from disk
+    STORING = 8,        // storing data to disk
+    CONNECTING = 16,    // waiting for connection establishment during a FORWARD
+    FORWARDING = 32     // waiting for a FORWARD to complete
+} req_status;
 
 typedef struct {
     unsigned char *buf;           // receive buffer, NULL for unused buf_info
