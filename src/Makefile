@@ -31,9 +31,9 @@ dep:
 
 # DO NOT DELETE
 
-ccmd.o: ccmd.h message.h cw_debug.h
+ccmd.o: ccmd.h message.h
 dw_client.o: cw_debug.h expon.h message.h timespec.h ccmd.h
 dw_node.o: cw_debug.h message.h timespec.h
 node-fwd.o: message.h timespec.h cw_debug.h
+test_ccmd.o: ccmd.h message.h
 test_expon.o: expon.h
-test_ccmd.o: cw_debug.h ccmd.h message.h
