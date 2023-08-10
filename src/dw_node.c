@@ -427,8 +427,6 @@ int process_messages(int buf_id) {
     unsigned char *buf = bufs[buf_id].buf;
     unsigned long msg_size = bufs[buf_id].curr_buf - buf;
 
-    size_t loaded_data = -1;
-
     // batch processing of multiple messages, if received more than 1
     do {
         cw_log("msg_size=%lu\n", msg_size);
@@ -458,11 +456,6 @@ int process_messages(int buf_id) {
                 // rest of cmds[] are for next hop, not me
                 i += to_skip - 1;
             } else if (m->cmds[i].cmd == REPLY) {
-                // simulate data retrieve
-                if (loaded_data >= 0) {
-                    m->cmds[i].u.fwd.pkt_size += loaded_data;
-                    loaded_data = -1;
-                }
                 if (!reply(sock, buf_id, m, i)) {
                     fprintf(stderr, "reply() failed\n");
                     close_and_forget(epollfd, bufs[buf_id].sock);
@@ -485,7 +478,6 @@ int process_messages(int buf_id) {
                 } else {
                     size_t leftovers;
                     load(buf_id, m->cmds[i].u.load_nbytes, &leftovers);
-                    loaded_data = m->cmds[i].u.load_nbytes - leftovers;
                 }
             } else {
                 cw_log("Error: Unknown cmd: %d\n", m->cmds[0].cmd);
