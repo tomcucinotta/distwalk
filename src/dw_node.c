@@ -291,7 +291,9 @@ int copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
         } else if (m->cmds[i].cmd == FORWARD)
             nested_fwd++;
     }
-    m_dst->num = i - cmd_id;
+
+    m_dst->num = i - cmd_id + 1;
+
     return m_dst->num;
 }
 
