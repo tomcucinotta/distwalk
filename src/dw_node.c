@@ -339,13 +339,19 @@ int forward(int buf_id, message_t *m, int cmd_id) {
 #endif
     cw_log("Forwarding req %u to %s:%d\n", m->req_id,
            inet_ntoa((struct in_addr){m->cmds[cmd_id].u.fwd.fwd_host}),
-           m->cmds[cmd_id].u.fwd.fwd_port);
+           ntohs(m->cmds[cmd_id].u.fwd.fwd_port));
     cw_log("  f: cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
 
     // TODO: return to epoll loop to handle sending of long packets
     // (here I'm blocking the thread)
     if (!send_all(sock, bufs[buf_id].fwd_buf, m_dst->req_size))
+        return 0;
+    int fwd_reply_id = cmd_id + forwarded;
+    cw_log("  f: cmd_id=%d, num=%d, fwd_repl_id=%d, forwarded=%d\n", cmd_id, m->num, fwd_reply_id, forwarded);
+    check(fwd_reply_id < m->num && m->cmds[fwd_reply_id].cmd == REPLY);
+    cw_log("  f: waiting for resp_size=%d bytes\n", m->cmds[fwd_reply_id].u.resp_size);
+    if (!recv_all(sock, bufs[buf_id].reply_buf, m->cmds[fwd_reply_id].u.resp_size))
         return 0;
     return forwarded;
 }
@@ -354,11 +360,13 @@ int forward(int buf_id, message_t *m, int cmd_id) {
 int reply(int sock, int buf_id, message_t *m, int cmd_id) {
     message_t *m_dst = (message_t *)bufs[buf_id].reply_buf;
 
-    copy_tail(m, m_dst, cmd_id + 1);
+    m_dst->req_id = m->req_id;
     m_dst->req_size = m->cmds[cmd_id].u.resp_size;
+    m_dst->num = 0;
     cw_log("Replying to req %u\n", m->req_id);
     cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
+    msg_log(m_dst);
     // TODO: return to epoll loop to handle sending of long packets
     // (here I'm blocking the thread)
     return start_send(buf_id, sock, bufs[buf_id].reply_buf, m_dst->req_size);
@@ -473,8 +481,8 @@ int process_messages(int buf_id) {
                     close_and_forget(epollfd, sock);
                     break;
                 }
-                // rest of cmds[] are for next hop, not me
-                i += to_skip - 1;
+                // skip forwarded portion of cmds[]
+                i += to_skip;
             } else if (m->cmds[i].cmd == REPLY) {
                 if (!reply(sock, buf_id, m, i)) {
                     fprintf(stderr, "reply() failed\n");

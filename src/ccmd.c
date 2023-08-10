@@ -195,7 +195,7 @@ void ccmd_log(ccmd_t* q) {
                 sprintf(opts, "%db", curr->cmd->u.load_nbytes);
                 break;
             case FORWARD:
-                sprintf(opts, "%s:%d,%ul", inet_ntoa((struct in_addr) {curr->cmd->u.fwd.fwd_host}), ntohs(curr->cmd->u.fwd.fwd_port), curr->cmd->u.fwd.pkt_size);
+                sprintf(opts, "%s:%d,%u", inet_ntoa((struct in_addr) {curr->cmd->u.fwd.fwd_host}), ntohs(curr->cmd->u.fwd.fwd_port), curr->cmd->u.fwd.pkt_size);
                 break;
             case REPLY:
                 sprintf(opts, "%db", curr->cmd->u.resp_size);

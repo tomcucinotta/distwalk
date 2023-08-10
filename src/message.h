@@ -76,7 +76,7 @@ static inline const void msg_log(message_t* m) {
             sprintf(opts, "%db", m->cmds[i].u.load_nbytes);
             break;
         case FORWARD:
-            sprintf(opts, "%s:%d,%ul", inet_ntoa((struct in_addr) {m->cmds[i].u.fwd.fwd_host}), ntohs(m->cmds[i].u.fwd.fwd_port), m->cmds[i].u.fwd.pkt_size);
+            sprintf(opts, "%s:%d,%u", inet_ntoa((struct in_addr) {m->cmds[i].u.fwd.fwd_host}), ntohs(m->cmds[i].u.fwd.fwd_port), m->cmds[i].u.fwd.pkt_size);
             break;
         case REPLY:
             sprintf(opts, "%db", m->cmds[i].u.resp_size);
