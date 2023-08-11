@@ -34,6 +34,21 @@
     }				 \
   } while (0)
 
+// Execute stmt if cond is violated
+#define check_do(cond, stmt) do {		 \
+    if (!(cond)) {				 \
+      fprintf(stderr, "Error: %s\n", #cond);     \
+      stmt;					 \
+    }						 \
+  } while (0)
+
+// Dump error on stderr if cond is violated, and ignore
+#define check_ignore(cond) do {			 \
+    if (!(cond)) {				 \
+      fprintf(stderr, "Error: %s\n", #cond);     \
+    }						 \
+  } while (0)
+
 // Ignore the syscall if cond is satisfied
 #define eventually_ignore_sys(call, cond) do { \
 	if (cond) { \
