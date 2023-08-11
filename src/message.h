@@ -61,10 +61,13 @@ static inline const char* get_command_name(command_type_t cmd) {
   }
 }
 
-static inline const void msg_log(message_t* m) {
+static inline const void msg_log(message_t* m, char* padding) {
+  printf("%s", padding);
   printf("message (req_id: %u, req_size: %u, num: %u): ", m->req_id, m->req_size, m->num);
+  
   for (int i=0; i<m->num; i++) {
-    char opts[32] = "";
+    char opts[64] = "";
+
     switch (m->cmds[i].cmd) {
         case STORE:
             sprintf(opts, "%db", m->cmds[i].u.store_nbytes);

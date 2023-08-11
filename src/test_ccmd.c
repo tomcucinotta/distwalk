@@ -22,8 +22,8 @@ int main() {
     ccmd_log(ccmd);
     ccmd_dump(ccmd, m);
     ccmd_destroy(ccmd);
-    
-    msg_log(m);
+
+    msg_log(m, "");
 
     free(m);
 

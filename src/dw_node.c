@@ -334,12 +334,12 @@ int forward(int buf_id, message_t *m, int cmd_id) {
     int forwarded = copy_tail(m, m_dst, cmd_id + 1);
     m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
 
-#ifdef CW_DEBUG
-    msg_log(m_dst);
-#endif
     cw_log("Forwarding req %u to %s:%d\n", m->req_id,
            inet_ntoa((struct in_addr){m->cmds[cmd_id].u.fwd.fwd_host}),
            ntohs(m->cmds[cmd_id].u.fwd.fwd_port));
+#ifdef CW_DEBUG
+    msg_log(m_dst, "  f: ");
+#endif
     cw_log("  f: cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
 
@@ -367,7 +367,7 @@ int reply(int sock, int buf_id, message_t *m, int cmd_id) {
     cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
 #ifdef CW_DEBUG
-    msg_log(m_dst);
+    msg_log(m_dst, "  ");
 #endif
     // TODO: return to epoll loop to handle sending of long packets
     // (here I'm blocking the thread)
@@ -470,7 +470,7 @@ int process_messages(int buf_id) {
         assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
 
 #ifdef CW_DEBUG
-        msg_log(m);
+        msg_log(m, "");
 #endif
 
         for (int i = 0; i < m->num; i++) {
