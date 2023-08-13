@@ -585,7 +585,7 @@ int send_messages(int buf_id) {
     int sock = bufs[buf_id].curr_send_sock;
     cw_log("send_messages(): buf_id=%d, status=%d, sock=%d\n", buf_id, bufs[buf_id].status, sock);
     size_t sent =
-        send(sock, bufs[buf_id].curr_send_buf, bufs[buf_id].curr_send_size, 0);
+        send(sock, bufs[buf_id].curr_send_buf, bufs[buf_id].curr_send_size, MSG_NOSIGNAL);
     cw_log("send() returned: %d\n", (int)sent);
     if (sent == 0) {
         // TODO: should not even be possible, ignoring
