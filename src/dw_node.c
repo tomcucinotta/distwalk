@@ -480,39 +480,34 @@ int process_messages(int buf_id) {
             } else if (m->cmds[i].cmd == FORWARD) {
                 int to_skip = forward(buf_id, m, i);
                 if (to_skip == 0) {
-                    cw_log("Error: could not execute FORWARD\n");
-                    close_and_forget(epollfd, sock);
-                    break;
+                    fprintf(stderr, "Error: could not execute FORWARD\n");
+                    return 0;
                 }
                 // skip forwarded portion of cmds[]
                 i += to_skip;
             } else if (m->cmds[i].cmd == REPLY) {
                 if (!reply(sock, buf_id, m, i)) {
                     fprintf(stderr, "reply() failed\n");
-                    close_and_forget(epollfd, bufs[buf_id].sock);
+                    return 0;
                 }
                 // any further cmds[] for replied-to hop, not me
                 break;
             } else if (m->cmds[i].cmd == STORE) {
                 if (!storage_path) {
-                    cw_log("Error: Cannot execute STORE cmd because no storage path has been defined\n");
-                    close_and_forget(epollfd, sock);
+                    fprintf(stderr, "Error: Cannot execute STORE cmd because no storage path has been defined\n");
                     exit(EXIT_FAILURE);
-                } else {
-                    store(buf_id, m->cmds[i].u.store_nbytes);
                 }
+                store(buf_id, m->cmds[i].u.store_nbytes);
             } else if (m->cmds[i].cmd == LOAD) {
                 if (!storage_path) {
-                    cw_log("Error: Cannot execute LOAD cmd because no storage path has been defined\n");
-                    close_and_forget(epollfd, sock);
+                    fprintf(stderr, "Error: Cannot execute LOAD cmd because no storage path has been defined\n");
                     exit(EXIT_FAILURE);
-                } else {
-                    size_t leftovers;
-                    load(buf_id, m->cmds[i].u.load_nbytes, &leftovers);
                 }
+                size_t leftovers;
+                load(buf_id, m->cmds[i].u.load_nbytes, &leftovers);
             } else {
-                cw_log("Error: Unknown cmd: %d\n", m->cmds[0].cmd);
-                close_and_forget(epollfd, sock);
+                fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
+                return 0;
             }
         }
 
@@ -547,13 +542,15 @@ int process_messages(int buf_id) {
 }
 
 void free_buf(int buf_id) {
+    cw_log("Freeing buf %d\n", buf_id);
+
+    if (per_client_thread)
+        sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
+
     free(bufs[buf_id].buf);
     free(bufs[buf_id].reply_buf);
     free(bufs[buf_id].fwd_buf);
     free(bufs[buf_id].store_buf);
-
-    if (per_client_thread)
-        sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
 
     bufs[buf_id].buf = NULL;
     bufs[buf_id].reply_buf = NULL;
@@ -623,7 +620,10 @@ int start_send(int buf_id, int sock, unsigned char *buf, size_t size) {
     return send_messages(buf_id);
 }
 
-void finalize_conn(int buf_id) { printf("finalize_conn()\n"); }
+int finalize_conn(int buf_id) {
+    printf("finalize_conn()\n");
+    return 1;
+}
 
 void setnonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -634,25 +634,30 @@ void setnonblocking(int fd) {
 
 void exec_request(int epollfd, const struct epoll_event *p_ev) {
     int buf_id = p_ev->data.u32;
+    if (bufs[buf_id].buf == NULL)
+        return;
 
     if ((p_ev->events | EPOLLIN) && (bufs[buf_id].status & RECEIVING)) {
-        if (!recv_messages(buf_id)) {
-            close_and_forget(epollfd, bufs[buf_id].sock);
-            return;
-        }
+        if (!recv_messages(buf_id))
+            goto err;
     }
     if ((p_ev->events | EPOLLOUT) && (bufs[buf_id].status & SENDING)) {
-        if (!send_messages(buf_id)) {
-            close_and_forget(epollfd, bufs[buf_id].sock);
-            return;
-        }
+        if (!send_messages(buf_id))
+            goto err;
     }
     if ((p_ev->events | EPOLLOUT) && (bufs[buf_id].status & CONNECTING)) {
-        finalize_conn(buf_id);
+        if (finalize_conn(buf_id))
+            goto err;
     }
     // check whether we have new or leftover messages to process
     if (!process_messages(buf_id))
-        close_and_forget(epollfd, buf_id);
+        goto err;
+
+    return;
+
+ err:
+    close_and_forget(epollfd, bufs[buf_id].sock);
+    free_buf(buf_id);
 }
 
 void *epoll_worker_loop(void *args) {
