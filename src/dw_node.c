@@ -64,8 +64,11 @@ static volatile int node_running = 1;  // epoll_main_loop flag
 #define MAX_BUFFERS 16
 
 buf_info bufs[MAX_BUFFERS];
-pthread_t workers[MAX_BUFFERS];
-thread_info thread_infos[MAX_BUFFERS];
+
+// used with --per-client-thread
+#define MAX_THREADS 8
+pthread_t workers[MAX_THREADS];
+thread_info thread_infos[MAX_THREADS];
 
 typedef struct {
     in_addr_t inaddr;  // target IP
@@ -141,7 +144,7 @@ void sigint_cleanup(int _) {
     // terminate workers by sending a notification
     // on their terminationfd
     if (per_client_thread) {
-        for (int i = 0; i < MAX_BUFFERS; i++) {
+        for (int i = 0; i < MAX_THREADS; i++) {
             eventfd_write(thread_infos[i].terminationfd, 1);
         }
     }
@@ -805,9 +808,12 @@ void epoll_main_loop(int listen_sock) {
                 // add client fd
                 if (per_client_thread) {
                     // to the worker epoll
-                    //(which, at this point, is already up and running)
-                    if (epoll_ctl(thread_infos[buf_id].epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
+                    // (which, at this point, is already up and running)
+                    static int next_thread_id = 0;
+                    if (epoll_ctl(thread_infos[next_thread_id].epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
+                    // round-robin accepted connections to the available threads
+                    next_thread_id = (next_thread_id + 1) % MAX_THREADS;
                 } else {  // to main thread
                     if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
@@ -897,7 +903,7 @@ int main(int argc, char *argv[]) {
 
     if (per_client_thread) {
         // Init worker threads
-        for (int i = 0; i < MAX_BUFFERS; i++) {
+        for (int i = 0; i < MAX_THREADS; i++) {
             thread_infos[i].terminationfd = eventfd(0, 0);
             sys_check(thread_infos[i].epollfd = epoll_create1(0));
             sys_check(pthread_create(&workers[i], NULL, epoll_worker_loop,
@@ -966,7 +972,7 @@ int main(int argc, char *argv[]) {
     // Clean-ups
     if (per_client_thread) {
         // Join worker threads
-        for (int i = 0; i < MAX_BUFFERS; i++) {
+        for (int i = 0; i < MAX_THREADS; i++) {
             sys_check(pthread_join(workers[i], NULL));
             close(thread_infos[i].terminationfd);
         }
