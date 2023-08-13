@@ -45,10 +45,9 @@ typedef struct {
 // TODO: Here we need all quantities to be network-ordered
 typedef struct {
   uint32_t req_id;
-  uint32_t req_size;    // Overall message size in bytes, including commands and payload
-
-  uint8_t num;      // Number of valid entries in cmds[]
-  command_t cmds[]; // Up to 255 command_t
+  uint32_t req_size; // Overall message size in bytes, including commands and payload
+  uint8_t num;       // Number of valid entries in cmds[] (0 denotes a response message)
+  command_t cmds[];  // Up to 255 command_t
 } message_t;
 
 static inline const char* get_command_name(command_type_t cmd) {
