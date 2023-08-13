@@ -49,11 +49,4 @@
     }						 \
   } while (0)
 
-// Ignore the syscall if cond is satisfied
-#define eventually_ignore_sys(call, cond) do { \
-	if (cond) { \
-	  sys_check(call); \
-	} \
-  } while (0)
-
 #endif

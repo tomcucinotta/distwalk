@@ -89,40 +89,42 @@ int epollfd;
 
 // return index in socks[] of sock_info associated to inaddr:port, or -1 if not found
 int sock_find_addr(in_addr_t inaddr, int port) {
-    eventually_ignore_sys(pthread_mutex_lock(&socks_mtx),
-                          (per_client_thread == 1));
+    int rv = -1;
+    if (per_client_thread)
+        sys_check(pthread_mutex_lock(&socks_mtx));
 
     for (int i = 0; i < MAX_SOCKETS; i++) {
         if (socks[i].sock != -1 && socks[i].inaddr == inaddr && socks[i].port == port) {
-            eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                                  (per_client_thread == 1));
-            return i;
+            rv = i;
+            break;
         }
     }
 
-    eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                          (per_client_thread == 1));
+    if (per_client_thread)
+        sys_check(pthread_mutex_unlock(&socks_mtx));
 
-    return -1;
+    return rv;
 }
 
 // return index of sock in socks[]
 int sock_find_sock(int sock) {
     assert(sock != -1);
+    int rv = -1;
 
-    eventually_ignore_sys(pthread_mutex_lock(&socks_mtx),
-                          (per_client_thread == 1));
+    if (per_client_thread)
+        sys_check(pthread_mutex_lock(&socks_mtx));
+
     for (int i = 0; i < MAX_SOCKETS; i++) {
         if (socks[i].sock == sock) {
-            eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                                  (per_client_thread == 1));
-            return i;
+            rv = i;
+            break;
         }
     }
 
-    eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                          (per_client_thread == 1));
-    return -1;
+    if (per_client_thread)
+        sys_check(pthread_mutex_unlock(&socks_mtx));
+
+    return rv;
 }
 
 #define MAX_STORAGE_SIZE 1000000
@@ -152,59 +154,55 @@ void sigint_cleanup(int _) {
 // return index of sock_info in socks[] where info has been added (or where it was already found),
 //        or -1 if no unused entry were found in socks[]
 int sock_add(in_addr_t inaddr, int port, int sock) {
-    eventually_ignore_sys(pthread_mutex_lock(&socks_mtx),
-                          (per_client_thread == 1));
+    if (per_client_thread)
+        sys_check(pthread_mutex_lock(&socks_mtx));
+
     int sock_id = sock_find_addr(inaddr, port);
 
-    if (sock_id != -1) {
-        eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                              (per_client_thread == 1));
-        return sock_id;
-    }
-    for (int i = 0; i < MAX_SOCKETS; i++) {
-        if (socks[i].sock == -1) {
-            socks[i].inaddr = inaddr;
-            socks[i].port = port;
-            socks[i].sock = sock;
-
-            eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                                  (per_client_thread == 1));
-            return i;
+    if (sock_id == -1) {
+        for (int i = 0; i < MAX_SOCKETS; i++) {
+            if (socks[i].sock == -1) {
+                socks[i].inaddr = inaddr;
+                socks[i].port = port;
+                socks[i].sock = sock;
+                sock_id = i;
+                break;
+            }
         }
     }
 
-    eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                          (per_client_thread == 1));
-    return -1;
+    if (per_client_thread)
+        sys_check(pthread_mutex_unlock(&socks_mtx));
+    return sock_id;
 }
 
 void sock_del_id(int id) {
     assert(id < MAX_SOCKETS);
 
-    eventually_ignore_sys(pthread_mutex_lock(&socks_mtx),
-                          (per_client_thread == 1));
+    if (per_client_thread)
+        sys_check(pthread_mutex_lock(&socks_mtx));
+
     cw_log("marking socks[%d] invalid\n", id);
     socks[id].sock = -1;
-    eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                          (per_client_thread == 1));
+
+    if (per_client_thread)
+        sys_check(pthread_mutex_unlock(&socks_mtx));
 }
 
 // make entry in socks[] associated to sock invalid, return entry ID if found or
 // -1
 int sock_del(int sock) {
-    eventually_ignore_sys(pthread_mutex_lock(&socks_mtx),
-                          (per_client_thread == 1));
+    if (per_client_thread)
+        sys_check(pthread_mutex_lock(&socks_mtx));
+
     int id = sock_find_sock(sock);
 
-    if (id == -1) {
-        eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                              (per_client_thread == 1));
-        return -1;
-    }
-    sock_del_id(id);
+    if (id != -1)
+        sock_del_id(id);
 
-    eventually_ignore_sys(pthread_mutex_unlock(&socks_mtx),
-                          (per_client_thread == 1));
+    if (per_client_thread)
+        sys_check(pthread_mutex_unlock(&socks_mtx));
+
     return id;
 }
 
@@ -551,12 +549,14 @@ void free_buf(int buf_id) {
     free(bufs[buf_id].fwd_buf);
     free(bufs[buf_id].store_buf);
 
-    eventually_ignore_sys(pthread_mutex_lock(&bufs[buf_id].mtx),
-                          (per_client_thread == 1));
+    if (per_client_thread)
+        sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
+
     bufs[buf_id].buf = NULL;
     bufs[buf_id].reply_buf = NULL;
-    eventually_ignore_sys(pthread_mutex_unlock(&bufs[buf_id].mtx),
-                          (per_client_thread == 1));
+
+    if (per_client_thread)
+        sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
 }
 
 int recv_messages(int buf_id) {
@@ -764,14 +764,13 @@ void epoll_main_loop(int listen_sock) {
 
                 int buf_id;
                 for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
-                    eventually_ignore_sys(pthread_mutex_lock(&bufs[buf_id].mtx),
-                                          (per_client_thread == 1));
+                    if (per_client_thread)
+                        sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
                     if (bufs[buf_id].buf == 0) {
                         break;  // unlock mutex above after mallocs
                     }
-                    eventually_ignore_sys(
-                        pthread_mutex_unlock(&bufs[buf_id].mtx),
-                        (per_client_thread == 1));
+                    if (per_client_thread)
+                        sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
                 }
                 if (buf_id == MAX_BUFFERS) {
                     fprintf(stderr,
@@ -785,8 +784,8 @@ void epoll_main_loop(int listen_sock) {
                 bufs[buf_id].fwd_buf = new_fwd_buf;
                 if (storage_path) bufs[buf_id].store_buf = new_store_buf;
 
-                eventually_ignore_sys(pthread_mutex_unlock(&bufs[buf_id].mtx),
-                                      (per_client_thread == 1));
+                if (per_client_thread)
+                    sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
 
                 // From here, safe to assume that bufs[buf_id] is thread-safe
                 cw_log("Connection assigned to worker %d\n", buf_id);
