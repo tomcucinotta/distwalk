@@ -632,22 +632,22 @@ void setnonblocking(int fd) {
     assert(fcntl(fd, F_SETFL, flags) == 0);
 }
 
-void exec_request(int epollfd, struct epoll_event ev) {
-    int buf_id = ev.data.u32;
+void exec_request(int epollfd, const struct epoll_event *p_ev) {
+    int buf_id = p_ev->data.u32;
 
-    if ((ev.events | EPOLLIN) && (bufs[buf_id].status & RECEIVING)) {
+    if ((p_ev->events | EPOLLIN) && (bufs[buf_id].status & RECEIVING)) {
         if (!recv_messages(buf_id)) {
             close_and_forget(epollfd, bufs[buf_id].sock);
             return;
         }
     }
-    if ((ev.events | EPOLLOUT) && (bufs[buf_id].status & SENDING)) {
+    if ((p_ev->events | EPOLLOUT) && (bufs[buf_id].status & SENDING)) {
         if (!send_messages(buf_id)) {
             close_and_forget(epollfd, bufs[buf_id].sock);
             return;
         }
     }
-    if ((ev.events | EPOLLOUT) && (bufs[buf_id].status & CONNECTING)) {
+    if ((p_ev->events | EPOLLOUT) && (bufs[buf_id].status & CONNECTING)) {
         finalize_conn(buf_id);
     }
     // check whether we have new or leftover messages to process
@@ -684,7 +684,7 @@ void *epoll_worker_loop(void *args) {
                 worker_running = 0;
                 break;
             } else {
-                exec_request(infos->epollfd, infos->events[i]);
+                exec_request(infos->epollfd, &infos->events[i]);
             }
         }
     }
@@ -828,7 +828,7 @@ void epoll_main_loop(int listen_sock) {
                 if (new_fwd_buf) free(new_fwd_buf);
                 if (storage_path && new_store_buf) free(new_store_buf);
             } else {  // NOTE: unused if --per-client-thread
-                exec_request(epollfd, events[i]);
+                exec_request(epollfd, &events[i]);
             }
         }
     }
