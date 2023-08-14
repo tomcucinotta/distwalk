@@ -541,7 +541,7 @@ int process_messages(int buf_id) {
     return 1;
 }
 
-void free_buf(int buf_id) {
+void buf_free(int buf_id) {
     cw_log("Freeing buf %d\n", buf_id);
 
     if (per_client_thread)
@@ -557,6 +557,70 @@ void free_buf(int buf_id) {
 
     if (per_client_thread)
         sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
+}
+
+int buf_alloc(int conn_sock) {
+    unsigned char *new_buf = NULL;
+    unsigned char *new_reply_buf = NULL;
+    unsigned char *new_fwd_buf = NULL;
+    unsigned char *new_store_buf = NULL;
+
+    new_buf = malloc(BUF_SIZE);
+    new_reply_buf = malloc(BUF_SIZE);
+    new_fwd_buf = malloc(BUF_SIZE);
+
+    if (storage_path)
+        new_store_buf =
+            (use_odirect
+             ? aligned_alloc(blk_size, BUF_SIZE + blk_size)
+             : malloc(BUF_SIZE));
+
+    if (new_buf == NULL || new_reply_buf == NULL || new_fwd_buf == NULL ||
+        (storage_path && new_store_buf == NULL))
+        goto continue_free;
+
+    int buf_id;
+    for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
+        if (per_client_thread)
+            sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
+        if (bufs[buf_id].buf == 0) {
+            break;  // unlock mutex above after mallocs
+        }
+        if (per_client_thread)
+            sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
+    }
+    if (buf_id == MAX_BUFFERS)
+        goto continue_free;
+
+    bufs[buf_id].buf = new_buf;
+    bufs[buf_id].reply_buf = new_reply_buf;
+    bufs[buf_id].fwd_buf = new_fwd_buf;
+    if (storage_path) bufs[buf_id].store_buf = new_store_buf;
+
+    if (per_client_thread)
+        sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
+
+    // From here, safe to assume that bufs[buf_id] is thread-safe
+    cw_log("Connection assigned to worker %d\n", buf_id);
+    bufs[buf_id].buf_size = BUF_SIZE;
+    bufs[buf_id].curr_buf = bufs[buf_id].buf;
+    bufs[buf_id].curr_size = BUF_SIZE;
+    bufs[buf_id].curr_send_buf = NULL;
+    bufs[buf_id].curr_send_size = 0;
+    bufs[buf_id].sock = conn_sock;
+    bufs[buf_id].status = RECEIVING;
+    bufs[buf_id].orig_sock_id = -1;
+
+    return buf_id;
+
+ continue_free:
+
+    if (new_buf) free(new_buf);
+    if (new_reply_buf) free(new_reply_buf);
+    if (new_fwd_buf) free(new_fwd_buf);
+    if (storage_path && new_store_buf) free(new_store_buf);
+
+    return -1;
 }
 
 int recv_messages(int buf_id) {
@@ -657,7 +721,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev) {
 
  err:
     close_and_forget(epollfd, bufs[buf_id].sock);
-    free_buf(buf_id);
+    buf_free(buf_id);
 }
 
 void *epoll_worker_loop(void *args) {
@@ -749,62 +813,12 @@ void epoll_main_loop(int listen_sock) {
                 sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY,
                                      (void *)&val, sizeof(val)));
 
-                unsigned char *new_buf = 0;
-                unsigned char *new_reply_buf = 0;
-                unsigned char *new_fwd_buf = 0;
-                unsigned char *new_store_buf = 0;
-
-                new_buf = malloc(BUF_SIZE);
-                new_reply_buf = malloc(BUF_SIZE);
-                new_fwd_buf = malloc(BUF_SIZE);
-
-                if (storage_path)
-                    new_store_buf =
-                        (use_odirect
-                             ? aligned_alloc(blk_size, BUF_SIZE + blk_size)
-                             : malloc(BUF_SIZE));
-
-                if (new_buf == 0 || new_reply_buf == 0 || new_fwd_buf == 0 ||
-                    (storage_path && new_store_buf == 0)) {
+                int buf_id = buf_alloc(conn_sock);
+                if (buf_id < 0) {
+                    fprintf(stderr, "Could not allocate new buf_info_t, closing...\n");
                     close_and_forget(epollfd, conn_sock);
-                    goto continue_free;
+                    continue;
                 }
-
-                int buf_id;
-                for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
-                    if (per_client_thread)
-                        sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
-                    if (bufs[buf_id].buf == 0) {
-                        break;  // unlock mutex above after mallocs
-                    }
-                    if (per_client_thread)
-                        sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
-                }
-                if (buf_id == MAX_BUFFERS) {
-                    fprintf(stderr,
-                            "Error: Not enough buffers for new connection, "
-                            "closing!\n");
-                    close_and_forget(epollfd, conn_sock);
-                    goto continue_free;
-                }
-                bufs[buf_id].buf = new_buf;
-                bufs[buf_id].reply_buf = new_reply_buf;
-                bufs[buf_id].fwd_buf = new_fwd_buf;
-                if (storage_path) bufs[buf_id].store_buf = new_store_buf;
-
-                if (per_client_thread)
-                    sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
-
-                // From here, safe to assume that bufs[buf_id] is thread-safe
-                cw_log("Connection assigned to worker %d\n", buf_id);
-                bufs[buf_id].buf_size = BUF_SIZE;
-                bufs[buf_id].curr_buf = bufs[buf_id].buf;
-                bufs[buf_id].curr_size = BUF_SIZE;
-                bufs[buf_id].curr_send_buf = NULL;
-                bufs[buf_id].curr_send_size = 0;
-                bufs[buf_id].sock = conn_sock;
-                bufs[buf_id].status = RECEIVING;
-                bufs[buf_id].orig_sock_id = -1;
 
                 ev.events = EPOLLIN | EPOLLOUT;
                 // Use the data.u32 field to store the buf_id in bufs[]
@@ -823,15 +837,6 @@ void epoll_main_loop(int listen_sock) {
                     if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
                 }
-
-                continue;
-
-            continue_free:
-
-                if (new_buf) free(new_buf);
-                if (new_reply_buf) free(new_reply_buf);
-                if (new_fwd_buf) free(new_fwd_buf);
-                if (storage_path && new_store_buf) free(new_store_buf);
             } else {  // NOTE: unused if --per-client-thread
                 exec_request(epollfd, &events[i]);
             }
