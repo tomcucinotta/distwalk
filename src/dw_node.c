@@ -57,7 +57,7 @@ typedef struct {
     int epollfd;
     struct epoll_event events[MAX_EVENTS];
     int terminationfd;  // special eventfd to handle termination
-} thread_info;
+} thread_info_t;
 
 static volatile int node_running = 1;  // epoll_main_loop flag
 
@@ -68,7 +68,7 @@ buf_info bufs[MAX_BUFFERS];
 // used with --per-client-thread
 #define MAX_THREADS 8
 pthread_t workers[MAX_THREADS];
-thread_info thread_infos[MAX_THREADS];
+thread_info_t thread_infos[MAX_THREADS];
 
 typedef struct {
     in_addr_t inaddr;  // target IP
@@ -661,7 +661,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev) {
 }
 
 void *epoll_worker_loop(void *args) {
-    thread_info *infos = (thread_info *)args;
+    thread_info_t *infos = (thread_info_t *)args;
     struct epoll_event ev;
     int worker_running = 1;
 
