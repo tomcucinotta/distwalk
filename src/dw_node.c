@@ -34,17 +34,17 @@ typedef enum {
 } req_status;
 
 typedef struct {
-    unsigned char *buf;           // receive buffer, NULL for unused buf_info
-    unsigned long buf_size;       // receive buffer size
-    unsigned char *curr_buf;      // current pointer within receive buffer while RECEIVING
-    unsigned long curr_size;      // leftover space in receive buffer
+    unsigned char *recv_buf;      // receive buffer, NULL for unused buf_info
+    unsigned long recv_buf_size;  // receive buffer size
+    unsigned char *curr_recv_buf; // current pointer within receive buffer while RECEIVING
+    unsigned long curr_recv_size; // leftover space in receive buffer
 
     unsigned char *curr_send_buf; // curr ptr in reply/fwd buffer while SENDING
     unsigned long curr_send_size; // size of leftover data to send
     unsigned long curr_send_sock; // sock we're sending to (reply vs forwarding)
 
     unsigned char *fwd_buf;       // forwarding buffer
-    unsigned char *reply_buf;     // forwarding buffer
+    unsigned char *reply_buf;     // reply buffer
     unsigned char *store_buf;
 
     int sock;
@@ -450,8 +450,8 @@ void close_and_forget(int epollfd, int sock) {
 
 int process_messages(int buf_id) {
     int sock = bufs[buf_id].sock;
-    unsigned char *buf = bufs[buf_id].buf;
-    unsigned long msg_size = bufs[buf_id].curr_buf - buf;
+    unsigned char *buf = bufs[buf_id].recv_buf;
+    unsigned long msg_size = bufs[buf_id].curr_recv_buf - buf;
 
     // batch processing of multiple messages, if received more than 1
     do {
@@ -513,28 +513,28 @@ int process_messages(int buf_id) {
 
         // move to batch processing of next message if any
         buf += m->req_size;
-        msg_size = bufs[buf_id].curr_buf - buf;
+        msg_size = bufs[buf_id].curr_recv_buf - buf;
         if (msg_size > 0)
             cw_log("Repeating loop with msg_size=%lu\n", msg_size);
     } while (msg_size > 0);
 
-    if (buf == bufs[buf_id].curr_buf) {
+    if (buf == bufs[buf_id].curr_recv_buf) {
         // all received data was processed, reset curr_* for next receive
-        bufs[buf_id].curr_buf = bufs[buf_id].buf;
-        bufs[buf_id].curr_size = bufs[buf_id].buf_size;
+        bufs[buf_id].curr_recv_buf = bufs[buf_id].recv_buf;
+        bufs[buf_id].curr_recv_size = bufs[buf_id].recv_buf_size;
     } else {
         // leftover received data, move it to beginning of buf unless already
         // there
-        if (buf != bufs[buf_id].buf) {
+        if (buf != bufs[buf_id].recv_buf) {
             // TODO do this only if we're beyond a threshold in buf[]
-            unsigned long leftover = bufs[buf_id].curr_buf - buf;
+            unsigned long leftover = bufs[buf_id].curr_recv_buf - buf;
             cw_log(
                 "Moving %lu leftover bytes back to beginning of buf with "
                 "buf_id %d",
                 leftover, buf_id);
-            memmove(bufs[buf_id].buf, buf, leftover);
-            bufs[buf_id].curr_buf = bufs[buf_id].buf + leftover;
-            bufs[buf_id].curr_size = bufs[buf_id].buf_size - leftover;
+            memmove(bufs[buf_id].recv_buf, buf, leftover);
+            bufs[buf_id].curr_recv_buf = bufs[buf_id].recv_buf + leftover;
+            bufs[buf_id].curr_recv_size = bufs[buf_id].recv_buf_size - leftover;
         }
     }
 
@@ -547,12 +547,12 @@ void buf_free(int buf_id) {
     if (per_client_thread)
         sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
 
-    free(bufs[buf_id].buf);
+    free(bufs[buf_id].recv_buf);
     free(bufs[buf_id].reply_buf);
     free(bufs[buf_id].fwd_buf);
     free(bufs[buf_id].store_buf);
 
-    bufs[buf_id].buf = NULL;
+    bufs[buf_id].recv_buf = NULL;
     bufs[buf_id].reply_buf = NULL;
 
     if (per_client_thread)
@@ -583,7 +583,7 @@ int buf_alloc(int conn_sock) {
     for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
         if (per_client_thread)
             sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
-        if (bufs[buf_id].buf == 0) {
+        if (bufs[buf_id].recv_buf == 0) {
             break;  // unlock mutex above after mallocs
         }
         if (per_client_thread)
@@ -592,7 +592,7 @@ int buf_alloc(int conn_sock) {
     if (buf_id == MAX_BUFFERS)
         goto continue_free;
 
-    bufs[buf_id].buf = new_buf;
+    bufs[buf_id].recv_buf = new_buf;
     bufs[buf_id].reply_buf = new_reply_buf;
     bufs[buf_id].fwd_buf = new_fwd_buf;
     if (storage_path) bufs[buf_id].store_buf = new_store_buf;
@@ -602,9 +602,9 @@ int buf_alloc(int conn_sock) {
 
     // From here, safe to assume that bufs[buf_id] is thread-safe
     cw_log("Connection assigned to worker %d\n", buf_id);
-    bufs[buf_id].buf_size = BUF_SIZE;
-    bufs[buf_id].curr_buf = bufs[buf_id].buf;
-    bufs[buf_id].curr_size = BUF_SIZE;
+    bufs[buf_id].recv_buf_size = BUF_SIZE;
+    bufs[buf_id].curr_recv_buf = bufs[buf_id].recv_buf;
+    bufs[buf_id].curr_recv_size = BUF_SIZE;
     bufs[buf_id].curr_send_buf = NULL;
     bufs[buf_id].curr_send_size = 0;
     bufs[buf_id].sock = conn_sock;
@@ -626,7 +626,7 @@ int buf_alloc(int conn_sock) {
 int recv_messages(int buf_id) {
     int sock = bufs[buf_id].sock;
     size_t received =
-        recv(sock, bufs[buf_id].curr_buf, bufs[buf_id].curr_size, 0);
+        recv(sock, bufs[buf_id].curr_recv_buf, bufs[buf_id].curr_recv_size, 0);
     cw_log("recv() returned: %d\n", (int)received);
     if (received == 0) {
         cw_log("Connection closed by remote end\n");
@@ -638,8 +638,8 @@ int recv_messages(int buf_id) {
         fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
         return 0;
     }
-    bufs[buf_id].curr_buf += received;
-    bufs[buf_id].curr_size -= received;
+    bufs[buf_id].curr_recv_buf += received;
+    bufs[buf_id].curr_recv_size -= received;
 
     return 1;
 }
@@ -698,7 +698,7 @@ void setnonblocking(int fd) {
 
 void exec_request(int epollfd, const struct epoll_event *p_ev) {
     int buf_id = p_ev->data.u32;
-    if (bufs[buf_id].buf == NULL)
+    if (bufs[buf_id].recv_buf == NULL)
         return;
 
     if ((p_ev->events | EPOLLIN) && (bufs[buf_id].status & RECEIVING)) {
@@ -903,7 +903,7 @@ int main(int argc, char *argv[]) {
 
     // Tag all buf_info as unused
     for (int i = 0; i < MAX_BUFFERS; i++) {
-        bufs[i].buf = 0;
+        bufs[i].recv_buf = 0;
     }
 
     // Tag all sock_info as unused
