@@ -35,7 +35,6 @@ typedef enum {
 
 typedef struct {
     unsigned char *recv_buf;      // receive buffer, NULL for unused buf_info
-    unsigned long recv_buf_size;  // receive buffer size
     unsigned char *curr_recv_buf; // current pointer within receive buffer while RECEIVING
     unsigned long curr_recv_size; // leftover space in receive buffer
 
@@ -521,7 +520,7 @@ int process_messages(int buf_id) {
     if (buf == bufs[buf_id].curr_recv_buf) {
         // all received data was processed, reset curr_* for next receive
         bufs[buf_id].curr_recv_buf = bufs[buf_id].recv_buf;
-        bufs[buf_id].curr_recv_size = bufs[buf_id].recv_buf_size;
+        bufs[buf_id].curr_recv_size = BUF_SIZE;
     } else {
         // leftover received data, move it to beginning of buf unless already
         // there
@@ -534,7 +533,7 @@ int process_messages(int buf_id) {
                 leftover, buf_id);
             memmove(bufs[buf_id].recv_buf, buf, leftover);
             bufs[buf_id].curr_recv_buf = bufs[buf_id].recv_buf + leftover;
-            bufs[buf_id].curr_recv_size = bufs[buf_id].recv_buf_size - leftover;
+            bufs[buf_id].curr_recv_size = BUF_SIZE - leftover;
         }
     }
 
@@ -602,7 +601,6 @@ int buf_alloc(int conn_sock) {
 
     // From here, safe to assume that bufs[buf_id] is thread-safe
     cw_log("Connection assigned to worker %d\n", buf_id);
-    bufs[buf_id].recv_buf_size = BUF_SIZE;
     bufs[buf_id].curr_recv_buf = bufs[buf_id].recv_buf;
     bufs[buf_id].curr_recv_size = BUF_SIZE;
     bufs[buf_id].curr_send_buf = NULL;
