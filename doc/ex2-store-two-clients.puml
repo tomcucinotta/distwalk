@@ -1,0 +1,40 @@
+@startuml
+
+!pragma teoz true
+
+skinparam ParticipantPadding 20
+
+participant Client1 order 0
+participant DiskA order 1
+participant NodeA order 2
+participant Client2 order 3
+
+Client1 -> NodeA: Req1 (4KB): C10ms, S10KB, R10B
+activate NodeA
+& NodeA -> NodeA: C10ms
+NodeA -> NodeA: S10KB
+NodeA -> DiskA: S10KB
+activate DiskA
+
+Client2 -> NodeA: Req2 (4KB): C20ms, S20KB, R20B
+
+NodeA -> NodeA: C20ms
+
+NodeA <-- DiskA
+deactivate DiskA
+
+NodeA -> NodeA: S20KB
+NodeA -> DiskA: S20KB
+activate DiskA
+
+NodeA -> NodeA: R10B
+Client1 <-- NodeA: Req1 (10B): R10B
+
+NodeA <-- DiskA
+deactivate DiskA
+
+NodeA -> NodeA: R20B
+Client2 <-- NodeA: Req2 (20B): R20B
+deactivate NodeA
+
+@enduml

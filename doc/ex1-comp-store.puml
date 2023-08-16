@@ -1,0 +1,18 @@
+@startuml
+
+Client1 -> NodeA: 128B: C100ms, R8B
+activate NodeA
+NodeA -> NodeA: C100ms
+NodeA -> NodeA: R8B
+Client1 <- NodeA: 8B: R8B
+deactivate NodeA
+
+Client1 -> NodeA: 4KB: C10ms, S4KB
+activate NodeA
+NodeA -> NodeA: C10ms
+NodeA -> NodeA: S4KB
+NodeA -> NodeA: R8B
+Client1 <- NodeA: 8B: R8B
+deactivate NodeA
+
+@enduml

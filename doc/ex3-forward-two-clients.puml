@@ -1,0 +1,64 @@
+@startuml
+
+!pragma teoz true
+
+participant Client1 order 0
+participant Client2 order 1
+participant NodeA order 2
+participant NodeB order 3
+
+Client1 -> NodeA: Req1 (4KB): C10ms, F4KB,NodeB, C15ms, R15B, R10B
+activate NodeA
+& NodeA -> NodeA: C10ms
+NodeA -> NodeB: Req1 (4KB): C15ms, R15B
+activate NodeB
+& NodeB -> NodeB: C15ms
+NodeB -> NodeB: R15B
+NodeA <-- NodeB: Req1 (15B): R15B
+deactivate NodeB
+NodeA -> NodeA: R10B
+Client1 <-- NodeA: Req1 (10B): R10B
+deactivate NodeA
+
+Client2 -> NodeA: Req2 (4KB): C20ms, F8KB,NodeB, C30ms, R30B, R20B
+activate NodeA
+& NodeA -> NodeA: C20ms
+NodeA -> NodeB: Req2 (8KB): C30ms, R20B
+activate NodeB
+& NodeB -> NodeB: C30ms
+NodeB -> NodeB: R30B
+NodeA <-- NodeB: Req2 (30B): R30B
+deactivate NodeB
+NodeA -> NodeA: R20B
+Client2 <-- NodeA: Req2 (20B): R20B
+deactivate NodeA
+
+Client1 -> NodeA: Req1 (4KB): C10ms, F4KB,NodeB, C15ms, R15B, R10B
+activate NodeA
+& NodeA -> NodeA: [Req1] C10ms
+NodeA -> NodeB: Req1 (4KB): C15ms, R15B
+activate NodeB
+& NodeB -> NodeB: [Req1] C15ms
+
+Client2 -> NodeA: Req2 (4KB): C20ms, F8KB,NodeB, C30ms, R30B, R20B
+activate NodeA
+& NodeA -> NodeA: [Req2] C20ms
+NodeA -> NodeB: Req2 (8KB): C30ms, R20B
+
+NodeB -> NodeB: [Req1] R15B
+NodeA <-- NodeB: Req1 (15B): R15B
+
+NodeB -> NodeB: [Req2] C30ms
+
+NodeA -> NodeA: [Req1] R10B
+Client1 <-- NodeA: Req1 (10B): R10B
+deactivate NodeA
+
+NodeB -> NodeB: [Req2] R30B
+NodeA <-- NodeB: Req2 (30B): R30B
+deactivate NodeB
+NodeA -> NodeA: [Req2] R20B
+Client2 <-- NodeA: Req2 (20B): R20B
+deactivate NodeA
+
+@enduml
