@@ -85,12 +85,12 @@ int bind_port = 7891;
 int no_delay = 1;
 
 int use_odirect = 0;
-int per_client_thread = 0;
+int nthread = 1;
 
 // return index in socks[] of sock_info associated to inaddr:port, or -1 if not found
 int sock_find_addr(in_addr_t inaddr, int port) {
     int rv = -1;
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_lock(&socks_mtx));
 
     for (int i = 0; i < MAX_SOCKETS; i++) {
@@ -100,7 +100,7 @@ int sock_find_addr(in_addr_t inaddr, int port) {
         }
     }
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_unlock(&socks_mtx));
 
     return rv;
@@ -111,7 +111,7 @@ int sock_find_sock(int sock) {
     assert(sock != -1);
     int rv = -1;
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_lock(&socks_mtx));
 
     for (int i = 0; i < MAX_SOCKETS; i++) {
@@ -121,7 +121,7 @@ int sock_find_sock(int sock) {
         }
     }
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_unlock(&socks_mtx));
 
     return rv;
@@ -139,8 +139,8 @@ void sigint_cleanup(int _) {
 
     // terminate workers by sending a notification
     // on their terminationfd
-    if (per_client_thread) {
-        for (int i = 0; i < MAX_THREADS; i++) {
+    if (nthread > 1) {
+        for (int i = 0; i < nthread; i++) {
             eventfd_write(thread_infos[i].terminationfd, 1);
         }
     }
@@ -153,7 +153,7 @@ void sigint_cleanup(int _) {
 // return index of sock_info in socks[] where info has been added (or where it was already found),
 //        or -1 if no unused entry were found in socks[]
 int sock_add(in_addr_t inaddr, int port, int sock) {
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_lock(&socks_mtx));
 
     int sock_id = sock_find_addr(inaddr, port);
@@ -170,7 +170,7 @@ int sock_add(in_addr_t inaddr, int port, int sock) {
         }
     }
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_unlock(&socks_mtx));
     return sock_id;
 }
@@ -178,20 +178,20 @@ int sock_add(in_addr_t inaddr, int port, int sock) {
 void sock_del_id(int id) {
     assert(id < MAX_SOCKETS);
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_lock(&socks_mtx));
 
     cw_log("marking socks[%d] invalid\n", id);
     socks[id].sock = -1;
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_unlock(&socks_mtx));
 }
 
 // make entry in socks[] associated to sock invalid, return entry ID if found or
 // -1
 int sock_del(int sock) {
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_lock(&socks_mtx));
 
     int id = sock_find_sock(sock);
@@ -199,7 +199,7 @@ int sock_del(int sock) {
     if (id != -1)
         sock_del_id(id);
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_unlock(&socks_mtx));
 
     return id;
@@ -540,7 +540,7 @@ int process_messages(int buf_id) {
 void buf_free(int buf_id) {
     cw_log("Freeing buf %d\n", buf_id);
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
 
     free(bufs[buf_id].recv_buf);
@@ -551,7 +551,7 @@ void buf_free(int buf_id) {
     bufs[buf_id].recv_buf = NULL;
     bufs[buf_id].reply_buf = NULL;
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
 }
 
@@ -577,12 +577,12 @@ int buf_alloc(int conn_sock) {
 
     int buf_id;
     for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
-        if (per_client_thread)
+        if (nthread > 1)
             sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
         if (bufs[buf_id].recv_buf == 0) {
             break;  // unlock mutex above after mallocs
         }
-        if (per_client_thread)
+        if (nthread > 1)
             sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
     }
     if (buf_id == MAX_BUFFERS)
@@ -593,7 +593,7 @@ int buf_alloc(int conn_sock) {
     bufs[buf_id].fwd_buf = new_fwd_buf;
     if (storage_path) bufs[buf_id].store_buf = new_store_buf;
 
-    if (per_client_thread)
+    if (nthread > 1)
         sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
 
     // From here, safe to assume that bufs[buf_id] is thread-safe
@@ -819,7 +819,7 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
             printf(
                 "Usage: dw_node [-h|--help] [-b bindname] [-bp bindport] "
-                "[-s|--storage path/to/storage/file] [--per-client-thread] "
+                "[-s|--storage path/to/storage/file] [--threads n] "
                 "[-m|--max-storage-size bytes] "
                 "[--odirect]\n");
             exit(EXIT_SUCCESS);
@@ -851,8 +851,11 @@ int main(int argc, char *argv[]) {
             max_storage_size = atoi(argv[1]);
             argc--;
             argv++;
-        } else if (strcmp(argv[0], "--per-client-thread") == 0) {
-            per_client_thread = 1;
+        } else if (strcmp(argv[0], "--threads") == 0) {
+            assert(argc >= 2);
+            nthread = atoi(argv[1]);
+            argc--;
+            argv++;
         } else if (strcmp(argv[0], "--odirect") == 0) {
             use_odirect = 1;
         } else {
@@ -862,6 +865,8 @@ int main(int argc, char *argv[]) {
         argc--;
         argv++;
     }
+
+    assert(nthread > 0 && nthread <= MAX_THREADS);
 
     // Tag all buf_info as unused
     for (int i = 0; i < MAX_BUFFERS; i++) {
@@ -897,7 +902,7 @@ int main(int argc, char *argv[]) {
     /*---- Create the socket. The three arguments are: ----*/
     /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
      * case) */
-    for (int i = 0; i < MAX_THREADS; i++) {
+    for (int i = 0; i < nthread; i++) {
         thread_infos[i].listen_sock = socket(PF_INET, SOCK_STREAM, 0);
 
         int val = 1;
@@ -918,12 +923,12 @@ int main(int argc, char *argv[]) {
 
     }
 
-    if (!per_client_thread) {
+    if (nthread == 1) {
         epoll_main_loop((void*) &thread_infos[0]);
     }
     else {
         // Init worker threads
-        for (int i = 0; i < MAX_THREADS; i++) {
+        for (int i = 0; i < nthread; i++) {
             sys_check(pthread_create(&workers[i], NULL, epoll_main_loop,
                                      (void *)&thread_infos[i]));
         }
@@ -944,9 +949,9 @@ int main(int argc, char *argv[]) {
     }
 
     // Clean-ups
-    if (per_client_thread) {
+    if (nthread > 1) {
         // Join worker threads
-        for (int i = 0; i < MAX_THREADS; i++) {
+        for (int i = 0; i < nthread; i++) {
             sys_check(pthread_join(workers[i], NULL));
             close(thread_infos[i].terminationfd);
         }
