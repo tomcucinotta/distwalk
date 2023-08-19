@@ -53,12 +53,12 @@ typedef struct {
 } buf_info;
 
 typedef struct {
+    int listen_sock;
+
     int epollfd;
     struct epoll_event events[MAX_EVENTS];
     int terminationfd;  // special eventfd to handle termination
 } thread_info_t;
-
-static volatile int node_running = 1;  // epoll_main_loop flag
 
 #define MAX_BUFFERS 16
 
@@ -86,8 +86,6 @@ int no_delay = 1;
 
 int use_odirect = 0;
 int per_client_thread = 0;
-
-int epollfd;
 
 // return index in socks[] of sock_info associated to inaddr:port, or -1 if not found
 int sock_find_addr(in_addr_t inaddr, int port) {
@@ -138,7 +136,6 @@ size_t storage_eof = 0; //TODO: same here
 
 void sigint_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
-    node_running = 0;
 
     // terminate workers by sending a notification
     // on their terminationfd
@@ -722,82 +719,54 @@ void exec_request(int epollfd, const struct epoll_event *p_ev) {
     buf_free(buf_id);
 }
 
-void *epoll_worker_loop(void *args) {
+void* epoll_main_loop(void* args) {
     thread_info_t *infos = (thread_info_t *)args;
-    struct epoll_event ev;
-    int worker_running = 1;
 
-    // Add terminationfd
-    ev.events = EPOLLIN;
-    ev.data.fd = infos->terminationfd;
-    if (epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
-        perror("epoll_ctl() failed");
-
-    while (worker_running) {
-        int nfds = epoll_wait(infos->epollfd, infos->events, MAX_EVENTS, -1);
-        if (nfds == -1) {
-            perror("epoll_wait");
-
-            if (errno == EINTR) {
-                worker_running = 0;
-            } else {
-                fprintf(stderr, "Error: %s\n", strerror(errno));
-                exit(EXIT_FAILURE);
-            }
-        }
-
-        for (int i = 0; i < nfds; i++) {
-            if (infos->events[i].data.fd == infos->terminationfd) {
-                worker_running = 0;
-                break;
-            } else {
-                exec_request(infos->epollfd, &infos->events[i]);
-            }
-        }
-    }
-
-    return (void *)1;
-}
-
-void epoll_main_loop(int listen_sock) {
+    int epollfd;
     struct epoll_event ev, events[MAX_EVENTS];
-
-    /* Code to set up listening socket, 'listen_sock',
-       (socket(), bind(), listen()) omitted */
 
     epollfd = epoll_create1(0);
     if (epollfd == -1) {
         perror("epoll_create1");
         exit(EXIT_FAILURE);
     }
-
+    
+    // Add listen socket
     ev.events = EPOLLIN;
     ev.data.fd = -1;  // Special value denoting listen_sock
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listen_sock, &ev) == -1) {
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->listen_sock, &ev) == -1) {
         perror("epoll_ctl: listen_sock");
         exit(EXIT_FAILURE);
     }
 
-    while (node_running) {
+    // Add termination fd
+    ev.events = EPOLLIN;
+    ev.data.fd = infos->terminationfd;
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
+        perror("epoll_ctl: terminationfd failed");
+
+    int running = 1;
+    while (running) {
         cw_log("epoll_wait()ing...\n");
         int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
         if (nfds == -1) {
             perror("epoll_wait");
 
             if (errno == EINTR) {
-                node_running = 0;
+                running = 0;
             } else {
                 perror("epoll_wait() failed: ");
                 exit(EXIT_FAILURE);
             }
         }
 
+        printf("Ready conns: %d\n", nfds);
         for (int i = 0; i < nfds; i++) {
-            if (events[i].data.fd == -1) {
+            if (events[i].data.fd == -1) { // New connection
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);
                 int conn_sock =
-                    accept(listen_sock, (struct sockaddr *)&addr, &addr_size);
+                    accept(infos->listen_sock, (struct sockaddr *)&addr, &addr_size);
 
                 if (conn_sock == -1) {
                     perror("accept() failed: ");
@@ -822,28 +791,26 @@ void epoll_main_loop(int listen_sock) {
                 // Use the data.u32 field to store the buf_id in bufs[]
                 ev.data.u32 = buf_id;
 
-                // add client fd
-                if (per_client_thread) {
-                    // to the worker epoll
-                    // (which, at this point, is already up and running)
-                    static int next_thread_id = 0;
-                    if (epoll_ctl(thread_infos[next_thread_id].epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
+                 if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
-                    // round-robin accepted connections to the available threads
-                    next_thread_id = (next_thread_id + 1) % MAX_THREADS;
-                } else {  // to main thread
-                    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
-                        perror("epoll_ctl() failed");
-                }
-            } else {  // NOTE: unused if --per-client-thread
+            } 
+            else if (events[i].data.fd == infos->terminationfd) {
+                running = 0;
+                break;
+            }
+            else {  // NOTE: unused if --per-client-thread
                 exec_request(epollfd, &events[i]);
             }
         }
     }
+
+    return (void *)1;
 }
 
 int main(int argc, char *argv[]) {
-    int welcomeSocket;
+    // Setup SIGINT signal handler
+    signal(SIGINT, sigint_cleanup);
+
     struct sockaddr_in serverAddr;
 
     argc--;
@@ -896,9 +863,6 @@ int main(int argc, char *argv[]) {
         argv++;
     }
 
-    // Setup SIGINT signal handler
-    signal(SIGINT, sigint_cleanup);
-
     // Tag all buf_info as unused
     for (int i = 0; i < MAX_BUFFERS; i++) {
         bufs[i].recv_buf = 0;
@@ -909,12 +873,58 @@ int main(int argc, char *argv[]) {
         socks[i].sock = -1;
     }
 
-    if (per_client_thread) {
+    // Open storage file, if any
+    if (storage_path) {
+        int flags = O_RDWR | O_CREAT | O_TRUNC;
+        if (use_odirect) flags |= O_DIRECT;
+        sys_check(storage_fd = open(storage_path, flags, S_IRUSR | S_IWUSR));
+        struct stat s;
+        sys_check(fstat(storage_fd, &s));
+        blk_size = s.st_blksize;
+        cw_log("blk_size = %lu\n", blk_size);
+    }
+
+    /*---- Configure settings of the server address struct ----*/
+    /* Address family = Internet */
+    serverAddr.sin_family = AF_INET;
+    /* Set port number, using htons function to use proper byte order */
+    serverAddr.sin_port = htons(bind_port);
+    /* Set IP address to localhost */
+    serverAddr.sin_addr.s_addr = inet_addr(bind_name);
+    /* Set all bits of the padding field to 0 */
+    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
+
+    /*---- Create the socket. The three arguments are: ----*/
+    /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
+     * case) */
+    for (int i = 0; i < MAX_THREADS; i++) {
+        thread_infos[i].listen_sock = socket(PF_INET, SOCK_STREAM, 0);
+
+        int val = 1;
+        sys_check(setsockopt(thread_infos[i].listen_sock, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
+        sys_check(setsockopt(thread_infos[i].listen_sock, SOL_SOCKET, SO_REUSEPORT, (void *)&val, sizeof(val)));
+
+        /*---- Bind the address struct to the socket ----*/
+        sys_check(bind(thread_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
+                        sizeof(serverAddr)));
+
+        cw_log("Node binded to %s:%d\n", bind_name, bind_port);
+
+        /*---- Listen on the socket, with 5 max connection requests queued ----*/
+        sys_check(listen(thread_infos[i].listen_sock, 5));
+        cw_log("Accepting new connections...\n");
+
+        thread_infos[i].terminationfd = eventfd(0, 0);
+
+    }
+
+    if (!per_client_thread) {
+        epoll_main_loop((void*) &thread_infos[0]);
+    }
+    else {
         // Init worker threads
         for (int i = 0; i < MAX_THREADS; i++) {
-            thread_infos[i].terminationfd = eventfd(0, 0);
-            sys_check(thread_infos[i].epollfd = epoll_create1(0));
-            sys_check(pthread_create(&workers[i], NULL, epoll_worker_loop,
+            sys_check(pthread_create(&workers[i], NULL, epoll_main_loop,
                                      (void *)&thread_infos[i]));
         }
 
@@ -932,48 +942,6 @@ int main(int argc, char *argv[]) {
 
         sys_check(pthread_mutex_init(&socks_mtx, &attr));
     }
-
-    // Open storage file, if any
-    if (storage_path) {
-        int flags = O_RDWR | O_CREAT | O_TRUNC;
-        if (use_odirect) flags |= O_DIRECT;
-        sys_check(storage_fd = open(storage_path, flags, S_IRUSR | S_IWUSR));
-        struct stat s;
-        sys_check(fstat(storage_fd, &s));
-        blk_size = s.st_blksize;
-        cw_log("blk_size = %lu\n", blk_size);
-    }
-
-    /*---- Create the socket. The three arguments are: ----*/
-    /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
-     * case) */
-    welcomeSocket = socket(PF_INET, SOCK_STREAM, 0);
-
-    int val = 1;
-    sys_check(setsockopt(welcomeSocket, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
-    sys_check(setsockopt(welcomeSocket, SOL_SOCKET, SO_REUSEPORT, (void *)&val, sizeof(val)));
-
-    /*---- Configure settings of the server address struct ----*/
-    /* Address family = Internet */
-    serverAddr.sin_family = AF_INET;
-    /* Set port number, using htons function to use proper byte order */
-    serverAddr.sin_port = htons(bind_port);
-    /* Set IP address to localhost */
-    serverAddr.sin_addr.s_addr = inet_addr(bind_name);
-    /* Set all bits of the padding field to 0 */
-    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
-
-    /*---- Bind the address struct to the socket ----*/
-    sys_check(bind(welcomeSocket, (struct sockaddr *)&serverAddr,
-                   sizeof(serverAddr)));
-
-    cw_log("Node binded to %s:%d\n", bind_name, bind_port);
-
-    /*---- Listen on the socket, with 5 max connection requests queued ----*/
-    sys_check(listen(welcomeSocket, 5));
-    cw_log("Accepting new connections...\n");
-
-    epoll_main_loop(welcomeSocket);
 
     // Clean-ups
     if (per_client_thread) {
