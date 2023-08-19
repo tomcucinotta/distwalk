@@ -950,10 +950,8 @@ int main(int argc, char *argv[]) {
     welcomeSocket = socket(PF_INET, SOCK_STREAM, 0);
 
     int val = 1;
-    setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEADDR, (void *)&val,
-               sizeof(val));
-    setsockopt(welcomeSocket, IPPROTO_TCP, SO_REUSEPORT, (void *)&val,
-               sizeof(val));
+    sys_check(setsockopt(welcomeSocket, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
+    sys_check(setsockopt(welcomeSocket, SOL_SOCKET, SO_REUSEPORT, (void *)&val, sizeof(val)));
 
     /*---- Configure settings of the server address struct ----*/
     /* Address family = Internet */
