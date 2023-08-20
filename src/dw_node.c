@@ -54,9 +54,6 @@ typedef struct {
 
 typedef struct {
     int listen_sock;
-
-    int epollfd;
-    struct epoll_event events[MAX_EVENTS];
     int terminationfd;  // special eventfd to handle termination
 } thread_info_t;
 
@@ -760,7 +757,6 @@ void* epoll_main_loop(void* args) {
             }
         }
 
-        printf("Ready conns: %d\n", nfds);
         for (int i = 0; i < nfds; i++) {
             if (events[i].data.fd == -1) { // New connection
                 struct sockaddr_in addr;
