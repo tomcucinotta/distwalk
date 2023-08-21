@@ -50,7 +50,7 @@ typedef struct {
     req_status status;
     int orig_sock_id;  // ID in socks[]
     pthread_mutex_t mtx;
-} buf_info;
+} buf_info_t;
 
 typedef struct {
     int listen_sock;
@@ -59,7 +59,7 @@ typedef struct {
 
 #define MAX_BUFFERS 16
 
-buf_info bufs[MAX_BUFFERS];
+buf_info_t bufs[MAX_BUFFERS];
 
 // used with --per-client-thread
 #define MAX_THREADS 8
@@ -70,10 +70,10 @@ typedef struct {
     in_addr_t inaddr;  // target IP
     uint16_t port;     // target port (for multiple nodes on same host)
     int sock;  // socket handling messages from/to inaddr:port (-1 = unused)
-} sock_info;
+} sock_info_t;
 
 #define MAX_SOCKETS 16
-sock_info socks[MAX_SOCKETS];
+sock_info_t socks[MAX_SOCKETS];
 pthread_mutex_t socks_mtx;
 
 char *bind_name = "0.0.0.0";
