@@ -25,7 +25,7 @@
 
 // I could be doing 0, 1, 2 or more of these at the same time => bitmask
 typedef enum {
-    RECEIVING = 1,      // receiving on bufs[].sock
+    RECEIVING = 1,      // receiving on conns[].sock
     SENDING = 2,        // sending data for REPLY or FORWARD
     LOADING = 4,        // loading data from disk
     STORING = 8,        // storing data to disk
@@ -34,7 +34,7 @@ typedef enum {
 } req_status;
 
 typedef struct {
-    unsigned char *recv_buf;      // receive buffer, NULL for unused buf_info
+    unsigned char *recv_buf;      // receive buffer, NULL for unused conn_info_t
     unsigned char *curr_recv_buf; // current pointer within receive buffer while RECEIVING
     unsigned long curr_recv_size; // leftover space in receive buffer
 
@@ -50,7 +50,7 @@ typedef struct {
     req_status status;
     int orig_sock_id;  // ID in socks[]
     pthread_mutex_t mtx;
-} buf_info_t;
+} conn_info_t;
 
 typedef struct {
     int listen_sock;
@@ -59,7 +59,7 @@ typedef struct {
 
 #define MAX_BUFFERS 16
 
-buf_info_t bufs[MAX_BUFFERS];
+conn_info_t conns[MAX_BUFFERS];
 
 // used with --per-client-thread
 #define MAX_THREADS 8
@@ -268,7 +268,7 @@ size_t recv_all(int sock, unsigned char *buf, size_t len) {
     return read_tot;
 }
 
-int start_send(int buf_id, int sock, unsigned char *buf, size_t size);
+int start_send(int conn_id, int sock, unsigned char *buf, size_t size);
 
 // Copy req id from m into m_dst, and commands up to the matching REPLY (or the end of m),
 // skipping the first cmd_id elems in m->cmds[].
@@ -303,7 +303,7 @@ int copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
 // rest to the next hop
 //
 // returns number of forwarded commands as found in m, or 0 if a problem occurred
-int forward(int buf_id, message_t *m, int cmd_id) {
+int forward(int conn_id, message_t *m, int cmd_id) {
     int sock_id = sock_find_addr(m->cmds[cmd_id].u.fwd.fwd_host,
                                  m->cmds[cmd_id].u.fwd.fwd_port);
     if (sock_id == -1) {
@@ -324,7 +324,7 @@ int forward(int buf_id, message_t *m, int cmd_id) {
     }
     int sock = socks[sock_id].sock;
     assert(sock != -1);
-    message_t *m_dst = (message_t *)bufs[buf_id].fwd_buf;
+    message_t *m_dst = (message_t *)conns[conn_id].fwd_buf;
     int forwarded = copy_tail(m, m_dst, cmd_id + 1);
     m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
 
@@ -339,20 +339,20 @@ int forward(int buf_id, message_t *m, int cmd_id) {
 
     // TODO: return to epoll loop to handle sending of long packets
     // (here I'm blocking the thread)
-    if (!send_all(sock, bufs[buf_id].fwd_buf, m_dst->req_size))
+    if (!send_all(sock, conns[conn_id].fwd_buf, m_dst->req_size))
         return 0;
     int fwd_reply_id = cmd_id + forwarded;
     cw_log("  f: cmd_id=%d, num=%d, fwd_repl_id=%d, forwarded=%d\n", cmd_id, m->num, fwd_reply_id, forwarded);
     check(fwd_reply_id < m->num && m->cmds[fwd_reply_id].cmd == REPLY);
     cw_log("  f: waiting for resp_size=%d bytes\n", m->cmds[fwd_reply_id].u.resp_size);
-    if (!recv_all(sock, bufs[buf_id].reply_buf, m->cmds[fwd_reply_id].u.resp_size))
+    if (!recv_all(sock, conns[conn_id].reply_buf, m->cmds[fwd_reply_id].u.resp_size))
         return 0;
     return forwarded;
 }
 
 // returns 1 if reply sent correctly, 0 otherwise
-int reply(int sock, int buf_id, message_t *m, int cmd_id) {
-    message_t *m_dst = (message_t *)bufs[buf_id].reply_buf;
+int reply(int sock, int conn_id, message_t *m, int cmd_id) {
+    message_t *m_dst = (message_t *)conns[conn_id].reply_buf;
 
     m_dst->req_id = m->req_id;
     m_dst->req_size = m->cmds[cmd_id].u.resp_size;
@@ -365,7 +365,7 @@ int reply(int sock, int buf_id, message_t *m, int cmd_id) {
 #endif
     // TODO: return to epoll loop to handle sending of long packets
     // (here I'm blocking the thread)
-    return start_send(buf_id, sock, bufs[buf_id].reply_buf, m_dst->req_size);
+    return start_send(conn_id, sock, conns[conn_id].reply_buf, m_dst->req_size);
 }
 
 size_t recv_message(int sock, unsigned char *buf, size_t len) {
@@ -394,7 +394,7 @@ void compute_for(unsigned long usecs) {
 
 unsigned long blk_size = 0;
 
-void store(int buf_id, size_t bytes) {
+void store(int conn_id, size_t bytes) {
     // generate the data to be stored
     if (use_odirect) bytes = (bytes + blk_size - 1) / blk_size * blk_size;
     cw_log("STORE: storing %lu bytes\n", bytes);
@@ -405,7 +405,7 @@ void store(int buf_id, size_t bytes) {
         storage_offset = 0;
     }
 
-    safe_write(storage_fd, bufs[buf_id].store_buf, bytes);
+    safe_write(storage_fd, conns[conn_id].store_buf, bytes);
 
     storage_offset += bytes;
 
@@ -420,7 +420,7 @@ void store(int buf_id, size_t bytes) {
     }
 }
 
-void load(int buf_id, size_t bytes, size_t* leftovers) {
+void load(int conn_id, size_t bytes, size_t* leftovers) {
     cw_log("LOAD: loading %lu bytes\n", bytes);
 
     if (storage_offset + bytes > storage_eof){
@@ -428,7 +428,7 @@ void load(int buf_id, size_t bytes, size_t* leftovers) {
         storage_offset = 0;
     }
 
-    *leftovers = safe_read(storage_fd, bufs[buf_id].store_buf, bytes);
+    *leftovers = safe_read(storage_fd, conns[conn_id].store_buf, bytes);
     storage_offset += bytes;
 }
 
@@ -441,10 +441,10 @@ void close_and_forget(int epollfd, int sock) {
     close(sock);
 }
 
-int process_messages(int buf_id) {
-    int sock = bufs[buf_id].sock;
-    unsigned char *buf = bufs[buf_id].recv_buf;
-    unsigned long msg_size = bufs[buf_id].curr_recv_buf - buf;
+int process_messages(int conn_id) {
+    int sock = conns[conn_id].sock;
+    unsigned char *buf = conns[conn_id].recv_buf;
+    unsigned long msg_size = conns[conn_id].curr_recv_buf - buf;
 
     // batch processing of multiple messages, if received more than 1
     do {
@@ -471,7 +471,7 @@ int process_messages(int buf_id) {
             if (m->cmds[i].cmd == COMPUTE) {
                 compute_for(m->cmds[i].u.comp_time_us);
             } else if (m->cmds[i].cmd == FORWARD) {
-                int to_skip = forward(buf_id, m, i);
+                int to_skip = forward(conn_id, m, i);
                 if (to_skip == 0) {
                     fprintf(stderr, "Error: could not execute FORWARD\n");
                     return 0;
@@ -479,7 +479,7 @@ int process_messages(int buf_id) {
                 // skip forwarded portion of cmds[]
                 i += to_skip;
             } else if (m->cmds[i].cmd == REPLY) {
-                if (!reply(sock, buf_id, m, i)) {
+                if (!reply(sock, conn_id, m, i)) {
                     fprintf(stderr, "reply() failed\n");
                     return 0;
                 }
@@ -490,14 +490,14 @@ int process_messages(int buf_id) {
                     fprintf(stderr, "Error: Cannot execute STORE cmd because no storage path has been defined\n");
                     exit(EXIT_FAILURE);
                 }
-                store(buf_id, m->cmds[i].u.store_nbytes);
+                store(conn_id, m->cmds[i].u.store_nbytes);
             } else if (m->cmds[i].cmd == LOAD) {
                 if (!storage_path) {
                     fprintf(stderr, "Error: Cannot execute LOAD cmd because no storage path has been defined\n");
                     exit(EXIT_FAILURE);
                 }
                 size_t leftovers;
-                load(buf_id, m->cmds[i].u.load_nbytes, &leftovers);
+                load(conn_id, m->cmds[i].u.load_nbytes, &leftovers);
             } else {
                 fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
                 return 0;
@@ -506,53 +506,53 @@ int process_messages(int buf_id) {
 
         // move to batch processing of next message if any
         buf += m->req_size;
-        msg_size = bufs[buf_id].curr_recv_buf - buf;
+        msg_size = conns[conn_id].curr_recv_buf - buf;
         if (msg_size > 0)
             cw_log("Repeating loop with msg_size=%lu\n", msg_size);
     } while (msg_size > 0);
 
-    if (buf == bufs[buf_id].curr_recv_buf) {
+    if (buf == conns[conn_id].curr_recv_buf) {
         // all received data was processed, reset curr_* for next receive
-        bufs[buf_id].curr_recv_buf = bufs[buf_id].recv_buf;
-        bufs[buf_id].curr_recv_size = BUF_SIZE;
+        conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf;
+        conns[conn_id].curr_recv_size = BUF_SIZE;
     } else {
         // leftover received data, move it to beginning of buf unless already
         // there
-        if (buf != bufs[buf_id].recv_buf) {
+        if (buf != conns[conn_id].recv_buf) {
             // TODO do this only if we're beyond a threshold in buf[]
-            unsigned long leftover = bufs[buf_id].curr_recv_buf - buf;
+            unsigned long leftover = conns[conn_id].curr_recv_buf - buf;
             cw_log(
                 "Moving %lu leftover bytes back to beginning of buf with "
-                "buf_id %d",
-                leftover, buf_id);
-            memmove(bufs[buf_id].recv_buf, buf, leftover);
-            bufs[buf_id].curr_recv_buf = bufs[buf_id].recv_buf + leftover;
-            bufs[buf_id].curr_recv_size = BUF_SIZE - leftover;
+                "conn_id %d",
+                leftover, conn_id);
+            memmove(conns[conn_id].recv_buf, buf, leftover);
+            conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf + leftover;
+            conns[conn_id].curr_recv_size = BUF_SIZE - leftover;
         }
     }
 
     return 1;
 }
 
-void buf_free(int buf_id) {
-    cw_log("Freeing buf %d\n", buf_id);
+void conn_free(int conn_id) {
+    cw_log("Freeing conn %d\n", conn_id);
 
     if (nthread > 1)
-        sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
+        sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
 
-    free(bufs[buf_id].recv_buf);
-    free(bufs[buf_id].reply_buf);
-    free(bufs[buf_id].fwd_buf);
-    free(bufs[buf_id].store_buf);
+    free(conns[conn_id].recv_buf);
+    free(conns[conn_id].reply_buf);
+    free(conns[conn_id].fwd_buf);
+    free(conns[conn_id].store_buf);
 
-    bufs[buf_id].recv_buf = NULL;
-    bufs[buf_id].reply_buf = NULL;
+    conns[conn_id].recv_buf = NULL;
+    conns[conn_id].reply_buf = NULL;
 
     if (nthread > 1)
-        sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
+        sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
 }
 
-int buf_alloc(int conn_sock) {
+int conn_alloc(int conn_sock) {
     unsigned char *new_buf = NULL;
     unsigned char *new_reply_buf = NULL;
     unsigned char *new_fwd_buf = NULL;
@@ -572,38 +572,38 @@ int buf_alloc(int conn_sock) {
         (storage_path && new_store_buf == NULL))
         goto continue_free;
 
-    int buf_id;
-    for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
+    int conn_id;
+    for (conn_id = 0; conn_id < MAX_BUFFERS; conn_id++) {
         if (nthread > 1)
-            sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
-        if (!bufs[buf_id].recv_buf) {
+            sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
+        if (!conns[conn_id].recv_buf) {
             break;  // unlock mutex above after mallocs
         }
         if (nthread > 1)
-            sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
+            sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
     }
-    if (buf_id == MAX_BUFFERS)
+    if (conn_id == MAX_BUFFERS)
         goto continue_free;
 
-    bufs[buf_id].recv_buf = new_buf;
-    bufs[buf_id].reply_buf = new_reply_buf;
-    bufs[buf_id].fwd_buf = new_fwd_buf;
-    if (storage_path) bufs[buf_id].store_buf = new_store_buf;
+    conns[conn_id].recv_buf = new_buf;
+    conns[conn_id].reply_buf = new_reply_buf;
+    conns[conn_id].fwd_buf = new_fwd_buf;
+    if (storage_path) conns[conn_id].store_buf = new_store_buf;
 
     if (nthread > 1)
-        sys_check(pthread_mutex_unlock(&bufs[buf_id].mtx));
+        sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
 
-    // From here, safe to assume that bufs[buf_id] is thread-safe
-    cw_log("Connection assigned to worker %d\n", buf_id);
-    bufs[buf_id].curr_recv_buf = bufs[buf_id].recv_buf;
-    bufs[buf_id].curr_recv_size = BUF_SIZE;
-    bufs[buf_id].curr_send_buf = NULL;
-    bufs[buf_id].curr_send_size = 0;
-    bufs[buf_id].sock = conn_sock;
-    bufs[buf_id].status = RECEIVING;
-    bufs[buf_id].orig_sock_id = -1;
+    // From here, safe to assume that conns[conn_id] is thread-safe
+    cw_log("Connection assigned to worker %d\n", conn_id);
+    conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf;
+    conns[conn_id].curr_recv_size = BUF_SIZE;
+    conns[conn_id].curr_send_buf = NULL;
+    conns[conn_id].curr_send_size = 0;
+    conns[conn_id].sock = conn_sock;
+    conns[conn_id].status = RECEIVING;
+    conns[conn_id].orig_sock_id = -1;
 
-    return buf_id;
+    return conn_id;
 
  continue_free:
 
@@ -615,10 +615,10 @@ int buf_alloc(int conn_sock) {
     return -1;
 }
 
-int recv_messages(int buf_id) {
-    int sock = bufs[buf_id].sock;
+int recv_messages(int conn_id) {
+    int sock = conns[conn_id].sock;
     size_t received =
-        recv(sock, bufs[buf_id].curr_recv_buf, bufs[buf_id].curr_recv_size, 0);
+        recv(sock, conns[conn_id].curr_recv_buf, conns[conn_id].curr_recv_size, 0);
     cw_log("recv() returned: %d\n", (int)received);
     if (received == 0) {
         cw_log("Connection closed by remote end\n");
@@ -630,18 +630,18 @@ int recv_messages(int buf_id) {
         fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
         return 0;
     }
-    bufs[buf_id].curr_recv_buf += received;
-    bufs[buf_id].curr_recv_size -= received;
+    conns[conn_id].curr_recv_buf += received;
+    conns[conn_id].curr_recv_size -= received;
 
     return 1;
 }
 
 // used during REPLYING or FORWARDING
-int send_messages(int buf_id) {
-    int sock = bufs[buf_id].curr_send_sock;
-    cw_log("send_messages(): buf_id=%d, status=%d, sock=%d\n", buf_id, bufs[buf_id].status, sock);
+int send_messages(int conn_id) {
+    int sock = conns[conn_id].curr_send_sock;
+    cw_log("send_messages(): conn_id=%d, status=%d, sock=%d\n", conn_id, conns[conn_id].status, sock);
     size_t sent =
-        send(sock, bufs[buf_id].curr_send_buf, bufs[buf_id].curr_send_size, MSG_NOSIGNAL);
+        send(sock, conns[conn_id].curr_send_buf, conns[conn_id].curr_send_size, MSG_NOSIGNAL);
     cw_log("send() returned: %d\n", (int)sent);
     if (sent == 0) {
         // TODO: should not even be possible, ignoring
@@ -652,31 +652,31 @@ int send_messages(int buf_id) {
         return 1;
     } else if (sent == -1) {
         fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
-        bufs[buf_id].status &= ~SENDING;
+        conns[conn_id].status &= ~SENDING;
         return 0;
     }
-    bufs[buf_id].curr_send_buf += sent;
-    bufs[buf_id].curr_send_size -= sent;
-    if (bufs[buf_id].curr_send_size == 0) {
-        bufs[buf_id].status &= ~SENDING;
-        cw_log("send_messages(): buf_id=%d, status=%d\n", buf_id, bufs[buf_id].status);
+    conns[conn_id].curr_send_buf += sent;
+    conns[conn_id].curr_send_size -= sent;
+    if (conns[conn_id].curr_send_size == 0) {
+        conns[conn_id].status &= ~SENDING;
+        cw_log("send_messages(): conn_id=%d, status=%d\n", conn_id, conns[conn_id].status);
     }
 
     return 1;
 }
 
-int start_send(int buf_id, int sock, unsigned char *buf, size_t size) {
-    cw_log("buf_id: %d, status: %d\n", buf_id, bufs[buf_id].status);
-    check(!(bufs[buf_id].status & SENDING));
-    bufs[buf_id].status |= SENDING;
-    cw_log("buf_id: %d, status: %d\n", buf_id, bufs[buf_id].status);
-    bufs[buf_id].curr_send_buf = buf;
-    bufs[buf_id].curr_send_size = size;
-    bufs[buf_id].curr_send_sock = sock;
-    return send_messages(buf_id);
+int start_send(int conn_id, int sock, unsigned char *buf, size_t size) {
+    cw_log("conn_id: %d, status: %d\n", conn_id, conns[conn_id].status);
+    check(!(conns[conn_id].status & SENDING));
+    conns[conn_id].status |= SENDING;
+    cw_log("conn_id: %d, status: %d\n", conn_id, conns[conn_id].status);
+    conns[conn_id].curr_send_buf = buf;
+    conns[conn_id].curr_send_size = size;
+    conns[conn_id].curr_send_sock = sock;
+    return send_messages(conn_id);
 }
 
-int finalize_conn(int buf_id) {
+int finalize_conn(int conn_id) {
     printf("finalize_conn()\n");
     return 1;
 }
@@ -689,31 +689,31 @@ void setnonblocking(int fd) {
 }
 
 void exec_request(int epollfd, const struct epoll_event *p_ev) {
-    int buf_id = p_ev->data.u32;
-    if (bufs[buf_id].recv_buf == NULL)
+    int conn_id = p_ev->data.u32;
+    if (conns[conn_id].recv_buf == NULL)
         return;
 
-    if ((p_ev->events | EPOLLIN) && (bufs[buf_id].status & RECEIVING)) {
-        if (!recv_messages(buf_id))
+    if ((p_ev->events | EPOLLIN) && (conns[conn_id].status & RECEIVING)) {
+        if (!recv_messages(conn_id))
             goto err;
     }
-    if ((p_ev->events | EPOLLOUT) && (bufs[buf_id].status & SENDING)) {
-        if (!send_messages(buf_id))
+    if ((p_ev->events | EPOLLOUT) && (conns[conn_id].status & SENDING)) {
+        if (!send_messages(conn_id))
             goto err;
     }
-    if ((p_ev->events | EPOLLOUT) && (bufs[buf_id].status & CONNECTING)) {
-        if (finalize_conn(buf_id))
+    if ((p_ev->events | EPOLLOUT) && (conns[conn_id].status & CONNECTING)) {
+        if (finalize_conn(conn_id))
             goto err;
     }
     // check whether we have new or leftover messages to process
-    if (!process_messages(buf_id))
+    if (!process_messages(conn_id))
         goto err;
 
     return;
 
  err:
-    close_and_forget(epollfd, bufs[buf_id].sock);
-    buf_free(buf_id);
+    close_and_forget(epollfd, conns[conn_id].sock);
+    conn_free(conn_id);
 }
 
 void* epoll_main_loop(void* args) {
@@ -776,16 +776,16 @@ void* epoll_main_loop(void* args) {
                 sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY,
                                      (void *)&val, sizeof(val)));
 
-                int buf_id = buf_alloc(conn_sock);
-                if (buf_id < 0) {
-                    fprintf(stderr, "Could not allocate new buf_info_t, closing...\n");
+                int conn_id = conn_alloc(conn_sock);
+                if (conn_id < 0) {
+                    fprintf(stderr, "Could not allocate new conn_info_t, closing...\n");
                     close_and_forget(epollfd, conn_sock);
                     continue;
                 }
 
                 ev.events = EPOLLIN | EPOLLOUT;
-                // Use the data.u32 field to store the buf_id in bufs[]
-                ev.data.u32 = buf_id;
+                // Use the data.u32 field to store the conn_id in conns[]
+                ev.data.u32 = conn_id;
 
                  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
@@ -864,9 +864,9 @@ int main(int argc, char *argv[]) {
 
     assert(nthread > 0 && nthread <= MAX_THREADS);
 
-    // Tag all buf_info as unused
+    // Tag all conn_info_t as unused
     for (int i = 0; i < MAX_BUFFERS; i++) {
-        bufs[i].recv_buf = 0;
+        conns[i].recv_buf = 0;
     }
 
     // Tag all sock_info as unused
@@ -918,9 +918,9 @@ int main(int argc, char *argv[]) {
         thread_infos[i].terminationfd = eventfd(0, 0);
     }
 
-    // Init bufs mutexs
+    // Init conns mutexs
     for (int i = 0; i < MAX_BUFFERS; i++) {
-        sys_check(pthread_mutex_init(&bufs[i].mtx, NULL));
+        sys_check(pthread_mutex_init(&conns[i].mtx, NULL));
     }
 
     // Init socks mutex
@@ -953,9 +953,9 @@ int main(int argc, char *argv[]) {
             close(thread_infos[i].terminationfd);
         }
 
-        // Destroy bufs mutexs
+        // Destroy conns mutexs
         for (int i = 0; i < MAX_BUFFERS; i++) {
-            sys_check(pthread_mutex_destroy(&bufs[i].mtx));
+            sys_check(pthread_mutex_destroy(&conns[i].mtx));
         }
 
         sys_check(pthread_mutex_destroy(&socks_mtx));
