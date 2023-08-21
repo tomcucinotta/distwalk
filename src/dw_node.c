@@ -576,7 +576,7 @@ int buf_alloc(int conn_sock) {
     for (buf_id = 0; buf_id < MAX_BUFFERS; buf_id++) {
         if (nthread > 1)
             sys_check(pthread_mutex_lock(&bufs[buf_id].mtx));
-        if (bufs[buf_id].recv_buf == 0) {
+        if (!bufs[buf_id].recv_buf) {
             break;  // unlock mutex above after mallocs
         }
         if (nthread > 1)
@@ -895,7 +895,7 @@ int main(int argc, char *argv[]) {
     /* Set all bits of the padding field to 0 */
     memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
 
-    /*---- Create the socket. The three arguments are: ----*/
+    /*---- Create the socket(s). The three arguments are: ----*/
     /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
      * case) */
     for (int i = 0; i < nthread; i++) {
@@ -916,32 +916,33 @@ int main(int argc, char *argv[]) {
         cw_log("Accepting new connections...\n");
 
         thread_infos[i].terminationfd = eventfd(0, 0);
-
     }
 
+    // Init bufs mutexs
+    for (int i = 0; i < MAX_BUFFERS; i++) {
+        sys_check(pthread_mutex_init(&bufs[i].mtx, NULL));
+    }
+
+    // Init socks mutex
+    // TODO: change sock_add and sock_dell's logic to avoid lock re-entrancy
+    pthread_mutexattr_t attr;
+
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+
+    sys_check(pthread_mutex_init(&socks_mtx, &attr));
+
+    // Run
     if (nthread == 1) {
         epoll_main_loop((void*) &thread_infos[0]);
     }
     else {
+        
         // Init worker threads
         for (int i = 0; i < nthread; i++) {
             sys_check(pthread_create(&workers[i], NULL, epoll_main_loop,
                                      (void *)&thread_infos[i]));
         }
-
-        // Init bufs mutexs
-        for (int i = 0; i < MAX_BUFFERS; i++) {
-            sys_check(pthread_mutex_init(&bufs[i].mtx, NULL));
-        }
-
-        // Init socks mutex
-        // TODO: change sock_add and sock_dell's logic to avoid lock re-entrancy
-        pthread_mutexattr_t attr;
-
-        pthread_mutexattr_init(&attr);
-        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-
-        sys_check(pthread_mutex_init(&socks_mtx, &attr));
     }
 
     // Clean-ups
