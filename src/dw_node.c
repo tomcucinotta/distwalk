@@ -57,9 +57,9 @@ typedef struct {
     int terminationfd;  // special eventfd to handle termination
 } thread_info_t;
 
-#define MAX_BUFFERS 16
+#define MAX_CONNS 16
 
-conn_info_t conns[MAX_BUFFERS];
+conn_info_t conns[MAX_CONNS];
 
 // used with --per-client-thread
 #define MAX_THREADS 8
@@ -573,7 +573,7 @@ int conn_alloc(int conn_sock) {
         goto continue_free;
 
     int conn_id;
-    for (conn_id = 0; conn_id < MAX_BUFFERS; conn_id++) {
+    for (conn_id = 0; conn_id < MAX_CONNS; conn_id++) {
         if (nthread > 1)
             sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
         if (!conns[conn_id].recv_buf) {
@@ -582,7 +582,7 @@ int conn_alloc(int conn_sock) {
         if (nthread > 1)
             sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
     }
-    if (conn_id == MAX_BUFFERS)
+    if (conn_id == MAX_CONNS)
         goto continue_free;
 
     conns[conn_id].recv_buf = new_buf;
@@ -865,7 +865,7 @@ int main(int argc, char *argv[]) {
     assert(nthread > 0 && nthread <= MAX_THREADS);
 
     // Tag all conn_info_t as unused
-    for (int i = 0; i < MAX_BUFFERS; i++) {
+    for (int i = 0; i < MAX_CONNS; i++) {
         conns[i].recv_buf = 0;
     }
 
@@ -919,7 +919,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Init conns mutexs
-    for (int i = 0; i < MAX_BUFFERS; i++) {
+    for (int i = 0; i < MAX_CONNS; i++) {
         sys_check(pthread_mutex_init(&conns[i].mtx, NULL));
     }
 
@@ -954,7 +954,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Destroy conns mutexs
-        for (int i = 0; i < MAX_BUFFERS; i++) {
+        for (int i = 0; i < MAX_CONNS; i++) {
             sys_check(pthread_mutex_destroy(&conns[i].mtx));
         }
 
