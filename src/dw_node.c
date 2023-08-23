@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sched.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
@@ -55,6 +56,8 @@ typedef struct {
 typedef struct {
     int listen_sock;
     int terminationfd;  // special eventfd to handle termination
+
+    int core_id; // core pinning
 } thread_info_t;
 
 #define MAX_CONNS 16
@@ -83,6 +86,7 @@ int no_delay = 1;
 
 int use_odirect = 0;
 int nthread = 1;
+int thread_affinity = 0;
 
 // return index in socks[] of sock_info associated to inaddr:port, or -1 if not found
 int sock_find_addr(in_addr_t inaddr, int port) {
@@ -141,6 +145,18 @@ void sigint_cleanup(int _) {
             eventfd_write(thread_infos[i].terminationfd, 1);
         }
     }
+}
+
+int pin_to_core(int core_id) {
+   int ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+   if (core_id < 0 || core_id >= ncpu)
+      return EINVAL;
+
+   cpu_set_t mask;
+   CPU_ZERO(&mask);
+   CPU_SET(core_id, &mask);
+
+   return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &mask);
 }
 
 // add the IP/port into the socks[] map to allow FORWARD finding an
@@ -719,6 +735,11 @@ void exec_request(int epollfd, const struct epoll_event *p_ev) {
 void* epoll_main_loop(void* args) {
     thread_info_t *infos = (thread_info_t *)args;
 
+    if (thread_affinity) {
+        pin_to_core(infos->core_id);
+        cw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
+    }
+
     int epollfd;
     struct epoll_event ev, events[MAX_EVENTS];
 
@@ -807,6 +828,7 @@ int main(int argc, char *argv[]) {
     // Setup SIGINT signal handler
     signal(SIGINT, sigint_cleanup);
 
+    cpu_set_t mask;
     struct sockaddr_in serverAddr;
 
     argc--;
@@ -854,6 +876,8 @@ int main(int argc, char *argv[]) {
             argv++;
         } else if (strcmp(argv[0], "--odirect") == 0) {
             use_odirect = 1;
+        } else if (strcmp(argv[0], "--thread-affinity") == 0) {
+            thread_affinity = 1;
         } else {
             fprintf(stderr, "Error: Unrecognized option: %s\n", argv[0]);
             exit(EXIT_FAILURE);
@@ -863,6 +887,22 @@ int main(int argc, char *argv[]) {
     }
 
     assert(nthread > 0 && nthread <= MAX_THREADS);
+
+    // Retrieve cpu set for thread-core pinning
+    long core_it = 0;
+    long nproc = sysconf(_SC_NPROCESSORS_ONLN);
+
+    if (thread_affinity) {
+        CPU_ZERO(&mask);
+        sys_check(sched_getaffinity(0, sizeof(cpu_set_t), &mask));
+
+        // Point BEFORE first pinnable core
+        while (!CPU_ISSET(core_it, &mask)) {
+            core_it++;
+            core_it = core_it % nproc;
+        }
+        core_it--;
+    }
 
     // Tag all conn_info_t as unused
     for (int i = 0; i < MAX_CONNS; i++) {
@@ -895,10 +935,10 @@ int main(int argc, char *argv[]) {
     /* Set all bits of the padding field to 0 */
     memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
 
-    /*---- Create the socket(s). The three arguments are: ----*/
-    /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
-     * case) */
     for (int i = 0; i < nthread; i++) {
+        /*---- Create the socket(s). The three arguments are: ----*/
+        /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
+        * case) */
         thread_infos[i].listen_sock = socket(PF_INET, SOCK_STREAM, 0);
 
         int val = 1;
@@ -916,6 +956,16 @@ int main(int argc, char *argv[]) {
         cw_log("Accepting new connections...\n");
 
         thread_infos[i].terminationfd = eventfd(0, 0);
+
+        // Round-robin thread-core pinning
+        if (thread_affinity) {
+            do {
+                core_it++;
+                core_it = core_it % nproc;
+            } while (!CPU_ISSET(core_it, &mask));
+
+            thread_infos[i].core_id = core_it;
+        }
     }
 
     // Init conns mutexs
