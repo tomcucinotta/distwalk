@@ -709,15 +709,15 @@ void exec_request(int epollfd, const struct epoll_event *p_ev) {
     if (conns[conn_id].recv_buf == NULL)
         return;
 
-    if ((p_ev->events | EPOLLIN) && (conns[conn_id].status & RECEIVING)) {
+    if ((p_ev->events & EPOLLIN) && (conns[conn_id].status & RECEIVING)) {
         if (!recv_messages(conn_id))
             goto err;
     }
-    if ((p_ev->events | EPOLLOUT) && (conns[conn_id].status & SENDING)) {
+    if ((p_ev->events & EPOLLOUT) && (conns[conn_id].status & SENDING)) {
         if (!send_messages(conn_id))
             goto err;
     }
-    if ((p_ev->events | EPOLLOUT) && (conns[conn_id].status & CONNECTING)) {
+    if ((p_ev->events & EPOLLOUT) && (conns[conn_id].status & CONNECTING)) {
         if (finalize_conn(conn_id))
             goto err;
     }
