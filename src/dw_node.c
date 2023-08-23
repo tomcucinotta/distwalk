@@ -655,7 +655,7 @@ int recv_messages(int conn_id) {
 // used during REPLYING or FORWARDING
 int send_messages(int conn_id) {
     int sock = conns[conn_id].curr_send_sock;
-    cw_log("send_messages(): conn_id=%d, status=%d, sock=%d\n", conn_id, conns[conn_id].status, sock);
+    cw_log("send_messages(): conn_id=%d, status=%d, curr_send_size=%lu, sock=%d\n", conn_id, conns[conn_id].status, conns[conn_id].curr_send_size, sock);
     size_t sent =
         send(sock, conns[conn_id].curr_send_buf, conns[conn_id].curr_send_size, MSG_NOSIGNAL);
     cw_log("send() returned: %d\n", (int)sent);
