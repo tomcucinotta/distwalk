@@ -413,8 +413,8 @@ void *thread_receiver(void *data) {
             goto skip;
         }
         message_t *m = (message_t *)recv_buf;
-        unsigned long pkt_id = m->req_id;
-        cw_log("Received %lu bytes, req_id=%lu, pkt_size=%u, ops=%d\n", read,
+        unsigned pkt_id = m->req_id;
+        cw_log("Received %lu bytes, req_id=%u, pkt_size=%u, ops=%d\n", read,
                pkt_id, m->req_size, m->num);
         cw_log("Expecting further %lu bytes (total pkt_size %u bytes)\n",
                m->req_size - read, m->req_size);
@@ -433,13 +433,17 @@ void *thread_receiver(void *data) {
             goto skip;
         }
 
+#ifdef CW_DEBUG
+        msg_log(m, "received message: ");
+#endif
+
         struct timespec ts_now;
         clock_gettime(clk_id, &ts_now);
         unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
                               (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
         usecs_elapsed[thread_id][idx(pkt_id)] =
             usecs - usecs_send[thread_id][idx(pkt_id)];
-        cw_log("req_id %lu elapsed %ld us\n", pkt_id,
+        cw_log("req_id %u elapsed %ld us\n", pkt_id,
                usecs_elapsed[thread_id][idx(pkt_id)]);
 
     skip:
