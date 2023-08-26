@@ -837,7 +837,7 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
             printf(
                 "Usage: dw_node [-h|--help] [-b bindname] [-bp bindport] "
-                "[-s|--storage path/to/storage/file] [--threads n] "
+                "[-s|--storage path/to/storage/file] [--threads n] [--thread-affinity] "
                 "[-m|--max-storage-size bytes] "
                 "[--odirect]\n");
             exit(EXIT_SUCCESS);
