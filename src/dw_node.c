@@ -27,12 +27,11 @@
 
 // I could be doing 0, 1, 2 or more of these at the same time => bitmask
 typedef enum {
-    RECEIVING = 1,      // receiving on conns[].sock
-    SENDING = 2,        // sending data for REPLY or FORWARD
-    LOADING = 4,        // loading data from disk
-    STORING = 8,        // storing data to disk
-    CONNECTING = 16,    // waiting for connection establishment during a FORWARD
-    FORWARDING = 32     // waiting for a FORWARD to complete
+    SENDING = 1,        // using EPOLLOUT while sending data to sock
+    LOADING = 2,        // loading data from disk
+    STORING = 4,        // storing data to disk
+    CONNECTING = 8,     // waiting for connection establishment during a FORWARD
+    FORWARDING = 16      // waiting for a FORWARD to complete
 } req_status;
 
 typedef struct {
@@ -46,7 +45,7 @@ typedef struct {
     unsigned char *send_buf;      // send buffer
     unsigned char *store_buf;     // load/store buffer
 
-    unsigned char *curr_recv_buf; // current pointer within receive buffer while RECEIVING
+    unsigned char *curr_recv_buf; // current pointer within receive buffer while receiving
     unsigned long curr_recv_size; // leftover space in receive buffer
 
     unsigned char *curr_send_buf; // curr ptr in send buffer while SENDING
@@ -140,12 +139,10 @@ int thread_affinity = 0;
 const char *conn_status_str(int s) {
     static char str[16] = "";
     char *p = str;
-    if (s & RECEIVING)
-        sprintf(p++, "R");
     if (s & SENDING)
         sprintf(p++, "S");
     if (s & LOADING)
-        sprintf(p++, "L");
+        sprintf(p++, "R");
     if (s & STORING)
         sprintf(p++, "W");
     if (s & CONNECTING)
@@ -744,7 +741,6 @@ int conn_alloc(int conn_sock) {
     conns[conn_id].curr_recv_size = BUF_SIZE;
     conns[conn_id].curr_send_buf = conns[conn_id].send_buf;
     conns[conn_id].curr_send_size = 0;
-    conns[conn_id].status = RECEIVING;
     conns[conn_id].curr_cmd_id = 0;
 
     if (nthread > 1)
@@ -798,14 +794,12 @@ int send_messages(int conn_id) {
         return 1;
     } else if (sent == -1) {
         fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
-        conns[conn_id].status &= ~SENDING;
         return 0;
     }
     conns[conn_id].curr_send_buf += sent;
     conns[conn_id].curr_send_size -= sent;
     if (conns[conn_id].curr_send_size == 0) {
         conns[conn_id].curr_send_buf = conns[conn_id].send_buf;
-        conns[conn_id].status &= ~SENDING;
         cw_log("send_messages(): conn_id=%d, status=%d (%s), curr_send_size=%lu\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status), conns[conn_id].curr_send_size);
     }
 
@@ -823,15 +817,11 @@ unsigned char *get_send_buf(int conn_id, size_t size) {
 // queue send of size bytes starting from the pointer get_send_buf() returned last
 int start_send(int conn_id, size_t size) {
     cw_log("conn_id: %d, status: %d (%s)\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status));
-    if (!(conns[conn_id].status & SENDING)) {
-        conns[conn_id].status |= SENDING;
-        cw_log("conn_id: %d, status: %d (%s)\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status));
+    if (conns[conn_id].curr_send_size == 0)
         conns[conn_id].curr_send_buf = conns[conn_id].send_buf;
-        conns[conn_id].curr_send_size = size;
-    } else {
-        // move end of send operation forward by size bytes
-        conns[conn_id].curr_send_size += size;
-    }
+    // move end of send operation forward by size bytes
+    conns[conn_id].curr_send_size += size;
+
     if (conns[conn_id].status & CONNECTING)
         return 1;
     else
@@ -849,8 +839,6 @@ int finalize_conn(int conn_id) {
     }
     // this may trigger send_messages() on return, if messages have already been enqueued
     conns[conn_id].status &= ~CONNECTING;
-    if (conns[conn_id].curr_send_size > 0)
-        conns[conn_id].status |= SENDING;
 
     return 1;
 }
@@ -868,7 +856,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     if (conns[conn_id].sock == -1 || conns[conn_id].recv_buf == NULL)
         return;
 
-    if ((p_ev->events & EPOLLIN) && (conns[conn_id].status & RECEIVING)) {
+    if (p_ev->events & EPOLLIN) {
         cw_log("calling recv_mesg()\n");
         if (!recv_messages(conn_id))
             goto err;
@@ -879,7 +867,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
             goto err;
         // we need the send_messages() below to still be tried afterwards
     }
-    if ((p_ev->events & EPOLLOUT) && (conns[conn_id].status & SENDING) && !(conns[conn_id].status & CONNECTING)) {
+    if ((p_ev->events & EPOLLOUT) && (conns[conn_id].curr_send_size > 0) && !(conns[conn_id].status & CONNECTING)) {
         cw_log("calling send_mesg()\n");
         if (!send_messages(conn_id))
             goto err;
@@ -890,6 +878,23 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         cw_log("calling proc_mesg()\n");
         if (!process_messages(conn_id, epollfd))
             goto err;
+    }
+
+    if (conns[conn_id].curr_send_size > 0 && !(conns[conn_id].status & SENDING)) {
+        struct epoll_event ev2;
+        ev2.data.u32 = conn_id;
+        ev2.events = EPOLLIN | EPOLLOUT;
+        cw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
+               conns[conn_id].sock, conn_id, conns[conn_id].curr_send_size);
+        sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[conn_id].sock, &ev2));
+    }
+    if (conns[conn_id].curr_send_size == 0 && (conns[conn_id].status & SENDING)) {
+        struct epoll_event ev2;
+        ev2.data.u32 = conn_id;
+        ev2.events = EPOLLIN;
+        cw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
+               conns[conn_id].sock, conn_id, conns[conn_id].curr_send_size);
+        sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[conn_id].sock, &ev2));
     }
 
     return;
@@ -1094,7 +1099,7 @@ void* conn_worker(void* args) {
                     continue;
                 }
 
-                ev.events = EPOLLIN | EPOLLOUT;
+                ev.events = EPOLLIN;
                 // Use the data.u32 field to store the conn_id in conns[]
                 ev.data.u32 = conn_id;
 
