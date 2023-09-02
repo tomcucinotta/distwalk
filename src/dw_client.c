@@ -30,6 +30,8 @@ unsigned int n_store = 0;    // Number of STORE requests
 unsigned int n_load = 0;     // Number of LOAD requests
 unsigned int n_compute = 0;  // Number of COMPUTE requests
 
+unsigned long default_compute_us = 1000;
+
 int exp_comptimes = 0;
 
 pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 128, .min = NAN, .max = NAN };
@@ -698,16 +700,26 @@ int main(int argc, char *argv[]) {
         argv++;
     }
 
+
+    if (n_compute + n_load + n_store <= 0){
+
+        if (num_pkts <= 0) {
+            num_pkts = 1;
+        }
+
+        template_cmds[ncmd].cmd = COMPUTE;
+        template_cmds[ncmd].u.comp_time_us = default_compute_us;
+
+        ccmd_add(ccmd, &template_cmds[ncmd++]);
+
+        n_compute++;
+    }
+
     // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
     // TODO: should be optional
     if (!ccmd->last_reply_called) {
         pd_spec_t val = pd_build_fixed(default_resp_size);
         ccmd_last_reply(ccmd, REPLY, &val);
-    }
-
-    // globals
-    if (n_compute + n_store + n_load > 0 && num_pkts <= 0){
-        num_pkts = 1;
     }
 
     for (int i = 0; i < 3; i++) {
