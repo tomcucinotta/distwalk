@@ -30,7 +30,7 @@ unsigned int n_store = 0;    // Number of STORE requests
 unsigned int n_load = 0;     // Number of LOAD requests
 unsigned int n_compute = 0;  // Number of COMPUTE requests
 
-unsigned long default_compute_us = 1000;
+unsigned int default_compute_us = 1000;
 
 int exp_comptimes = 0;
 
@@ -707,10 +707,8 @@ int main(int argc, char *argv[]) {
             num_pkts = 1;
         }
 
-        template_cmds[ncmd].cmd = COMPUTE;
-        template_cmds[ncmd].u.comp_time_us = default_compute_us;
-
-        ccmd_add(ccmd, &template_cmds[ncmd++]);
+        pd_spec_t val = pd_build_fixed(default_compute_us);
+        ccmd_add(ccmd, COMPUTE, &val);
 
         n_compute++;
     }
