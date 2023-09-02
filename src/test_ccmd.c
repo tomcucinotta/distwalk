@@ -10,14 +10,11 @@ int main() {
     unsigned char *send_buf = malloc(BUF_SIZE);
     message_t *m = (message_t *)send_buf;
 
-    command_t cmd1;
-    cmd1.cmd = COMPUTE;
-    cmd1.u.comp_time_us = 100;
-    ccmd_add(ccmd, &cmd1);
+    pd_spec_t val = { .prob = FIXED, .val = 100, .min = 0, .max = 0 };
+    ccmd_add(ccmd, COMPUTE, &val);
 
-    command_t cmd2;
-    cmd2.cmd = REPLY;
-    ccmd_add(ccmd, &cmd2);
+    pd_spec_t val2 = { .prob = FIXED, .val = 100, .min = 0, .max = 0 };
+    ccmd_add(ccmd, REPLY, &val2);
 
     ccmd_log(ccmd);
     ccmd_dump(ccmd, m);

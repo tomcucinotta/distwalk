@@ -15,7 +15,7 @@
 #include <unistd.h>
 
 #include "cw_debug.h"
-#include "expon.h"
+#include "distrib.h"
 #include "message.h"
 #include "timespec.h"
 #include "ccmd.h"
@@ -24,8 +24,6 @@ int exp_arrivals = 0;
 int wait_spinning = 0;
 
 ccmd_t* ccmd = NULL; // Ordered chain of commands
-command_t template_cmds[255];
-int ncmd = 0;
 
 // For print only
 unsigned int n_store = 0;    // Number of STORE requests
@@ -34,8 +32,8 @@ unsigned int n_compute = 0;  // Number of COMPUTE requests
 
 int exp_comptimes = 0;
 
-unsigned long pkt_size = 128;
-int exp_pkt_size = 0;
+pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 128, .min = NAN, .max = NAN };
+pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 10000, .min = NAN, .max = NAN };
 
 unsigned long default_resp_size = 128;
 int exp_resp_size = 0;
@@ -172,26 +170,6 @@ command_type_t pick_next_cmd() {
 #define MIN_SEND_SIZE (sizeof(message_t) + 2 * sizeof(command_t))
 #define MIN_REPLY_SIZE sizeof(message_t)
 
-uint32_t exp_packet_size(uint32_t avg, uint32_t min, uint32_t max,
-                         struct drand48_data *rnd_buf) {
-    /* The pkt_size in input does not consider header size but I need to take
-     * that into account if I want to generate an exponential distribution.
-     */
-    uint32_t ret = lround(expon(1.0 / (avg + TCPIP_HEADERS_SIZE), rnd_buf));
-
-    if (ret >= TCPIP_HEADERS_SIZE)
-        ret -= TCPIP_HEADERS_SIZE;
-    else
-        ret = 0;
-
-    if (ret < min)
-        return min;
-    else if (ret > max)
-        return max;
-    else
-        return ret;
-}
-
 #define MAX_PKTS 1000000
 #define MAX_RATES 1000000
 
@@ -201,7 +179,6 @@ long usecs_send[MAX_THREADS][MAX_PKTS];
 long usecs_elapsed[MAX_THREADS][MAX_PKTS];
 // abs start-time of the experiment
 struct timespec ts_start;
-unsigned int rate = 1000;  // pkt/s rate (period is its inverse)
 
 unsigned long num_pkts = 0;
 
@@ -230,8 +207,6 @@ typedef struct {
     int num_send_pkts;
 } thread_data_t;
 
-unsigned long curr_period_us() { return 1000000 / rate; }
-
 int idx(int pkt_id) {
     int val = per_session_output ? pkt_id % pkts_per_session : pkt_id;
     assert(val < MAX_PKTS);
@@ -246,21 +221,20 @@ void *thread_sender(void *data) {
     unsigned char *send_buf = malloc(BUF_SIZE);
     check(send_buf != NULL);
     struct timespec ts_now;
-    struct drand48_data rnd_buf;
 
     clock_gettime(clk_id, &ts_now);
-    srand48_r(time(NULL), &rnd_buf);
+    pd_init(time(NULL));
 
-    int rate_start = rate;
+    int rate_start = 1000000.0 / send_period_us_pd.val;
 
     message_t *m = (message_t *)send_buf;
 
-    ccmd_dump(ccmd, m);
 #ifdef CW_DEBUG
     ccmd_log(ccmd);
 #endif
 
     for (int i = 0; i < num_send_pkts; i++) {
+        ccmd_dump(ccmd, m);
         /* remember time of send relative to ts_start */
         struct timespec ts_send;
         clock_gettime(clk_id, &ts_send);
@@ -271,44 +245,14 @@ void *thread_sender(void *data) {
         usecs_elapsed[thread_id][idx(pkt_id)] = 0;
         /*---- Issue a request to the server ---*/
         m->req_id = pkt_id;
-
-        if (exp_pkt_size) {
-            m->req_size =
-            exp_packet_size(pkt_size, MIN_SEND_SIZE, BUF_SIZE, &rnd_buf);
-        } else {
-            m->req_size = pkt_size;
-        }
-
-        // Personalize commmand chain
-        for (int i=0; i<m->num; i++) {
-            switch (m->cmds[i].cmd) {
-                case STORE:
-                    break;
-                case COMPUTE:
-                    if (exp_comptimes) {
-                        m->cmds[i].u.comp_time_us =
-                            lround(expon(1.0 / m->cmds[i].u.comp_time_us, &rnd_buf));
-                    }
-                    break;
-                case LOAD:
-                    break;
-                case FORWARD:
-                    break;
-                case REPLY:
-                    if (exp_resp_size) {
-                        m->cmds[i].u.resp_size =
-                            exp_packet_size(m->cmds[i].u.fwd.pkt_size, MIN_REPLY_SIZE, BUF_SIZE, &rnd_buf);
-                    }
-                    break;
-                default: 
-                    printf("Unknown command type\n");
-                    exit(EXIT_FAILURE);
-            }
-        }
+        m->req_size = pd_sample(&send_pkt_size_pd);
 
         cw_log("sending %u bytes (will expect %u bytes in response)...\n",
                m->req_size, m->cmds[m->num-1].u.resp_size);
         assert(m->req_size <= BUF_SIZE);
+#ifdef CW_DEBUG
+        msg_log(m, "Sending msg: ");
+#endif
         if (!send_all(clientSocket[thread_id], send_buf, m->req_size)) {
             fprintf(stderr,
                     "Forcing premature termination of sender thread while "
@@ -317,13 +261,8 @@ void *thread_sender(void *data) {
             break;
         }
 
-        unsigned long period_us = curr_period_us();
-        unsigned long period_ns;
-        if (exp_arrivals) {
-            period_ns = lround(expon(1.0 / period_us, &rnd_buf) * 1000.0);
-        } else {
-            period_ns = period_us * 1000;
-        }
+        unsigned long period_ns = pd_sample(&send_period_us_pd) * 1000.0;
+        cw_log("period_ns=%lu\n", period_ns);
         struct timespec ts_delta =
             (struct timespec){period_ns / 1000000000, period_ns % 1000000000};
 
@@ -341,12 +280,14 @@ void *thread_sender(void *data) {
         if (ramp_step_secs != 0 && pkt_id > 0) {
             int step =
                 usecs_send[thread_id][idx(pkt_id)] / 1000000 / ramp_step_secs;
-            int old_rate = rate;
+            int old_rate = 1000000.0 / send_period_us_pd.val;
+            int rate;
             if (ramp_fname != NULL)
                 rate = rates[(step < ramp_num_steps) ? step
                                                      : (ramp_num_steps - 1)];
             else
                 rate = rate_start + step * ramp_delta_rate;
+            send_period_us_pd.val = 1000000.0 / rate;
             if (old_rate != rate)
                 cw_log("old_rate: %d, rate: %d\n", old_rate, rate);
         }
@@ -592,13 +533,13 @@ int main(int argc, char *argv[]) {
             argv++;
         } else if (strcmp(argv[0], "-p") == 0) {
             assert(argc >= 2);
-            rate = 1000000 / atol(argv[1]);
+            assert(pd_parse(&send_period_us_pd, argv[1]));
             argc--;
             argv++;
         } else if (strcmp(argv[0], "-r") == 0 ||
                    strcmp(argv[0], "--rate") == 0) {
             assert(argc >= 2);
-            rate = atoi(argv[1]);
+            send_period_us_pd = pd_build_fixed(atof(argv[1]));
             argc--;
             argv++;
         } else if (strcmp(argv[0], "-ea") == 0 ||
@@ -632,10 +573,9 @@ int main(int argc, char *argv[]) {
                    strcmp(argv[0], "--comp-time") == 0) {
             assert(argc >= 2);
 
-            template_cmds[ncmd].cmd = COMPUTE;
-            template_cmds[ncmd].u.comp_time_us = atoi(argv[1]);
-
-            ccmd_add(ccmd, &template_cmds[ncmd++]);
+            pd_spec_t val;
+            assert(pd_parse(&val, argv[1]));
+            ccmd_add(ccmd, COMPUTE, &val);
 
             n_compute++;
             argc--;
@@ -644,10 +584,8 @@ int main(int argc, char *argv[]) {
                    strcmp(argv[0], "--store-data") == 0) {
             assert(argc >= 2);
 
-            template_cmds[ncmd].cmd = STORE;
-            template_cmds[ncmd].u.store_nbytes = atoi(argv[1]);
-
-            ccmd_add(ccmd, &template_cmds[ncmd++]);
+            pd_spec_t val = { .prob = FIXED, .val = atoi(argv[1]), .min = 0, .max = 0 };
+            ccmd_add(ccmd, STORE, &val);
 
             n_store++;
             argc--;
@@ -656,10 +594,8 @@ int main(int argc, char *argv[]) {
                    strcmp(argv[0], "--load-data") == 0) {
             assert(argc >= 2);
 
-            template_cmds[ncmd].cmd = LOAD;
-            template_cmds[ncmd].u.load_nbytes = atoi(argv[1]);
-
-            ccmd_add(ccmd, &template_cmds[ncmd++]);
+            pd_spec_t val = { .prob = FIXED, .val = atoi(argv[1]), .min = 0, .max = 0 };
+            ccmd_add(ccmd, LOAD, &val);
 
             n_load++;
             argc--;
@@ -671,15 +607,15 @@ int main(int argc, char *argv[]) {
             struct sockaddr_in addr;
             host_net_config(argv[1], &addr);
 
-            template_cmds[ncmd].cmd = FORWARD;
-            template_cmds[ncmd].u.fwd.fwd_port = addr.sin_port;
-            template_cmds[ncmd].u.fwd.fwd_host = addr.sin_addr.s_addr;
-            template_cmds[ncmd].u.fwd.pkt_size = default_resp_size;
-            ccmd_add(ccmd, &template_cmds[ncmd++]);
+            // TODO: customize forward pkt size
+            pd_spec_t val = { .prob = FIXED, .val = default_resp_size, .min = 0, .max = 0 };
+            ccmd_add(ccmd, FORWARD, &val);
+            ccmd_last(ccmd)->fwd.fwd_port = addr.sin_port;
+            ccmd_last(ccmd)->fwd.fwd_host = addr.sin_addr.s_addr;
 
-            template_cmds[ncmd].cmd = REPLY;
-            template_cmds[ncmd].u.resp_size = default_resp_size;
-            ccmd_add(ccmd, &template_cmds[ncmd++]);
+            // TODO: customize forward-reply pkt size
+            val = (pd_spec_t) { .prob = FIXED, .val = default_resp_size, .min = 0, .max = 0 };
+            ccmd_add(ccmd, REPLY, &val);
 
             argc--;
             argv++;
@@ -713,12 +649,12 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[0], "-ps") == 0 ||
                    strcmp(argv[0], "--pkt-size") == 0) {
             assert(argc >= 2);
-            pkt_size = atol(argv[1]);
+            assert(pd_parse(&send_pkt_size_pd, argv[1]));
             argc--;
             argv++;
         } else if (strcmp(argv[0], "-eps") == 0 ||
                    strcmp(argv[0], "--exp-pkt-size") == 0) {
-            exp_pkt_size = 1;
+            send_pkt_size_pd.prob = EXPON;
         } else if (strcmp(argv[0], "-rs") == 0 ||
                    strcmp(argv[0], "--resp-size") == 0) {
             assert(argc >= 2);
@@ -727,7 +663,8 @@ int main(int argc, char *argv[]) {
             unsigned long resp_size = atol(argv[1]);
             assert(resp_size <= BUF_SIZE);
             assert(resp_size >= MIN_REPLY_SIZE);
-            ccmd_attach_reply_size(ccmd, resp_size);
+            pd_spec_t val = { .prob = FIXED, .val = resp_size, .min = 0, .max = 0 };
+            ccmd_attach_reply_size(ccmd, &val);
 
             argc--;
             argv++;
@@ -764,9 +701,8 @@ int main(int argc, char *argv[]) {
     // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
     // TODO: should be optional
     if (!ccmd->last_reply_called) {
-        template_cmds[ncmd].cmd = REPLY;
-        template_cmds[ncmd].u.resp_size = default_resp_size;
-        ccmd_last_reply(ccmd, &template_cmds[ncmd++]);
+        pd_spec_t val = pd_build_fixed(default_resp_size);
+        ccmd_last_reply(ccmd, REPLY, &val);
     }
 
     // globals
@@ -795,11 +731,11 @@ int main(int argc, char *argv[]) {
                 }
             }
             fclose(ramp_fid);
-            rate = rates[0];
+            send_period_us_pd.val = 1000000.0 / rates[0];
             if (num_pkts == 0 || num_pkts > cnt) num_pkts = cnt;
         } else {
             num_pkts = 0;
-            int r = rate;
+            int r = send_period_us_pd.val;
             for (int s = 0; s < ramp_num_steps; s++) {
                 num_pkts += r * ramp_step_secs;
                 r += ramp_delta_rate;
@@ -825,14 +761,15 @@ int main(int argc, char *argv[]) {
     printf("  num_threads: %d\n", num_threads);
     printf("  num_pkts=%lu (COMPUTE:%d, STORE:%d, LOAD:%d)\n", num_pkts,
            n_compute, n_store, n_load);
-    printf("  rate=%d, exp_arrivals=%d\n", rate, exp_arrivals);
+    printf("  rate=%g, exp_arrivals=%d\n", 1000000.0 / send_period_us_pd.val, exp_arrivals);
+    printf("  period=%sus\n", pd_str(&send_period_us_pd));
     printf("  waitspin=%d\n", wait_spinning);
     printf("  ramp_num_steps=%d, ramp_delta_rate=%d, ramp_step_secs=%d\n",
            ramp_num_steps, ramp_delta_rate, ramp_step_secs);
     /*printf("  comptime_us=%lu, exp_comptimes=%d\n", comptimes_us,
            exp_comptimes); TODO: Update */
-    printf("  pkt_size=%lu (%lu with headers), exp_pkt_size=%d\n", pkt_size,
-           pkt_size + TCPIP_HEADERS_SIZE, exp_pkt_size);
+    printf("  pkt_size=%s (+%d for headers)\n", pd_str(&send_pkt_size_pd),
+           TCPIP_HEADERS_SIZE);
     /*printf("  resp_size=%lu (%lu with headers), exp_resp_size=%d\n", resp_size,
            resp_size + TCPIP_HEADERS_SIZE, exp_resp_size); TODO: Update */
     printf("  min packet size due to header: send=%lu, reply=%lu\n",
@@ -842,8 +779,8 @@ int main(int argc, char *argv[]) {
     printf("  num_sessions: %d\n", num_sessions);
     printf("  per_session_output: %d\n", per_session_output);
 
-    assert(pkt_size >= MIN_SEND_SIZE);
-    assert(pkt_size <= BUF_SIZE);
+    assert(send_pkt_size_pd.val >= MIN_SEND_SIZE);
+    assert(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE);
     assert(no_delay == 0 || no_delay == 1);
 
     // Init random number generator
