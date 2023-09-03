@@ -6,15 +6,17 @@
 
 // Probabilistic distribution types
 typedef enum {
-    FIXED,
-    UNIF,
-    EXPON,
+    FIXED,              // fixed value .val
+    UNIF,               // uniformly distributed value in range [.min, .max)
+    EXPON,              // exponentially distributed value with average .val
+    NORM,               // Normal distribution with average .val and sigma .std
 } pd_type_t;
 
 // Probabilistic distribution spec
 typedef struct {
     pd_type_t prob;
-    double val;        // usually, average of the distribution
+    double val;        // average of the distribution
+    double std;        // standard deviation of the distribution
     double min;        // lower-bound saturation if !isnan()
     double max;        // upper-bound saturation if !isnan()
 } pd_spec_t;

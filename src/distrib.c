@@ -13,6 +13,26 @@ double expon(double lambda) {
     return (-log(1 - x) / lambda);
 }
 
+/* X~unif[0,1] -> E[X] = 1/2, sx^2 = E[(X-1/2)^2] = \int_0^1 x^2 dx - 1/4 = 1/3 - 1/4 = 1/12
+ * Y = X_1 + ... + X_n -> my = n * mx, sy^2 = n * sx^2, sy = sqrt(n) * sx
+ * E[(Y - my)^2] = E[Y^2] - my^2
+ * = E[(X_1 + ... + X_n)*(X_1 + ... + X_n)] - my^2
+ * = n * (mx^2 + sx^2) + (n^2 - n)*mx^2 - n^2 * mx^2
+ * = n * sx^2
+ */
+double gaussian(double avg, double std) {
+    double y = 0.0;
+    const int N = 4;
+    for (int i = 0; i < N*N; i++) {
+        double x;
+        drand48_r(&rnd_buf, &x);
+        y += x - 0.5;
+    }
+    // y has mean 0, var N*N/12
+    y *= sqrt(12)/N; // now y ~ N(0,1)
+    return y * std + avg;
+}
+
 void pd_init(long int seed) {
     srand48_r(seed, &rnd_buf);
 }
@@ -28,6 +48,10 @@ int pd_parse(pd_spec_t *p, const char *s) {
         return 1;
     } else if (sscanf(s, "exp(%lf)", &p->val) == 1) {
         p->prob = EXPON;
+        return 1;
+    } else if (sscanf(s, "norm(%lf,%lf)", &p->val, &p->std) == 2) {
+        p->min = 0;
+        p->prob = NORM;
         return 1;
     } else if (sscanf(s, "%lf", &p->val) == 1) {
         p->prob = FIXED;
@@ -50,6 +74,9 @@ double pd_sample(pd_spec_t *p) {
         return p->min + (p->max - p->min) * x;
     case EXPON:
         val = expon(1.0 / (p->val));
+        break;
+    case NORM:
+        val = gaussian(p->val, p->std);
         break;
     default:
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
@@ -75,6 +102,9 @@ char *pd_str(pd_spec_t *p) {
         break;
     case EXPON:
         sprintf(s, "exp(%g)", p->val);
+        break;
+    case NORM:
+        sprintf(s, "norm(%g,%g)", p->val, p->std);
         break;
     default:
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
