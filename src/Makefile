@@ -15,6 +15,7 @@ dw_client_debug: ccmd_debug.o dw_client_debug.o distrib_debug.o
 dw_node: dw_node.o
 dw_node_debug: dw_node_debug.o
 test_distrib: test_distrib.o distrib.o
+test_distrib_debug: test_distrib_debug.o distrib_debug.o
 test_ccmd: ccmd.o test_ccmd.o distrib.o
 
 %_tsan: %_tsan.o

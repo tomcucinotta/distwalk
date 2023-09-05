@@ -1,4 +1,5 @@
 #include "distrib.h"
+#include "cw_debug.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -37,28 +38,41 @@ void pd_init(long int seed) {
     srand48_r(seed, &rnd_buf);
 }
 
-int pd_parse(pd_spec_t *p, const char *s) {
-    *p = (pd_spec_t) { .prob = FIXED, .val = NAN, .min = NAN, .max = NAN };
-    if (sscanf(s, "unif(%lf,%lf)", &p->min, &p->max) == 2) {
-        p->prob = UNIF;
-        return 1;
-    } else if (sscanf(s, "unif(%lf)", &p->max) == 1) {
-        p->min = 0;
-        p->prob = UNIF;
-        return 1;
-    } else if (sscanf(s, "exp(%lf)", &p->val) == 1) {
-        p->prob = EXPON;
-        return 1;
-    } else if (sscanf(s, "norm(%lf,%lf)", &p->val, &p->std) == 2) {
-        p->min = 0;
-        p->prob = NORM;
-        return 1;
-    } else if (sscanf(s, "%lf", &p->val) == 1) {
-        p->prob = FIXED;
-        return 1;
-    } else {
-        return 0;
+int pd_parse(pd_spec_t *p, char *s) {
+    *p = (pd_spec_t) { .prob = FIXED, .val = NAN, .std = NAN, .min = NAN, .max = NAN };
+    char *tok = strsep(&s, ":");
+    if (!tok) {
+        fprintf(stderr, "Wrong value/distribution syntax\n");
+        exit(1);
     }
+    if (strcmp(tok, "unif") == 0)
+        p->prob = UNIF;
+    else if (strcmp(tok, "exp") == 0)
+        p->prob = EXPON;
+    else if (strcmp(tok, "norm") == 0)
+        p->prob = NORM;
+    else if (sscanf(tok, "%lf", &p->val) == 1)
+        p->prob = FIXED;
+    else {
+        fprintf(stderr, "Wrong value/distribution syntax: %s\n", tok);
+        exit(1);
+    }
+    while ((tok = strsep(&s, ",")) != NULL) {
+        printf("Processing tok: %s\n", tok);
+        if (sscanf(tok, "min=%lf", &p->min) == 1
+            || sscanf(tok, "max=%lf", &p->max) == 1
+            || sscanf(tok, "std=%lf", &p->std) == 1
+            || sscanf(tok, "avg=%lf", &p->val) == 1
+            || sscanf(tok, "%lf", &p->val) == 1)
+                continue;
+        fprintf(stderr, "Unrecognized token in value/distribution syntax: %s\n", tok);
+        exit(1);
+    }
+    check(p->prob != FIXED || !isnan(p->val));
+    check(p->prob != UNIF || (!isnan(p->min) && !isnan(p->max)));
+    check(p->prob != EXPON || (!isnan(p->val) && isnan(p->std)));
+    check(p->prob != NORM || (!isnan(p->val) && !isnan(p->std)));
+    return 1;
 }
 
 double pd_sample(pd_spec_t *p) {

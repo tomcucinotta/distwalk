@@ -35,6 +35,6 @@ double pd_sample(pd_spec_t *p);
 char *pd_str(pd_spec_t *p);
 
 // return 1 if probabilistic distribution successfully parsed from s
-int pd_parse(pd_spec_t *p, const char *s);
+int pd_parse(pd_spec_t *p, char *s);
 
 #endif
