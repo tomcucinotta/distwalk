@@ -610,13 +610,12 @@ int main(int argc, char *argv[]) {
             host_net_config(argv[1], &addr);
 
             // TODO: customize forward pkt size
-            pd_spec_t val = { .prob = FIXED, .val = default_resp_size, .min = 0, .max = 0 };
+            pd_spec_t val = pd_build_fixed(default_resp_size);
             ccmd_add(ccmd, FORWARD, &val);
             ccmd_last(ccmd)->fwd.fwd_port = addr.sin_port;
             ccmd_last(ccmd)->fwd.fwd_host = addr.sin_addr.s_addr;
 
             // TODO: customize forward-reply pkt size
-            val = (pd_spec_t) { .prob = FIXED, .val = default_resp_size, .min = 0, .max = 0 };
             ccmd_add(ccmd, REPLY, &val);
 
             argc--;
