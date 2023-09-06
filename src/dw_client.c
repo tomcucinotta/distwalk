@@ -585,8 +585,8 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[0], "-S") == 0 ||
                    strcmp(argv[0], "--store-data") == 0) {
             assert(argc >= 2);
-
-            pd_spec_t val = { .prob = FIXED, .val = atoi(argv[1]), .min = 0, .max = 0 };
+            
+            pd_spec_t val = pd_build_fixed(atoi(argv[1]));
             ccmd_add(ccmd, STORE, &val);
 
             n_store++;
@@ -596,7 +596,7 @@ int main(int argc, char *argv[]) {
                    strcmp(argv[0], "--load-data") == 0) {
             assert(argc >= 2);
 
-            pd_spec_t val = { .prob = FIXED, .val = atoi(argv[1]), .min = 0, .max = 0 };
+            pd_spec_t val = pd_build_fixed(atoi(argv[1]));
             ccmd_add(ccmd, LOAD, &val);
 
             n_load++;
