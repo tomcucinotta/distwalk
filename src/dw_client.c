@@ -665,7 +665,8 @@ int main(int argc, char *argv[]) {
             unsigned long resp_size = atol(argv[1]);
             assert(resp_size <= BUF_SIZE);
             assert(resp_size >= MIN_REPLY_SIZE);
-            pd_spec_t val = { .prob = FIXED, .val = resp_size, .min = 0, .max = 0 };
+
+            pd_spec_t val = pd_build_fixed(resp_size);
             ccmd_attach_reply_size(ccmd, &val);
 
             argc--;
