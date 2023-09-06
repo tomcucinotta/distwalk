@@ -139,6 +139,7 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
                 break;
             case FORWARD:
                 m->cmds[i++].u.fwd = curr->fwd;
+                break;
             default: 
                 printf("ccmd_dump() - Unknown command type\n");
                 exit(EXIT_FAILURE);
