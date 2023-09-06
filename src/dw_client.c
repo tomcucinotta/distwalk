@@ -701,8 +701,11 @@ int main(int argc, char *argv[]) {
     }
 
 
-    if (n_compute + n_load + n_store <= 0){
+    if (n_compute + n_store + n_load > 0 && num_pkts <= 0){
+        num_pkts = 1;
+    }
 
+    if (n_compute + n_load + n_store <= 0){
         if (num_pkts <= 0) {
             num_pkts = 1;
         }
