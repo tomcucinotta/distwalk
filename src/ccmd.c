@@ -121,12 +121,6 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
 
     int i = 0;
     while (curr) {
-        // Chain validity check
-        if (prec && prec->cmd == FORWARD && curr->cmd == FORWARD) {
-            printf("ccmd_dump() error - Two contiguous forward operations\n");
-            exit(EXIT_FAILURE);
-        }
-
         m->cmds[i].cmd = curr->cmd;
         // doesn't really matter if we're filling up comp_time_us, resp_size, ...
         m->cmds[i++].u.comp_time_us = pd_sample(&curr->pd_val);
@@ -138,7 +132,7 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
             case REPLY: 
                 break;
             case FORWARD:
-                m->cmds[i++].u.fwd = curr->fwd;
+                m->cmds[i].u.fwd = curr->fwd;
                 break;
             default: 
                 printf("ccmd_dump() - Unknown command type\n");
