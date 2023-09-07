@@ -585,8 +585,9 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[0], "-S") == 0 ||
                    strcmp(argv[0], "--store-data") == 0) {
             assert(argc >= 2);
-            
-            pd_spec_t val = pd_build_fixed(atoi(argv[1]));
+
+            pd_spec_t val;
+            assert(pd_parse(&val, argv[1]));
             ccmd_add(ccmd, STORE, &val);
 
             n_store++;
@@ -596,7 +597,8 @@ int main(int argc, char *argv[]) {
                    strcmp(argv[0], "--load-data") == 0) {
             assert(argc >= 2);
 
-            pd_spec_t val = pd_build_fixed(atoi(argv[1]));
+            pd_spec_t val;
+            assert(pd_parse(&val, argv[1]));
             ccmd_add(ccmd, LOAD, &val);
 
             n_load++;
@@ -661,11 +663,11 @@ int main(int argc, char *argv[]) {
             assert(argc >= 2);
 
             //TODO: attach last -rs to original reply
-            unsigned long resp_size = atol(argv[1]);
-            assert(resp_size <= BUF_SIZE);
-            assert(resp_size >= MIN_REPLY_SIZE);
-
-            pd_spec_t val = pd_build_fixed(resp_size);
+            pd_spec_t val;
+            assert(pd_parse(&val, argv[1]));
+            val.min = MIN_REPLY_SIZE;
+            val.max = BUF_SIZE;
+            check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max));
             ccmd_attach_reply_size(ccmd, &val);
 
             argc--;
