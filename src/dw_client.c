@@ -34,8 +34,8 @@ unsigned int default_compute_us = 1000;
 
 int exp_comptimes = 0;
 
-pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 128, .min = NAN, .max = NAN };
-pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 10000, .min = NAN, .max = NAN };
+pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 128, .std = NAN, .min = NAN, .max = NAN };
+pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 10000, .std = NAN, .min = NAN, .max = NAN };
 
 unsigned long default_resp_size = 128;
 int exp_resp_size = 0;
