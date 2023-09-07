@@ -112,17 +112,23 @@ char *pd_str(pd_spec_t *p) {
         sprintf(s, "%g", p->val);
         break;
     case UNIF:
-        sprintf(s, "unif(%g,%g)", p->min, p->max);
+        sprintf(s, "unif:");
         break;
     case EXPON:
-        sprintf(s, "exp(%g)", p->val);
+        sprintf(s, "exp:%g", p->val);
         break;
     case NORM:
-        sprintf(s, "norm(%g,%g)", p->val, p->std);
+        sprintf(s, "norm:%g", p->val);
         break;
     default:
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
         exit(1);
     }
+    if (!isnan(p->std))
+        sprintf(s + strlen(s), ",std=%g", p->std);
+    if (!isnan(p->min))
+        sprintf(s + strlen(s), ",min=%g", p->min);
+    if (!isnan(p->max))
+        sprintf(s + strlen(s), ",max=%g", p->max);
     return s;
 }
