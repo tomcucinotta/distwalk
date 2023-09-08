@@ -66,6 +66,12 @@ typedef struct {
     size_t max_storage_size;
     size_t storage_offset; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
     size_t storage_eof; //TODO: same here
+
+    int storefd;
+    int loadfd;
+    unsigned char *store_buf;
+
+    int terminationfd;
 } storage_info_t;
 
 #define MAX_CONNS 16
@@ -77,6 +83,7 @@ conn_info_t conns[MAX_CONNS];
 pthread_t workers[MAX_THREADS];
 thread_info_t thread_infos[MAX_THREADS];
 
+pthread_t storer;
 storage_info_t storage_info;
 
 typedef struct {
@@ -152,6 +159,8 @@ void sigint_cleanup(int _) {
             eventfd_write(thread_infos[i].terminationfd, 1);
         }
     }
+
+    eventfd_write(storage_info.terminationfd, 1);
 }
 
 int pin_to_core(int core_id) {
@@ -513,14 +522,16 @@ int process_messages(int conn_id) {
                     fprintf(stderr, "Error: Cannot execute STORE cmd because no storage path has been defined\n");
                     exit(EXIT_FAILURE);
                 }
-                store(&storage_info, conns[conn_id].store_buf, m->cmds[i].u.store_nbytes);
+                eventfd_write(storage_info.storefd, m->cmds[i].u.store_nbytes);
+                //store(&storage_info, conns[conn_id].store_buf, m->cmds[i].u.store_nbytes);
             } else if (m->cmds[i].cmd == LOAD) {
                 if (!storage_path) {
                     fprintf(stderr, "Error: Cannot execute LOAD cmd because no storage path has been defined\n");
                     exit(EXIT_FAILURE);
                 }
-                size_t leftovers;
-                load(&storage_info, conns[conn_id].store_buf, m->cmds[i].u.load_nbytes, &leftovers);
+                eventfd_write(storage_info.loadfd, m->cmds[i].u.load_nbytes);
+                //size_t leftovers;
+                //load(&storage_info, conns[conn_id].store_buf, m->cmds[i].u.load_nbytes, &leftovers);
             } else {
                 fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
                 return 0;
@@ -739,6 +750,77 @@ void exec_request(int epollfd, const struct epoll_event *p_ev) {
     conn_free(conn_id);
 }
 
+void* storage_worker(void* args) {
+    storage_info_t *infos = (storage_info_t *)args;
+
+    int epollfd;
+    struct epoll_event ev, events[MAX_EVENTS];
+
+    epollfd = epoll_create1(0);
+    if (epollfd == -1) {
+        perror("epoll_create1");
+        exit(EXIT_FAILURE);
+    }
+    
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = infos->storefd;
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->storefd, &ev) < 0)
+        perror("epoll_ctl: storefd failed");
+
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = infos->loadfd;
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->loadfd, &ev) < 0)
+        perror("epoll_ctl: loadfd failed");
+
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = infos->terminationfd;
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
+        perror("epoll_ctl: terminationfd failed");
+
+
+    int running = 1;
+    while (running) {
+        int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+        if (nfds == -1) {
+            perror("epoll_wait");
+
+            if (errno == EINTR) {
+                running = 0;
+            } else {
+                perror("epoll_wait() failed: ");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        for (int i = 0; i < nfds; i++) {
+            if (events[i].data.fd == infos->storefd) {
+                uint64_t val;
+                eventfd_read(infos->storefd, &val);
+                store(&storage_info, storage_info.store_buf, val);
+            }
+            else if (events[i].data.fd == infos->loadfd) {
+                uint64_t val;
+                size_t leftovers;
+
+                eventfd_read(infos->loadfd, &val);
+                load(&storage_info, storage_info.store_buf, val, &leftovers);
+            }
+            else if (events[i].data.fd == infos->terminationfd) {
+                running = 0;
+                break;
+            }
+            else {
+                // Shoudn't be here
+                printf("?!?\n");
+                running = 0;
+                break;
+            }
+        }
+    }
+
+    return (void*)1;
+}
+
 void* epoll_main_loop(void* args) {
     thread_info_t *infos = (thread_info_t *)args;
 
@@ -936,6 +1018,12 @@ int main(int argc, char *argv[]) {
         sys_check(fstat(storage_info.storage_fd, &s));
         blk_size = s.st_blksize;
         cw_log("blk_size = %lu\n", blk_size);
+
+        storage_info.terminationfd = eventfd(0, 0);
+        storage_info.storefd = eventfd(0, 0);
+        storage_info.loadfd = eventfd(0, 0);
+
+        storage_info.store_buf = malloc(BUF_SIZE);
     }
 
     /*---- Configure settings of the server address struct ----*/
@@ -995,6 +1083,11 @@ int main(int argc, char *argv[]) {
 
     sys_check(pthread_mutex_init(&socks_mtx, &attr));
 
+    // Init storage thread
+    if (storage_path) {
+        sys_check(pthread_create(&storer, NULL, storage_worker, (void *)&storage_info));
+    }
+
     // Run
     if (nthread == 1) {
         epoll_main_loop((void*) &thread_infos[0]);
@@ -1003,8 +1096,7 @@ int main(int argc, char *argv[]) {
         
         // Init worker threads
         for (int i = 0; i < nthread; i++) {
-            sys_check(pthread_create(&workers[i], NULL, epoll_main_loop,
-                                     (void *)&thread_infos[i]));
+            sys_check(pthread_create(&workers[i], NULL, epoll_main_loop, (void *)&thread_infos[i]));
         }
     }
 
@@ -1022,6 +1114,11 @@ int main(int argc, char *argv[]) {
         }
 
         sys_check(pthread_mutex_destroy(&socks_mtx));
+    }
+
+    if (storage_path) {
+        sys_check(pthread_join(storer, NULL));
+        free(storage_info.store_buf);
     }
 
     // termination clean-ups
