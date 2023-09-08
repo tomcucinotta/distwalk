@@ -35,8 +35,8 @@ typedef struct {
     uint32_t comp_time_us;  // COMPUTE time (usecs)
     uint32_t store_nbytes;  // STORE data size
     uint32_t load_nbytes;   // LOAD data size
-    fwd_opts_t fwd;         // FORWARD host+port and pkt size
     uint32_t resp_size;     // REPLY pkt size
+    fwd_opts_t fwd;         // FORWARD host+port and pkt size
   } u;
 } command_t;
 
