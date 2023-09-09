@@ -117,7 +117,6 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
     }
 
     ccmd_node_t* curr = q->head_actions;
-    ccmd_node_t* prec = NULL;
 
     int i = 0;
     while (curr) {
@@ -139,7 +138,6 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
                 exit(EXIT_FAILURE);
         }
         //printf("%s\n", get_command_name(curr->cmd->cmd));
-        prec = curr;
         curr = curr->next;
     }
 
