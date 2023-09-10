@@ -739,7 +739,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev) {
     conn_free(conn_id);
 }
 
-void* epoll_main_loop(void* args) {
+void* conn_worker(void* args) {
     thread_info_t *infos = (thread_info_t *)args;
 
     if (thread_affinity) {
@@ -997,14 +997,13 @@ int main(int argc, char *argv[]) {
 
     // Run
     if (nthread == 1) {
-        epoll_main_loop((void*) &thread_infos[0]);
+        conn_worker((void*) &thread_infos[0]);
     }
     else {
         
         // Init worker threads
         for (int i = 0; i < nthread; i++) {
-            sys_check(pthread_create(&workers[i], NULL, epoll_main_loop,
-                                     (void *)&thread_infos[i]));
+            sys_check(pthread_create(&workers[i], NULL, conn_worker, (void *)&thread_infos[i]));
         }
     }
 
