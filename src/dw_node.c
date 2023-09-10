@@ -53,9 +53,16 @@ typedef struct {
     pthread_mutex_t mtx;
 } conn_info_t;
 
+#define MAX_CONNS 16
+// used with --per-client-thread
+#define MAX_THREADS 8
+
 typedef struct {
     int listen_sock;
     int terminationfd;  // special eventfd to handle termination
+
+    // communication with storage
+    int storefd;
 
     int core_id; // core pinning
 } thread_info_t;
@@ -66,17 +73,22 @@ typedef struct {
     size_t max_storage_size;
     size_t storage_offset; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
     size_t storage_eof; //TODO: same here
-} storage_info_t;
 
-#define MAX_CONNS 16
+    // communication with conn worker
+    int storefd[MAX_THREADS];
+    int nthread;
+
+    unsigned char *store_buf;
+
+    int terminationfd;
+} storage_info_t;
 
 conn_info_t conns[MAX_CONNS];
 
-// used with --per-client-thread
-#define MAX_THREADS 8
 pthread_t workers[MAX_THREADS];
 thread_info_t thread_infos[MAX_THREADS];
 
+pthread_t storer;
 storage_info_t storage_info;
 
 typedef struct {
@@ -152,6 +164,8 @@ void sigint_cleanup(int _) {
             eventfd_write(thread_infos[i].terminationfd, 1);
         }
     }
+
+    eventfd_write(storage_info.terminationfd, 1);
 }
 
 int pin_to_core(int core_id) {
@@ -464,7 +478,7 @@ void close_and_forget(int epollfd, int sock) {
     close(sock);
 }
 
-int process_messages(int conn_id) {
+int process_messages(int conn_id, int storefd) {
     int sock = conns[conn_id].sock;
     unsigned char *buf = conns[conn_id].recv_buf;
     unsigned long msg_size = conns[conn_id].curr_recv_buf - buf;
@@ -508,19 +522,16 @@ int process_messages(int conn_id) {
                 }
                 // any further cmds[] for replied-to hop, not me
                 break;
-            } else if (m->cmds[i].cmd == STORE) {
+            } else if (m->cmds[i].cmd == STORE || m->cmds[i].cmd == LOAD) {
                 if (!storage_path) {
-                    fprintf(stderr, "Error: Cannot execute STORE cmd because no storage path has been defined\n");
+                    fprintf(stderr, "Error: Cannot execute storage command because no storage path has been defined\n");
                     exit(EXIT_FAILURE);
                 }
-                store(&storage_info, conns[conn_id].store_buf, m->cmds[i].u.store_nbytes);
-            } else if (m->cmds[i].cmd == LOAD) {
-                if (!storage_path) {
-                    fprintf(stderr, "Error: Cannot execute LOAD cmd because no storage path has been defined\n");
-                    exit(EXIT_FAILURE);
+
+                if (write(storefd, &m->cmds[i], sizeof(m->cmds[i])) < 0) {
+                    perror("storage worker write() failed");
+                    return -1;
                 }
-                size_t leftovers;
-                load(&storage_info, conns[conn_id].store_buf, m->cmds[i].u.load_nbytes, &leftovers);
             } else {
                 fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
                 return 0;
@@ -711,7 +722,7 @@ void setnonblocking(int fd) {
     assert(fcntl(fd, F_SETFL, flags) == 0);
 }
 
-void exec_request(int epollfd, const struct epoll_event *p_ev) {
+void exec_request(int epollfd, const struct epoll_event *p_ev, int storefd) {
     int conn_id = p_ev->data.u32;
     if (conns[conn_id].recv_buf == NULL)
         return;
@@ -729,7 +740,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev) {
             goto err;
     }
     // check whether we have new or leftover messages to process
-    if (!process_messages(conn_id))
+    if (!process_messages(conn_id, storefd))
         goto err;
 
     return;
@@ -737,6 +748,75 @@ void exec_request(int epollfd, const struct epoll_event *p_ev) {
  err:
     close_and_forget(epollfd, conns[conn_id].sock);
     conn_free(conn_id);
+}
+
+void* storage_worker(void* args) {
+    storage_info_t *infos = (storage_info_t *)args;
+
+    int epollfd;
+    struct epoll_event ev, events[MAX_EVENTS];
+
+    epollfd = epoll_create1(0);
+    if (epollfd == -1) {
+        perror("epoll_create1");
+        exit(EXIT_FAILURE);
+    }
+    
+    for (int i = 0; i < infos->nthread; i++) {
+        ev.events = EPOLLIN;
+        ev.data.fd = infos->storefd[i];
+        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->storefd[i], &ev) < 0)
+            perror("epoll_ctl: storefd failed");
+    }
+
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = infos->terminationfd;
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
+        perror("epoll_ctl: terminationfd failed");
+
+
+    int running = 1;
+    while (running) {
+        int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+        if (nfds == -1) {
+            perror("epoll_wait");
+
+            if (errno == EINTR) {
+                running = 0;
+            } else {
+                perror("epoll_wait() failed: ");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        for (int i = 0; i < nfds; i++) {
+            if (events[i].data.fd != infos->terminationfd) {
+                command_t storage_cmd;
+
+                if (read(events[i].data.fd, &storage_cmd, sizeof(command_t)) < 0) {
+                    perror("storage worker read()");
+                    running = 0;
+                    break;
+                }
+
+                if (storage_cmd.cmd == STORE) {
+                    store(&storage_info, storage_info.store_buf, storage_cmd.u.store_nbytes);
+                }
+                else if (storage_cmd.cmd == REPLY) {
+                    size_t leftovers;
+                    load(&storage_info, storage_info.store_buf, storage_cmd.u.load_nbytes, &leftovers);
+                }
+                else { // error
+                }
+            }
+            else {
+                running = 0;
+                break;
+            }
+        }
+    }
+
+    return (void*)1;
 }
 
 void* conn_worker(void* args) {
@@ -823,7 +903,7 @@ void* conn_worker(void* args) {
                 break;
             }
             else {  // NOTE: unused if --per-client-thread
-                exec_request(epollfd, &events[i]);
+                exec_request(epollfd, &events[i], infos->storefd);
             }
         }
     }
@@ -837,6 +917,9 @@ int main(int argc, char *argv[]) {
 
     cpu_set_t mask;
     struct sockaddr_in serverAddr;
+
+    // Pipe comm
+    int fds[MAX_THREADS][2];
 
     // Storage info defaults
     storage_info.storage_fd = -1;
@@ -936,6 +1019,22 @@ int main(int argc, char *argv[]) {
         sys_check(fstat(storage_info.storage_fd, &s));
         blk_size = s.st_blksize;
         cw_log("blk_size = %lu\n", blk_size);
+
+        storage_info.terminationfd = eventfd(0, 0);
+        storage_info.store_buf = malloc(BUF_SIZE);
+
+        for (int i = 0; i < nthread; i++) {
+            if (pipe(fds[i]) == -1) {
+               perror("pipe");
+               exit(EXIT_FAILURE);
+            }
+
+
+            storage_info.storefd[i] = fds[i][0]; // read
+            thread_infos[i].storefd = fds[i][1]; // write
+        }
+
+        storage_info.nthread = nthread;
     }
 
     /*---- Configure settings of the server address struct ----*/
@@ -995,6 +1094,11 @@ int main(int argc, char *argv[]) {
 
     sys_check(pthread_mutex_init(&socks_mtx, &attr));
 
+    // Init storage thread
+    if (storage_path) {
+        sys_check(pthread_create(&storer, NULL, storage_worker, (void *)&storage_info));
+    }
+
     // Run
     if (nthread == 1) {
         conn_worker((void*) &thread_infos[0]);
@@ -1023,9 +1127,19 @@ int main(int argc, char *argv[]) {
         sys_check(pthread_mutex_destroy(&socks_mtx));
     }
 
+    if (storage_path) {
+        sys_check(pthread_join(storer, NULL));
+        free(storage_info.store_buf);
+    }
+
     // termination clean-ups
     if (storage_info.storage_fd >= 0) {
         close(storage_info.storage_fd);
+
+        for (int i=0; i<nthread; i++){
+            close(thread_infos[i].storefd);
+            close(storage_info.storefd[i]);
+        }
     }
 
     return 0;
