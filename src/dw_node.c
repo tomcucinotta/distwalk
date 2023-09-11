@@ -479,7 +479,7 @@ void close_and_forget(int epollfd, int sock) {
     close(sock);
 }
 
-int process_messages(int conn_id, int storefd) {
+int process_messages(int conn_id, thread_info_t* infos) {
     int sock = conns[conn_id].sock;
     unsigned char *buf = conns[conn_id].recv_buf;
     unsigned long msg_size = conns[conn_id].curr_recv_buf - buf;
@@ -525,8 +525,7 @@ int process_messages(int conn_id, int storefd) {
                 break;
             } else if (m->cmds[i].cmd == STORE || m->cmds[i].cmd == LOAD) {
                 check(storage_path, "Error: Cannot execute LOAD/STORE cmd because no storage path has been defined");
-
-                if (write(storefd, &m->cmds[i], sizeof(m->cmds[i])) < 0) {
+                if (write(infos->storefd, &m->cmds[i], sizeof(m->cmds[i])) < 0) {
                     perror("storage worker write() failed");
                     return -1;
                 }
@@ -720,7 +719,7 @@ void setnonblocking(int fd) {
     assert(fcntl(fd, F_SETFL, flags) == 0);
 }
 
-void exec_request(int epollfd, const struct epoll_event *p_ev, int storefd) {
+void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* infos) {
     int conn_id = p_ev->data.u32;
     if (conns[conn_id].recv_buf == NULL)
         return;
@@ -738,7 +737,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, int storefd) {
             goto err;
     }
     // check whether we have new or leftover messages to process
-    if (!process_messages(conn_id, storefd))
+    if (!process_messages(conn_id, infos))
         goto err;
 
     return;
@@ -890,7 +889,7 @@ void* conn_worker(void* args) {
                 break;
             }
             else {  // NOTE: unused if --per-client-thread
-                exec_request(epollfd, &events[i], infos->storefd);
+                exec_request(epollfd, &events[i], infos);
             }
         }
     }
