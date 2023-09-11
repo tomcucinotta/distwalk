@@ -64,6 +64,7 @@ typedef struct {
     // communication with storage
     int storefd;
 
+    int worker_id;
     int core_id; // core pinning
 } thread_info_t;
 
@@ -1062,6 +1063,8 @@ int main(int argc, char *argv[]) {
 
             thread_infos[i].core_id = core_it;
         }
+
+        thread_infos[i].worker_id = i;
     }
 
     // Init conns mutexs
