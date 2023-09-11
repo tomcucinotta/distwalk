@@ -31,6 +31,8 @@ typedef struct {
 // TODO: Here we need all quantities to be network-ordered
 typedef struct {
   command_type_t cmd;
+  int worker_id; // worker currently processing the message
+  
   union {
     uint32_t comp_time_us;  // COMPUTE time (usecs)
     uint32_t store_nbytes;  // STORE data size
@@ -44,6 +46,7 @@ typedef struct {
 typedef struct {
   uint32_t req_id;
   uint32_t req_size;    // Overall message size in bytes, including commands and payload
+
   uint8_t num;      // Number of valid entries in cmds[]
   command_t cmds[]; // Up to 255 command_t
 } message_t;
