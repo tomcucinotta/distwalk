@@ -781,6 +781,7 @@ void* storage_worker(void* args) {
 
             if (errno == EINTR) {
                 running = 0;
+                break;
             } else {
                 perror("epoll_wait() failed: ");
                 exit(EXIT_FAILURE);
@@ -849,6 +850,7 @@ void* conn_worker(void* args) {
 
             if (errno == EINTR) {
                 running = 0;
+                break;
             } else {
                 perror("epoll_wait() failed: ");
                 exit(EXIT_FAILURE);
