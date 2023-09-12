@@ -13,6 +13,7 @@
 #include <sched.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/timerfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h> /* See NOTES */
@@ -71,6 +72,9 @@ typedef struct {
 
 typedef struct {
     int storage_fd;
+
+    int tfd; // periodic timerfd
+    int periodic_sync_msec;
 
     size_t max_storage_size;
     size_t storage_offset; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
@@ -777,6 +781,7 @@ void* storage_worker(void* args) {
         exit(EXIT_FAILURE);
     }
     
+    // Add conn_worker(s) -> storage_worker communication pipe
     for (int i = 0; i < infos->nthread; i++) {
         ev.events = EPOLLIN;
         ev.data.fd = infos->storefd[i];
@@ -784,11 +789,41 @@ void* storage_worker(void* args) {
             perror("epoll_ctl: storefd failed");
     }
 
+    // Add termination handler
     ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = infos->terminationfd;
     if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
         perror("epoll_ctl: terminationfd failed");
 
+
+    // Add periodic sync timerfd
+    if (infos->periodic_sync_msec > 0) {
+        if((infos->tfd = timerfd_create(CLOCK_MONOTONIC, 0)) < 0) {
+            perror("timerfd_create");
+            exit(EXIT_FAILURE);
+        }
+
+        struct itimerspec ts;
+        bzero(&ts,sizeof(ts));
+
+        struct timespec ts_template;
+        ts_template.tv_sec =  infos->periodic_sync_msec / 1000;
+        ts_template.tv_nsec = (infos->periodic_sync_msec % 1000) * 1000000;
+
+        //both interval and value have been set
+        ts.it_value = ts_template;
+        ts.it_interval = ts_template;
+
+        if(timerfd_settime(infos->tfd, 0, &ts, NULL) < 0) {
+            perror("timerfd_settime");
+            exit(EXIT_FAILURE);
+        }
+
+        ev.events = EPOLLIN | EPOLLET;
+        ev.data.fd = infos->tfd;
+        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->tfd, &ev) < 0)
+            perror("epoll_ctl: terminationfd failed");
+    }
 
     int running = 1;
     while (running) {
@@ -806,7 +841,25 @@ void* storage_worker(void* args) {
         }
 
         for (int i = 0; i < nfds; i++) {
-            if (events[i].data.fd != infos->terminationfd) {
+            if (events[i].data.fd == infos->terminationfd) {
+                running = 0;
+                break;
+            }
+            else if (events[i].data.fd == infos->tfd) {
+                // NOTE: timerfd requires a read to be re-armed
+                uint64_t val;
+                if (read(infos->tfd, &val, sizeof(uint64_t)) < 0) {
+                    perror("periodic sync read()");
+                    running = 0;
+                    break;
+                }
+
+                fsync(infos->storage_fd);
+
+                // Too expensive??
+                cw_log("storage sync...\n");
+            }
+            else {
                 wrapper_t w;
                 command_t storage_cmd;
                 int worker_id;
@@ -836,10 +889,6 @@ void* storage_worker(void* args) {
                     running = 0;
                     break;
                 }
-            }
-            else {
-                running = 0;
-                break;
             }
         }
     }
@@ -952,6 +1001,8 @@ int main(int argc, char *argv[]) {
 
     // Storage info defaults
     storage_info.storage_fd = -1;
+    storage_info.tfd = -1;
+    storage_info.periodic_sync_msec = -1;
     storage_info.max_storage_size = MAX_STORAGE_SIZE;
     storage_info.storage_offset = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
     storage_info.storage_eof = 0; //TODO: same here
@@ -964,6 +1015,7 @@ int main(int argc, char *argv[]) {
                 "Usage: dw_node [-h|--help] [-b bindname] [-bp bindport] "
                 "[-s|--storage path/to/storage/file] [--threads n] [--thread-affinity] "
                 "[-m|--max-storage-size bytes] "
+                "[--sync msec ]"
                 "[--odirect]\n");
             exit(EXIT_SUCCESS);
         } else if (strcmp(argv[0], "-b") == 0) {
@@ -988,6 +1040,11 @@ int main(int argc, char *argv[]) {
             storage_path = argv[1];
             argc--;
             argv++;
+        } else if (strcmp(argv[0], "--sync") == 0) {
+            assert(argc >= 2);
+            storage_info.periodic_sync_msec = atoi(argv[1]);
+            argc--;
+            argv++; 
         } else if (strcmp(argv[0], "-m") == 0 ||
                    strcmp(argv[0], "--max-storage-size") == 0) {
             assert(argc >= 2);
