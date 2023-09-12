@@ -62,7 +62,8 @@ typedef struct {
     int terminationfd;  // special eventfd to handle termination
 
     // communication with storage
-    int storefd;
+    int storefd; // write
+    int store_replyfd; // read
 
     int worker_id;
     int core_id; // core pinning
@@ -76,13 +77,19 @@ typedef struct {
     size_t storage_eof; //TODO: same here
 
     // communication with conn worker
-    int storefd[MAX_THREADS];
+    int storefd[MAX_THREADS]; // read
+    int store_replyfd[MAX_THREADS]; //write
     int nthread;
 
     unsigned char *store_buf;
 
     int terminationfd;
 } storage_info_t;
+
+typedef struct {
+    command_t cmd;
+    int worker_id;
+} wrapper_t;
 
 conn_info_t conns[MAX_CONNS];
 
@@ -525,7 +532,18 @@ int process_messages(int conn_id, thread_info_t* infos) {
                 break;
             } else if (m->cmds[i].cmd == STORE || m->cmds[i].cmd == LOAD) {
                 check(storage_path, "Error: Cannot execute LOAD/STORE cmd because no storage path has been defined");
-                if (write(infos->storefd, &m->cmds[i], sizeof(m->cmds[i])) < 0) {
+
+                wrapper_t w;
+                w.cmd = m->cmds[i];
+                w.worker_id = infos->worker_id;
+                if (write(infos->storefd, &w, sizeof(w)) < 0) {
+                    perror("storage worker write() failed");
+                    return -1;
+                }
+
+                // TODO: wait optionally
+                int ACK;
+                if (safe_read(infos->store_replyfd, (unsigned char*) &ACK, sizeof(ACK)) < 0) {
                     perror("storage worker write() failed");
                     return -1;
                 }
@@ -789,13 +807,18 @@ void* storage_worker(void* args) {
 
         for (int i = 0; i < nfds; i++) {
             if (events[i].data.fd != infos->terminationfd) {
+                wrapper_t w;
                 command_t storage_cmd;
+                int worker_id;
 
-                if (read(events[i].data.fd, &storage_cmd, sizeof(command_t)) < 0) {
+                if (read(events[i].data.fd, &w, sizeof(w)) < 0) {
                     perror("storage worker read()");
                     running = 0;
                     break;
                 }
+
+                storage_cmd = w.cmd;
+                worker_id = w.worker_id;
 
                 if (storage_cmd.cmd == STORE) {
                     store(&storage_info, storage_info.store_buf, storage_cmd.u.store_nbytes);
@@ -805,6 +828,13 @@ void* storage_worker(void* args) {
                     load(&storage_info, storage_info.store_buf, storage_cmd.u.load_nbytes, &leftovers);
                 }
                 else { // error
+                }
+
+                int ACK = 1;
+                if (write(infos->store_replyfd[worker_id], (unsigned char*) &ACK, sizeof(ACK)) < 0) {
+                    perror("storage reply write()");
+                    running = 0;
+                    break;
                 }
             }
             else {
@@ -839,6 +869,14 @@ void* conn_worker(void* args) {
     ev.events = EPOLLIN;
     ev.data.fd = infos->terminationfd;
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev));
+
+    // Add storage reply fd
+    if (storage_path) {
+        ev.events = EPOLLOUT;
+        ev.data.fd = infos->store_replyfd;
+        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->store_replyfd, &ev) < 0)
+            perror("epoll_ctl: storefd failed");
+    }
 
     int running = 1;
     while (running) {
@@ -883,6 +921,10 @@ void* conn_worker(void* args) {
 
                  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
+            }
+            else if (events[i].data.fd == infos->store_replyfd) {
+                // storage operation completed
+                // TODO: code
             } 
             else if (events[i].data.fd == infos->terminationfd) {
                 running = 0;
@@ -906,6 +948,7 @@ int main(int argc, char *argv[]) {
 
     // Pipe comm
     int fds[MAX_THREADS][2];
+    int fds2[MAX_THREADS][2];
 
     // Storage info defaults
     storage_info.storage_fd = -1;
@@ -1010,14 +1053,23 @@ int main(int argc, char *argv[]) {
         storage_info.store_buf = malloc(BUF_SIZE);
 
         for (int i = 0; i < nthread; i++) {
+            // conn_worker -> storage_worker
             if (pipe(fds[i]) == -1) {
                perror("pipe");
                exit(EXIT_FAILURE);
             }
 
-
             storage_info.storefd[i] = fds[i][0]; // read
             thread_infos[i].storefd = fds[i][1]; // write
+
+            // storage_worker -> conn_worker
+            if (pipe(fds2[i]) == -1) {
+               perror("pipe");
+               exit(EXIT_FAILURE);
+            }
+
+            storage_info.store_replyfd[i] = fds2[i][1]; // write 
+            thread_infos[i].store_replyfd = fds2[i][0]; // read
         }
 
         storage_info.nthread = nthread;
@@ -1124,9 +1176,12 @@ int main(int argc, char *argv[]) {
     if (storage_info.storage_fd >= 0) {
         close(storage_info.storage_fd);
 
-        for (int i=0; i<nthread; i++){
+        for (int i = 0; i < nthread; i++){
             close(thread_infos[i].storefd);
             close(storage_info.storefd[i]);
+
+            close(thread_infos[i].store_replyfd);
+            close(storage_info.store_replyfd[i]);
         }
     }
 
