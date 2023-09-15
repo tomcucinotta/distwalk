@@ -452,13 +452,13 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
     return forwarded;
 }
 
-int process_messages(int conn_id, int epollfd);
+int process_messages(int conn_id, int epollfd, thread_info_t* infos);
 
 // Call this once we received a REPLY from a socket matching a req_id we forwarded
-int handle_forward_reply(int conn_id, int epollfd) {
+int handle_forward_reply(int conn_id, int epollfd, thread_info_t* infos) {
     // TODO: really continue processing req even if FORWARD failed?
     conns[conn_id].status &= ~FORWARDING;
-    return process_messages(conn_id, epollfd);
+    return process_messages(conn_id, epollfd, infos);
     /* message_t *m = (message_t *) conns[conn_id].buf; */
     /* int fwd_reply_id = conns[conn_id].fwd_reply_id; */
     /* cw_log("  f: cmd_id=%d, num=%d, fwd_repl_id=%d, forwarded=%d\n", cmd_id, m->num, fwd_reply_id, forwarded); */
@@ -590,7 +590,7 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
             if (reqs[m->req_id % MAX_REQS].req_id == m->req_id) {
                 cw_log("Found match with conn_id %d\n", reqs[m->req_id % MAX_REQS].conn_id);
                 reqs[m->req_id % MAX_REQS].req_id = -1;
-                if (!handle_forward_reply(reqs[m->req_id % MAX_REQS].conn_id, epollfd)) {
+                if (!handle_forward_reply(reqs[m->req_id % MAX_REQS].conn_id, epollfd, infos)) {
                     cw_log("handle_forward_reply() failed\n");
                     return 0;
                 }
@@ -876,7 +876,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     // check whether we have new or leftover messages to process
     if (!(conns[conn_id].status & FORWARDING)) {
         cw_log("calling proc_mesg()\n");
-        if (!process_messages(conn_id, epollfd))
+        if (!process_messages(conn_id, epollfd, infos))
             goto err;
     }
 
