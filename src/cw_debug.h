@@ -2,18 +2,19 @@
 #define __CW_DEBUG_H__
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #ifdef CW_DEBUG
 
-#define cw_log(msg, args...) do { \
-    printf(msg, ##args);  \
+#define cw_log(msg, ...) do { \
+    printf(msg, ## __VA_ARGS__);  \
     fflush(stdout);  \
   } while (0);
 
 #else
 
-#define cw_log(msg, args...)
+#define cw_log(msg, ...)
 
 #endif
 
@@ -27,9 +28,10 @@
   } while (0)
 
 // Exit immediately if cond is violated
-#define check(cond) do {	 \
+#define check(cond, ...) do {	 \
     if (!(cond)) {		 \
-      fprintf(stderr, "Error: %s\n", #cond);     \
+        fprintf(stderr, "Error (" #cond ") " __VA_ARGS__);       \
+      fprintf(stderr, "\n");     \
       exit(EXIT_FAILURE);	 \
     }				 \
   } while (0)
