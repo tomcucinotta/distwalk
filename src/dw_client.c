@@ -120,10 +120,7 @@ void host_net_config(char* host_str, struct sockaddr_in* addr) {
 
     // Get port
     port_str = strchr(host_str, ':');
-    if (!port_str) {
-        fprintf(stderr, "Missing ':' in <host>:<port>!\n");
-        exit(EXIT_FAILURE);
-    }
+    check(port_str, "Missing ':' in <host>:<port>!");
 
     // Now host containts hostname (or ip) only
     *port_str = '\0';
@@ -132,10 +129,7 @@ void host_net_config(char* host_str, struct sockaddr_in* addr) {
     // Convert port string in integer
     char* end_ptr = NULL;
     port = strtol(port_str, &end_ptr, 10);
-    if (*end_ptr) {
-        fprintf(stderr, "Port '%s' is not a numeric value!\n", port_str);
-        exit(EXIT_FAILURE);
-    }
+    check(!*end_ptr, "Port '%s' is not a numeric value!\n", port_str);
 
     // Hostname Resolve
     cw_log("Resolving %s...\n", hostname);

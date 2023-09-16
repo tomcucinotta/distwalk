@@ -5,6 +5,7 @@
 
 #include "ccmd.h"
 #include "message.h"
+#include "cw_debug.h"
 
 void ccmd_init(ccmd_t** q) {
     *q = malloc(sizeof(ccmd_t));
@@ -106,15 +107,8 @@ void ccmd_last_reply(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
 }
 
 void ccmd_dump(ccmd_t* q, message_t* m) {
-    if (!q) {
-        printf("ccmd_dump() error - Initialize queue first\n");
-        exit(EXIT_FAILURE);
-    }
-
-    if (!m) {
-        printf("ccmd_dump() error - NullPointer message_t* \n");
-        exit(EXIT_FAILURE);
-    }
+    check(q, "ccmd_dump() error - Initialize queue first");
+    check(m, "ccmd_dump() error - NullPointer message_t*");
 
     ccmd_node_t* curr = q->head_actions;
 
@@ -134,7 +128,7 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
                 m->cmds[i].u.fwd = curr->fwd;
                 break;
             default: 
-                printf("ccmd_dump() - Unknown command type\n");
+                fprintf(stderr, "ccmd_dump() - Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
         //printf("%s\n", get_command_name(curr->cmd->cmd));
@@ -145,10 +139,7 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
 }
 
 void ccmd_destroy(ccmd_t* q) {
-    if (!q) {
-        printf("ccmd_destroy() error - Initialize queue first\n");
-        exit(EXIT_FAILURE);
-    }
+    check(q, "ccmd_destroy() error - Initialize queue first");
 
     ccmd_node_t* curr = q->head_actions;
     ccmd_node_t* tmp = NULL;
@@ -162,10 +153,7 @@ void ccmd_destroy(ccmd_t* q) {
 }
 
 void ccmd_log(ccmd_t* q) {
-    if (!q) {
-        printf("ccmd_log() error - Initialize queue first\n");
-        exit(EXIT_FAILURE);
-    }
+    check(q, "ccmd_log() error - Initialize queue first");
 
     ccmd_node_t* curr = q->head_actions;
 
@@ -189,7 +177,7 @@ void ccmd_log(ccmd_t* q) {
                 sprintf(opts, "%sb", pd_str(&curr->pd_val));
                 break;
             default: 
-                printf("ccmd_log() - Unknown command type\n");
+                fprintf(stderr, "ccmd_log() - Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
         printf("%s(%s)%s", get_command_name(curr->cmd), opts, curr->next ? "->" : "");

@@ -509,16 +509,10 @@ int process_messages(int conn_id) {
                 // any further cmds[] for replied-to hop, not me
                 break;
             } else if (m->cmds[i].cmd == STORE) {
-                if (!storage_path) {
-                    fprintf(stderr, "Error: Cannot execute STORE cmd because no storage path has been defined\n");
-                    exit(EXIT_FAILURE);
-                }
+                check(storage_path, "Error: Cannot execute STORE cmd because no storage path has been defined");
                 store(&storage_info, conns[conn_id].store_buf, m->cmds[i].u.store_nbytes);
             } else if (m->cmds[i].cmd == LOAD) {
-                if (!storage_path) {
-                    fprintf(stderr, "Error: Cannot execute LOAD cmd because no storage path has been defined\n");
-                    exit(EXIT_FAILURE);
-                }
+                check(storage_path, "Error: Cannot execute LOAD cmd because no storage path has been defined");
                 size_t leftovers;
                 load(&storage_info, conns[conn_id].store_buf, m->cmds[i].u.load_nbytes, &leftovers);
             } else {
@@ -750,25 +744,17 @@ void* conn_worker(void* args) {
     int epollfd;
     struct epoll_event ev, events[MAX_EVENTS];
 
-    epollfd = epoll_create1(0);
-    if (epollfd == -1) {
-        perror("epoll_create1");
-        exit(EXIT_FAILURE);
-    }
-    
+    sys_check(epollfd = epoll_create1(0));
+
     // Add listen socket
     ev.events = EPOLLIN;
     ev.data.fd = -1;  // Special value denoting listen_sock
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->listen_sock, &ev) == -1) {
-        perror("epoll_ctl: listen_sock");
-        exit(EXIT_FAILURE);
-    }
+    sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->listen_sock, &ev) == -1);
 
     // Add termination fd
     ev.events = EPOLLIN;
     ev.data.fd = infos->terminationfd;
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
-        perror("epoll_ctl: terminationfd failed");
+    sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev));
 
     int running = 1;
     while (running) {
@@ -789,13 +775,8 @@ void* conn_worker(void* args) {
             if (events[i].data.fd == -1) { // New connection
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);
-                int conn_sock =
-                    accept(infos->listen_sock, (struct sockaddr *)&addr, &addr_size);
-
-                if (conn_sock == -1) {
-                    perror("accept() failed: ");
-                    exit(EXIT_FAILURE);
-                }
+                int conn_sock;
+                sys_check(conn_sock = accept(infos->listen_sock, (struct sockaddr *)&addr, &addr_size));
 
                 cw_log("Accepted connection from: %s:%d\n",
                        inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));

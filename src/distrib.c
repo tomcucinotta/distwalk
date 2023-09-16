@@ -41,10 +41,7 @@ void pd_init(long int seed) {
 int pd_parse(pd_spec_t *p, char *s) {
     *p = (pd_spec_t) { .prob = FIXED, .val = NAN, .std = NAN, .min = NAN, .max = NAN };
     char *tok = strsep(&s, ":");
-    if (!tok) {
-        fprintf(stderr, "Wrong value/distribution syntax\n");
-        exit(1);
-    }
+    check(tok, "Wrong value/distribution syntax\n");
     if (strcmp(tok, "unif") == 0)
         p->prob = UNIF;
     else if (strcmp(tok, "exp") == 0)
@@ -55,7 +52,7 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->prob = FIXED;
     else {
         fprintf(stderr, "Wrong value/distribution syntax: %s\n", tok);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     while ((tok = strsep(&s, ",")) != NULL) {
         printf("Processing tok: %s\n", tok);
@@ -66,7 +63,7 @@ int pd_parse(pd_spec_t *p, char *s) {
             || sscanf(tok, "%lf", &p->val) == 1)
                 continue;
         fprintf(stderr, "Unrecognized token in value/distribution syntax: %s\n", tok);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     check(p->prob != FIXED || !isnan(p->val));
     check(p->prob != UNIF || (!isnan(p->min) && !isnan(p->max)));
@@ -94,7 +91,7 @@ double pd_sample(pd_spec_t *p) {
         break;
     default:
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     if (!isnan(p->min) && val < p->min)
         val = p->min;
@@ -122,7 +119,7 @@ char *pd_str(pd_spec_t *p) {
         break;
     default:
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     if (!isnan(p->std))
         sprintf(s + strlen(s), ",std=%g", p->std);
