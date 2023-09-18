@@ -1103,10 +1103,10 @@ void* conn_worker(void* args) {
                 // Use the data.u32 field to store the conn_id in conns[]
                 ev.data.u32 = conn_id;
 
-                 if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
+                if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
             }
-            else if (events[i].data.fd == infos->store_replyfd) {
+            else if (storage_path && events[i].data.fd == infos->store_replyfd) {
                 // storage operation completed
                 // TODO: code
             } 
@@ -1269,6 +1269,11 @@ int main(int argc, char *argv[]) {
         }
 
         storage_info.nthread = nthread;
+    } else {
+        for (int i = 0; i < nthread; i++) {
+            thread_infos[i].storefd = -1;
+            thread_infos[i].store_replyfd = -1;
+        }
     }
 
     /*---- Configure settings of the server address struct ----*/
