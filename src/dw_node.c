@@ -135,6 +135,7 @@ int no_delay = 1;
 int use_odirect = 0;
 int nthread = 1;
 int thread_affinity = 0;
+volatile int running = 1;
 
 const char *conn_status_str(int s) {
     static char str[16] = "";
@@ -198,6 +199,8 @@ char *storage_path = NULL;
 
 void sigint_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
+
+    running = 0;
 
     // terminate workers by sending a notification
     // on their terminationfd
@@ -960,7 +963,6 @@ void* storage_worker(void* args) {
             perror("epoll_ctl: terminationfd failed");
     }
 
-    int running = 1;
     while (running) {
         int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
         if (nfds == -1) {
@@ -1062,7 +1064,6 @@ void* conn_worker(void* args) {
             perror("epoll_ctl: storefd failed");
     }
 
-    int running = 1;
     while (running) {
         cw_log("epoll_wait()ing...\n");
         int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
