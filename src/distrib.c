@@ -74,10 +74,11 @@ int pd_parse(pd_spec_t *p, char *s) {
 
 double pd_sample(pd_spec_t *p) {
     double val;
+ retry:
     switch (p->prob) {
     case FIXED:
-        val = p->val;
-        break;
+        // no need to check boundaries in this case
+        return p->val;
     case UNIF:
         double x;
         drand48_r(&rnd_buf, &x);
@@ -93,10 +94,9 @@ double pd_sample(pd_spec_t *p) {
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
         exit(EXIT_FAILURE);
     }
-    if (!isnan(p->min) && val < p->min)
-        val = p->min;
-    if (!isnan(p->max) && val > p->max)
-        val = p->max;
+    if ((!isnan(p->min) && val < p->min)
+        || (!isnan(p->max) && val > p->max))
+        goto retry;
     return val;
 }
 
