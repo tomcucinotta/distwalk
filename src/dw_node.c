@@ -25,6 +25,18 @@
 
 #define MAX_EVENTS 10
 
+static inline uint64_t i2l(uint32_t ln, uint32_t rn) {
+    return ((uint64_t) ln) << 32 | rn;
+}
+
+static inline void l2i(uint64_t n, uint32_t* ln, uint32_t* rn) {
+    if (ln)
+        *ln = n >> 32;
+    
+    if (rn)
+        *rn = (uint32_t) n;
+}
+
 // I could be doing 0, 1, 2 or more of these at the same time => bitmask
 typedef enum {
     SENDING = 1,        // using EPOLLOUT while sending data to sock
@@ -409,7 +421,7 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
 
         struct epoll_event ev;
         ev.events = EPOLLIN | EPOLLOUT;
-        ev.data.u32 = fwd_conn_id;
+        ev.data.u64 = i2l(clientSocket, fwd_conn_id);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
 
         cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {m->cmds[cmd_id].u.fwd.fwd_host}),
@@ -854,7 +866,10 @@ void setnonblocking(int fd) {
 }
 
 void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* infos) {
-    int conn_id = p_ev->data.u32;
+    int conn_id;
+    int fd;
+    l2i(p_ev->data.u64, (uint32_t*) &fd, (uint32_t*) &conn_id);
+    
     cw_log("conns[%d].status=%d (%s), events=%d\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status), p_ev->events);
     if (conns[conn_id].sock == -1 || conns[conn_id].recv_buf == NULL)
         return;
@@ -885,7 +900,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
 
     if (conns[conn_id].curr_send_size > 0 && !(conns[conn_id].status & SENDING)) {
         struct epoll_event ev2;
-        ev2.data.u32 = conn_id;
+        ev2.data.u64 = i2l(fd, conn_id);
         ev2.events = EPOLLIN | EPOLLOUT;
         cw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[conn_id].sock, conn_id, conns[conn_id].curr_send_size);
@@ -893,7 +908,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     }
     if (conns[conn_id].curr_send_size == 0 && (conns[conn_id].status & SENDING)) {
         struct epoll_event ev2;
-        ev2.data.u32 = conn_id;
+        ev2.data.u64 = i2l(fd, conn_id);
         ev2.events = EPOLLIN;
         cw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[conn_id].sock, conn_id, conns[conn_id].curr_send_size);
@@ -922,14 +937,14 @@ void* storage_worker(void* args) {
     // Add conn_worker(s) -> storage_worker communication pipe
     for (int i = 0; i < infos->nthread; i++) {
         ev.events = EPOLLIN;
-        ev.data.fd = infos->storefd[i];
+        ev.data.u64 = i2l(infos->storefd[i], -1);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->storefd[i], &ev) < 0)
             perror("epoll_ctl: storefd failed");
     }
 
     // Add termination handler
     ev.events = EPOLLIN | EPOLLET;
-    ev.data.fd = infos->terminationfd;
+    ev.data.u64 = i2l(infos->terminationfd, -1);
     if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
         perror("epoll_ctl: terminationfd failed");
 
@@ -958,7 +973,7 @@ void* storage_worker(void* args) {
         }
 
         ev.events = EPOLLIN | EPOLLET;
-        ev.data.fd = infos->tfd;
+        ev.data.u64 = i2l(infos->tfd, -1);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->tfd, &ev) < 0)
             perror("epoll_ctl: terminationfd failed");
     }
@@ -977,12 +992,15 @@ void* storage_worker(void* args) {
             }
         }
 
+        int fd;
         for (int i = 0; i < nfds; i++) {
-            if (events[i].data.fd == infos->terminationfd) {
+            l2i(events[i].data.u64, (uint32_t*) &fd, NULL);
+
+            if (fd == infos->terminationfd) {
                 running = 0;
                 break;
             }
-            else if (events[i].data.fd == infos->tfd) {
+            else if (fd == infos->tfd) {
                 // NOTE: timerfd requires a read to be re-armed
                 uint64_t val;
                 if (read(infos->tfd, &val, sizeof(uint64_t)) < 0) {
@@ -1001,7 +1019,7 @@ void* storage_worker(void* args) {
                 command_t storage_cmd;
                 int worker_id;
 
-                if (read(events[i].data.fd, &w, sizeof(w)) < 0) {
+                if (read(fd, &w, sizeof(w)) < 0) {
                     perror("storage worker read()");
                     running = 0;
                     break;
@@ -1048,18 +1066,18 @@ void* conn_worker(void* args) {
 
     // Add listen socket
     ev.events = EPOLLIN;
-    ev.data.fd = infos->listen_sock;
+    ev.data.u64 = i2l(infos->listen_sock, -1);
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->listen_sock, &ev) == -1);
 
     // Add termination fd
     ev.events = EPOLLIN;
-    ev.data.fd = infos->terminationfd;
+    ev.data.u64 = i2l(infos->terminationfd, -1);
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev));
 
     // Add storage reply fd
     if (storage_path) {
         ev.events = EPOLLOUT;
-        ev.data.fd = infos->store_replyfd;
+        ev.data.u64 = i2l(infos->store_replyfd, -1);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->store_replyfd, &ev) < 0)
             perror("epoll_ctl: storefd failed");
     }
@@ -1079,8 +1097,11 @@ void* conn_worker(void* args) {
             }
         }
 
+        int fd;
         for (int i = 0; i < nfds; i++) {
-            if (events[i].data.fd == infos->listen_sock) { // New connection
+            l2i(events[i].data.u64, (uint32_t*) &fd, NULL);
+
+            if (fd == infos->listen_sock) { // New connection
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);
                 int conn_sock;
@@ -1101,17 +1122,16 @@ void* conn_worker(void* args) {
                 }
 
                 ev.events = EPOLLIN;
-                // Use the data.u32 field to store the conn_id in conns[]
-                ev.data.u32 = conn_id;
+                ev.data.u64 = i2l(conn_sock, conn_id);
 
                 if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
             }
-            else if (storage_path && events[i].data.fd == infos->store_replyfd) {
+            else if (storage_path && fd == infos->store_replyfd) {
                 // storage operation completed
                 // TODO: code
             } 
-            else if (events[i].data.fd == infos->terminationfd) {
+            else if (fd == infos->terminationfd) {
                 running = 0;
                 break;
             }
