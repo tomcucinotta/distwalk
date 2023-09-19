@@ -1048,7 +1048,7 @@ void* conn_worker(void* args) {
 
     // Add listen socket
     ev.events = EPOLLIN;
-    ev.data.fd = -1;  // Special value denoting listen_sock
+    ev.data.fd = infos->listen_sock;
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->listen_sock, &ev) == -1);
 
     // Add termination fd
@@ -1080,7 +1080,7 @@ void* conn_worker(void* args) {
         }
 
         for (int i = 0; i < nfds; i++) {
-            if (events[i].data.fd == -1) { // New connection
+            if (events[i].data.fd == infos->listen_sock) { // New connection
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);
                 int conn_sock;
