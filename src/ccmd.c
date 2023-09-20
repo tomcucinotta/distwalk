@@ -115,17 +115,18 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
     int i = 0;
     while (curr) {
         m->cmds[i].cmd = curr->cmd;
-        // doesn't really matter if we're filling up comp_time_us, resp_size, ...
-        m->cmds[i++].u.comp_time_us = pd_sample(&curr->pd_val);
 
         switch (curr->cmd) {
             case STORE:
             case COMPUTE:
             case LOAD:
             case REPLY: 
+                // doesn't really matter if we're filling up comp_time_us, resp_size, ...
+                m->cmds[i++].u.comp_time_us = pd_sample(&curr->pd_val);
                 break;
             case FORWARD:
                 m->cmds[i].u.fwd = curr->fwd;
+                m->cmds[i++].u.fwd.pkt_size = pd_sample(&curr->pd_val);
                 break;
             default: 
                 fprintf(stderr, "ccmd_dump() - Unknown command type\n");
