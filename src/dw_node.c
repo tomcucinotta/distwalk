@@ -629,7 +629,7 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
                 }
                 // skip forwarded portion of cmds[]
                 i += to_skip;
-                if (conns[conn_id].status | FORWARDING) {
+                if (conns[conn_id].status & FORWARDING) {
                     conns[conn_id].curr_cmd_id = i;
                     return 1;
                 }
