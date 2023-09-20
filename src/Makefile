@@ -32,12 +32,12 @@ dep:
 
 # DO NOT DELETE
 
-ccmd.o: ccmd.h message.h
-distrib.o: distrib.h
+ccmd.o: ccmd.h message.h distrib.h cw_debug.h
+distrib.o: distrib.h cw_debug.h
 dw_client.o: cw_debug.h distrib.h message.h timespec.h ccmd.h
 dw_node.o: cw_debug.h message.h timespec.h
 dw_node_epoll_new_squashed.o: cw_debug.h message.h timespec.h
 dw_node_master.o: cw_debug.h message.h timespec.h
 node-fwd.o: message.h timespec.h cw_debug.h
-test_ccmd.o: ccmd.h message.h
-test_expon.o: distrib.h
+test_ccmd.o: ccmd.h message.h distrib.h
+test_distrib.o: distrib.h
