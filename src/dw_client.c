@@ -311,7 +311,7 @@ void *thread_receiver(void *data) {
                                  sizeof(no_delay)));
 
             cw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
-                   myaddr.sin_port);
+                   ntohs(myaddr.sin_port));
 
             /*---- Bind the address struct to the socket ----*/
             sys_check(bind(clientSocket[thread_id], (struct sockaddr *)&myaddr,
