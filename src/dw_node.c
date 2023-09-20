@@ -1031,11 +1031,13 @@ void* storage_worker(void* args) {
                 if (storage_cmd.cmd == STORE) {
                     store(&storage_info, storage_info.store_buf, storage_cmd.u.store_nbytes);
                 }
-                else if (storage_cmd.cmd == REPLY) {
+                else if (storage_cmd.cmd == LOAD) {
                     size_t leftovers;
                     load(&storage_info, storage_info.store_buf, storage_cmd.u.load_nbytes, &leftovers);
                 }
                 else { // error
+                    fprintf(stderr, "Unknown command sent to storage server - skipping");
+                    continue;
                 }
 
                 int ACK = 1;
@@ -1135,7 +1137,7 @@ void* conn_worker(void* args) {
                 running = 0;
                 break;
             }
-            else {  // NOTE: unused if --per-client-thread
+            else {
                 exec_request(epollfd, &events[i], infos);
             }
         }
