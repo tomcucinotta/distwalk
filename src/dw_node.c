@@ -150,7 +150,8 @@ int thread_affinity = 0;
 volatile int running = 1;
 
 const char *conn_status_str(int s) {
-    static char str[16] = "";
+    static char str[16];
+    str[0] = 0;
     char *p = str;
     if (s & SENDING)
         sprintf(p++, "S");
@@ -743,6 +744,7 @@ int conn_alloc(int conn_sock) {
         goto continue_free;
 
     conns[conn_id].sock = conn_sock;
+    conns[conn_id].status = 0;
     conns[conn_id].recv_buf = new_recv_buf;
     conns[conn_id].send_buf = new_send_buf;
     if (storage_path) conns[conn_id].store_buf = new_store_buf;
