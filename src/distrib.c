@@ -34,6 +34,18 @@ double gaussian(double avg, double std) {
     return y * std + avg;
 }
 
+// Only works for small and integer values of 'k'
+double distr_gamma(double avg, double std) {
+    // avg = k * scale, std^2 = k * scale^2
+    double scale = std*std / avg;
+    int k = lrint(avg / scale);
+    check(fabs(k - avg/scale) < 0.00001, "Using Gamma with non-integer k: %g", avg/scale);
+    double x = 0.0;
+    for (int i = 0; i < k; i++)
+        x += expon(1.0 / scale);
+    return x;
+}
+
 void pd_init(long int seed) {
     srand48_r(seed, &rnd_buf);
 }
@@ -48,27 +60,37 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->prob = EXPON;
     else if (strcmp(tok, "norm") == 0)
         p->prob = NORM;
+    else if (strcmp(tok, "gamma") == 0)
+        p->prob = GAMMA;
     else if (sscanf(tok, "%lf", &p->val) == 1)
         p->prob = FIXED;
     else {
         fprintf(stderr, "Wrong value/distribution syntax: %s\n", tok);
         exit(EXIT_FAILURE);
     }
+    double k = NAN, scale = NAN; // for Gamma
     while ((tok = strsep(&s, ",")) != NULL) {
         printf("Processing tok: %s\n", tok);
         if (sscanf(tok, "min=%lf", &p->min) == 1
             || sscanf(tok, "max=%lf", &p->max) == 1
             || sscanf(tok, "std=%lf", &p->std) == 1
+            || sscanf(tok, "k=%lf", &k) == 1
+            || sscanf(tok, "scale=%lf", &scale) == 1
             || sscanf(tok, "avg=%lf", &p->val) == 1
             || sscanf(tok, "%lf", &p->val) == 1)
                 continue;
         fprintf(stderr, "Unrecognized token in value/distribution syntax: %s\n", tok);
         exit(EXIT_FAILURE);
     }
+    if (p->prob == GAMMA && !isnan(k) && !isnan(scale)) {
+        p->val = k * scale;
+        p->std = sqrt(k) * scale;
+    }
     check(p->prob != FIXED || !isnan(p->val));
     check(p->prob != UNIF || (!isnan(p->min) && !isnan(p->max)));
     check(p->prob != EXPON || (!isnan(p->val) && isnan(p->std)));
     check(p->prob != NORM || (!isnan(p->val) && !isnan(p->std)));
+    check(p->prob != GAMMA || (!isnan(p->val) && !isnan(p->std)));
     return 1;
 }
 
@@ -89,6 +111,9 @@ double pd_sample(pd_spec_t *p) {
         break;
     case NORM:
         val = gaussian(p->val, p->std);
+        break;
+    case GAMMA:
+        val = distr_gamma(p->val, p->std);
         break;
     default:
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
@@ -116,6 +141,11 @@ char *pd_str(pd_spec_t *p) {
         break;
     case NORM:
         sprintf(s, "norm:%g", p->val);
+        break;
+    case GAMMA:
+        double scale = p->std * p->std / p->val;
+        int k = lrint(p->val / scale);
+        sprintf(s, "gamma:%g,k=%d,scale=%g", p->val, k, scale);
         break;
     default:
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);

@@ -10,6 +10,7 @@ typedef enum {
     UNIF,               // uniformly distributed value in range [.min, .max)
     EXPON,              // exponentially distributed value with average .val
     NORM,               // Normal distribution with average .val and sigma .std
+    GAMMA               // Gamma distribution with average .val and sigma .std (can be specified as k, scale as well)
 } pd_type_t;
 
 // Probabilistic distribution spec
