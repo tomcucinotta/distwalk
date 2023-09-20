@@ -151,7 +151,7 @@ char *pd_str(pd_spec_t *p) {
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
         exit(EXIT_FAILURE);
     }
-    if (!isnan(p->std))
+    if (p->prob != FIXED && !isnan(p->std))
         sprintf(s + strlen(s), ",std=%g", p->std);
     if (!isnan(p->min))
         sprintf(s + strlen(s), ",min=%g", p->min);
