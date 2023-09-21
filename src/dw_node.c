@@ -669,6 +669,7 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
 
         // move to batch processing of next message if any
         buf += m->req_size;
+        conns[conn_id].curr_cmd_id = 0;
         msg_size = conns[conn_id].curr_recv_buf - buf;
         if (msg_size > 0)
             cw_log("Repeating loop with msg_size=%lu\n", msg_size);
@@ -800,7 +801,7 @@ int recv_messages(int conn_id) {
 // used during REPLYING or FORWARDING
 int send_messages(int conn_id) {
     int sock = conns[conn_id].sock;
-    cw_log("send_messages(): conn_id=%d, status=%d (%s), curr_send_size=%lu, sock=%d\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status), conns[conn_id].curr_send_size, sock);
+    cw_log("send_messages(): conn_id=%d, status=%d (%s), curr_send_size=%lu, sock=%d, curr_cmd_id=%d\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status), conns[conn_id].curr_send_size, sock, conns[conn_id].curr_cmd_id);
     size_t sent =
         send(sock, conns[conn_id].curr_send_buf, conns[conn_id].curr_send_size, MSG_NOSIGNAL);
     cw_log("send() returned: %d\n", (int)sent);
