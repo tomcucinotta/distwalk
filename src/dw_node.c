@@ -109,6 +109,7 @@ typedef struct {
 typedef struct {
     command_t cmd;
     int worker_id;
+    int conn_id;
 } wrapper_t;
 
 conn_info_t conns[MAX_CONNS];
@@ -651,17 +652,16 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
                 wrapper_t w;
                 w.cmd = m->cmds[i];
                 w.worker_id = infos->worker_id;
+                w.conn_id = conn_id;
+
                 if (write(infos->storefd, &w, sizeof(w)) < 0) {
                     perror("storage worker write() failed");
                     return -1;
                 }
 
-                // TODO: wait optionally
-                int ACK;
-                if (safe_read(infos->store_replyfd, (unsigned char*) &ACK, sizeof(ACK)) < 0) {
-                    perror("storage worker write() failed");
-                    return -1;
-                }
+                conns[conn_id].curr_cmd_id = i+1;
+                conns[conn_id].status |= STORING;
+                return 1;
             } else {
                 fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
                 return 0;
@@ -905,7 +905,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     }
     cw_log("conns[%d].status=%d (%s)\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status));
     // check whether we have new or leftover messages to process
-    if (!(conns[conn_id].status & FORWARDING)) {
+    if (!(conns[conn_id].status & (FORWARDING | STORING))) {
         cw_log("calling proc_mesg()\n");
         if (!process_messages(conn_id, epollfd, infos))
             goto err;
@@ -1033,6 +1033,7 @@ void* storage_worker(void* args) {
                 wrapper_t w;
                 command_t storage_cmd;
                 int worker_id;
+                int conn_id;
 
                 if (read(fd, &w, sizeof(w)) < 0) {
                     perror("storage worker read()");
@@ -1042,6 +1043,9 @@ void* storage_worker(void* args) {
 
                 storage_cmd = w.cmd;
                 worker_id = w.worker_id;
+                conn_id = w.conn_id;
+
+                cw_log("STORAGE cmd from conn_id %d\n", conn_id);
 
                 if (storage_cmd.cmd == STORE) {
                     store(&storage_info, storage_info.store_buf, storage_cmd.u.store_nbytes);
@@ -1055,12 +1059,7 @@ void* storage_worker(void* args) {
                     continue;
                 }
 
-                int ACK = 1;
-                if (write(infos->store_replyfd[worker_id], (unsigned char*) &ACK, sizeof(ACK)) < 0) {
-                    perror("storage reply write()");
-                    running = 0;
-                    break;
-                }
+                safe_write(infos->store_replyfd[worker_id], (unsigned char*) &conn_id, sizeof(conn_id));
             }
         }
     }
@@ -1093,7 +1092,7 @@ void* conn_worker(void* args) {
 
     // Add storage reply fd
     if (storage_path) {
-        ev.events = EPOLLOUT;
+        ev.events = EPOLLIN;
         ev.data.u64 = i2l(infos->store_replyfd, -1);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->store_replyfd, &ev) < 0)
             perror("epoll_ctl: storefd failed");
@@ -1147,6 +1146,17 @@ void* conn_worker(void* args) {
             else if (storage_path && fd == infos->store_replyfd) {
                 // storage operation completed
                 // TODO: code
+
+                int conn_id_ACK;
+                if (safe_read(infos->store_replyfd, (unsigned char*) &conn_id_ACK, sizeof(conn_id_ACK)) < 0) {
+                    perror("storage worker read() failed");
+                    continue;
+                }
+
+                conns[conn_id_ACK].status &= ~STORING;
+                cw_log("STORAGE ACK for conn_id %d\n", conn_id_ACK);
+                process_messages(conn_id_ACK, epollfd, infos);
+                //exec_request(epollfd, &events[i], infos);
             } 
             else if (fd == infos->terminationfd) {
                 running = 0;
