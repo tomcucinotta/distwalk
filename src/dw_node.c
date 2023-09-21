@@ -421,8 +421,9 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
         }
 
         struct epoll_event ev;
-        ev.events = EPOLLIN | EPOLLOUT;
+        ev.events = EPOLLOUT | EPOLLONESHOT;
         ev.data.u64 = i2l(clientSocket, fwd_conn_id);
+        cw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
 
         cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {m->cmds[cmd_id].u.fwd.fwd_host}),
@@ -433,6 +434,7 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
         addr.sin_addr.s_addr = m->cmds[cmd_id].u.fwd.fwd_host;
         addr.sin_port = m->cmds[cmd_id].u.fwd.fwd_port;
         int rv = connect(clientSocket, &addr, sizeof(addr));
+        cw_log("connect() returned: %d (errno: %s)\n", rv, strerror(errno));
         if (rv == -1) {
             if (errno != EAGAIN && errno != EINPROGRESS) {
                 cw_log("unexpected error from connect(): %s\n", strerror(errno));
@@ -845,7 +847,7 @@ int start_send(int conn_id, size_t size) {
         return send_messages(conn_id);
 }
 
-int finalize_conn(int conn_id) {
+int finalize_conn(int epollfd, int conn_id) {
     cw_log("finalize_conn() for conn %d\n", conn_id);
     int val;
     socklen_t len = sizeof(val);
@@ -856,6 +858,11 @@ int finalize_conn(int conn_id) {
     }
     // this may trigger send_messages() on return, if messages have already been enqueued
     conns[conn_id].status &= ~CONNECTING;
+
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.u64 = i2l(conns[conn_id].sock, conn_id);
+    sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[conn_id].sock, &ev));
 
     return 1;
 }
@@ -883,7 +890,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     }
     if ((p_ev->events & EPOLLOUT) && (conns[conn_id].status & CONNECTING)) {
         cw_log("calling final_conn()\n");
-        if (!finalize_conn(conn_id))
+        if (!finalize_conn(epollfd, conn_id))
             goto err;
         // we need the send_messages() below to still be tried afterwards
     }
