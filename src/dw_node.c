@@ -631,7 +631,7 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
                     goto out_shift_messages;
                 }
                 // skip forwarded portion of cmds[]
-                i += to_skip;
+                i += to_skip + 1;
                 if (conns[conn_id].status & FORWARDING) {
                     conns[conn_id].curr_cmd_id = i;
                     return 1;
