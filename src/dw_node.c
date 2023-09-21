@@ -494,7 +494,7 @@ int reply(int conn_id, message_t *m, int cmd_id) {
     m_dst->req_id = m->req_id;
     m_dst->req_size = m->cmds[cmd_id].u.resp_size;
     m_dst->num = 0;
-    cw_log("Replying to req %u\n", m->req_id);
+    cw_log("Replying to req %u (conn_id=%d)\n", m->req_id, conn_id);
     cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
 #ifdef CW_DEBUG
