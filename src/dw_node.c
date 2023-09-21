@@ -60,6 +60,8 @@ typedef struct {
     unsigned char *curr_recv_buf; // current pointer within receive buffer while receiving
     unsigned long curr_recv_size; // leftover space in receive buffer
 
+    unsigned char *curr_proc_buf; // current message within receive buffer being processed
+
     unsigned char *curr_send_buf; // curr ptr in send buffer while SENDING
     unsigned long curr_send_size; // size of leftover data to send
 
@@ -578,8 +580,7 @@ void close_and_forget(int epollfd, int sock) {
 }
 
 int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
-    unsigned char *buf = conns[conn_id].recv_buf;
-    unsigned long msg_size = conns[conn_id].curr_recv_buf - buf;
+    unsigned long msg_size = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
 
     // batch processing of multiple messages, if received more than 1
     do {
@@ -588,9 +589,9 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
             cw_log("Got incomplete header, need to recv() more...\n");
             break;
         }
-        message_t *m = (message_t *)buf;
-        cw_log("Processing %lu bytes, req_id=%u, req_size=%u, num=%d\n", msg_size,
-               m->req_id, m->req_size, m->num);
+        message_t *m = (message_t *)conns[conn_id].curr_proc_buf;
+        cw_log("Processing %lu bytes, req_id=%u, req_size=%u, num=%d, curr_cmd_id=%d\n", msg_size,
+               m->req_id, m->req_size, m->num, conns[conn_id].curr_cmd_id);
         if (msg_size < m->req_size) {
             cw_log(
                 "Got header but incomplete message, need to recv() more...\n");
@@ -668,34 +669,35 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
         }
 
         // move to batch processing of next message if any
-        buf += m->req_size;
+        conns[conn_id].curr_proc_buf += m->req_size;
         conns[conn_id].curr_cmd_id = 0;
-        msg_size = conns[conn_id].curr_recv_buf - buf;
+        msg_size = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
         if (msg_size > 0)
             cw_log("Repeating loop with msg_size=%lu\n", msg_size);
     } while (msg_size > 0);
 
  out_shift_messages:
 
-    if (buf == conns[conn_id].curr_recv_buf) {
+    if (conns[conn_id].curr_proc_buf == conns[conn_id].curr_recv_buf) {
         // all received data was processed, reset curr_* for next receive
         conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf;
         conns[conn_id].curr_recv_size = BUF_SIZE;
     } else {
         // leftover received data, move it to beginning of buf unless already
         // there
-        if (buf != conns[conn_id].recv_buf) {
+        if (conns[conn_id].curr_proc_buf != conns[conn_id].recv_buf) {
             // TODO do this only if we're beyond a threshold in buf[]
-            unsigned long leftover = conns[conn_id].curr_recv_buf - buf;
+            unsigned long leftover = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
             cw_log(
                 "Moving %lu leftover bytes back to beginning of buf with "
                 "conn_id %d",
                 leftover, conn_id);
-            memmove(conns[conn_id].recv_buf, buf, leftover);
+            memmove(conns[conn_id].recv_buf, conns[conn_id].curr_proc_buf, leftover);
             conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf + leftover;
             conns[conn_id].curr_recv_size = BUF_SIZE - leftover;
         }
     }
+    conns[conn_id].curr_proc_buf = conns[conn_id].recv_buf;
 
     return 1;
 }
@@ -758,6 +760,7 @@ int conn_alloc(int conn_sock) {
     // From here, safe to assume that conns[conn_id] is thread-safe
     cw_log("Connection %d just allocated\n", conn_id);
     conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf;
+    conns[conn_id].curr_proc_buf = conns[conn_id].recv_buf;
     conns[conn_id].curr_recv_size = BUF_SIZE;
     conns[conn_id].curr_send_buf = conns[conn_id].send_buf;
     conns[conn_id].curr_send_size = 0;
