@@ -915,6 +915,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         cw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[conn_id].sock, conn_id, conns[conn_id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[conn_id].sock, &ev2));
+        conns[conn_id].status |= SENDING;
     }
     if (conns[conn_id].curr_send_size == 0 && (conns[conn_id].status & SENDING)) {
         struct epoll_event ev2;
@@ -923,6 +924,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         cw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[conn_id].sock, conn_id, conns[conn_id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[conn_id].sock, &ev2));
+        conns[conn_id].status &= ~SENDING;
     }
 
     return;
