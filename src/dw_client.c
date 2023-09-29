@@ -32,8 +32,6 @@ unsigned int n_compute = 0;  // Number of COMPUTE requests
 
 unsigned int default_compute_us = 1000;
 
-int exp_comptimes = 0;
-
 pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 128, .std = NAN, .min = NAN, .max = NAN };
 pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 10000, .std = NAN, .min = NAN, .max = NAN };
 
@@ -456,7 +454,7 @@ int main(int argc, char *argv[]) {
                 "[-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] "
                 "[-rns|--ramp-num-steps n] [-rfn|--rate-file-name "
                 "rates_file.dat] [-C|--comp-time comp_time(us)] "
-                "[-ec|--exp-comp] [-S|--store-data n(bytes)] [-L|--load-data "
+                "[-S|--store-data n(bytes)] [-L|--load-data "
                 "n(bytes)] [-Cw|--comp-weight w] [-Sw|--store-weight w] "
                 "[-Lw|--load-weight w] [-ps req_size] [-eps|--exp-req-size] "
                 "[-rs resp_size] [-ers|--exp-resp-size] [-nd|--no-delay val] "
@@ -485,7 +483,7 @@ int main(int argc, char *argv[]) {
                 "  -rfn|--rate-file-name fname ..... Load rates from specified "
                 "file\n"
                 "  -C|--comp-time time(us) ......... Set per-request "
-                "processing time (average, if -ec is specified)\n"
+                "processing time (distribution)\n"
                 "  -ec|--exp-comp .................. Set exponentially "
                 "distributed per-request processing times\n"
                 "  -S|--store-data bytes ........... Set per-store data size\n"
@@ -642,9 +640,6 @@ int main(int argc, char *argv[]) {
             weights[LOAD] = atoi(argv[1]);
             argc--;
             argv++;
-        } else if (strcmp(argv[0], "-ec") == 0 ||
-                   strcmp(argv[0], "--exp-comp") == 0) {
-            exp_comptimes = 1;
         } else if (strcmp(argv[0], "-ws") == 0 ||
                    strcmp(argv[0], "--waitspin") == 0) {
             wait_spinning = 1;
@@ -783,8 +778,6 @@ int main(int argc, char *argv[]) {
     printf("  waitspin=%d\n", wait_spinning);
     printf("  ramp_num_steps=%d, ramp_delta_rate=%d, ramp_step_secs=%d\n",
            ramp_num_steps, ramp_delta_rate, ramp_step_secs);
-    /*printf("  comptime_us=%lu, exp_comptimes=%d\n", comptimes_us,
-           exp_comptimes); TODO: Update */
     printf("  pkt_size=%s (+%d for headers)\n", pd_str(&send_pkt_size_pd),
            TCPIP_HEADERS_SIZE);
     /*printf("  resp_size=%lu (%lu with headers), exp_resp_size=%d\n", resp_size,
@@ -795,6 +788,8 @@ int main(int argc, char *argv[]) {
     printf("  no_delay: %d\n", no_delay);
     printf("  num_sessions: %d\n", num_sessions);
     printf("  per_session_output: %d\n", per_session_output);
+
+    printf("  request template: ");  ccmd_log(ccmd);
 
     assert(send_pkt_size_pd.val >= MIN_SEND_SIZE);
     assert(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE);
