@@ -47,6 +47,9 @@ int per_session_output = 0;
 pthread_t sender[MAX_THREADS];
 pthread_t receiver[MAX_THREADS];
 
+#define DEFAULT_ADDR "127.0.0.1"
+#define DEFAULT_PORT "7891"
+
 void safe_send(int sock, unsigned char *buf, size_t len) {
     while (len > 0) {
         int sent;
@@ -109,29 +112,33 @@ size_t recv_all(int sock, unsigned char *buf, size_t len) {
 int sum_w = 0;
 int weights[3] = {0, 0, 0};  // 0 compute, 1 store, 2 load
 
-
+// Support "host[:port]" or ":port" syntaxes
 void host_net_config(char* host_str, struct sockaddr_in* addr) {
-    char* hostname;
+    char* hostname = DEFAULT_ADDR;
+    int port = atoi(DEFAULT_PORT);
     char* port_str;
-    int port;
 
-    // Parse host:port string
-    hostname = host_str;
+    check(strlen(host_str) > 0,
+          "Allowed host/port syntaxes are \"host[:port]\" or \":port\"");
 
     // Get port
     port_str = strchr(host_str, ':');
-    check(port_str, "Missing ':' in <host>:<port>!");
-
     // Now host containts hostname (or ip) only
-    *port_str = '\0';
-    port_str++;
+    if (port_str) {
+        cw_log("port_str: %s\n", port_str);
+        *port_str = '\0';
+        port_str++;
 
-    // Convert port string in integer
-    char* end_ptr = NULL;
-    port = strtol(port_str, &end_ptr, 10);
-    check(!*end_ptr, "Port '%s' is not a numeric value!\n", port_str);
+        // Convert port string to integer
+        char* end_ptr = NULL;
+        port = strtol(port_str, &end_ptr, 10);
+        check(!*end_ptr, "Port '%s' is not a numeric value!\n", port_str);
+    }
+    cw_log("host_str: %s\n", hostname);
+    if (strlen(host_str) > 0)
+        hostname = host_str;
 
-    // Hostname Resolve
+    // Resolve hostname
     cw_log("Resolving %s...\n", hostname);
     struct hostent *e = gethostbyname(hostname);
     check(e != NULL);
@@ -144,8 +151,9 @@ void host_net_config(char* host_str, struct sockaddr_in* addr) {
     bcopy((char *)e->h_addr, (char *) &addr->sin_addr.s_addr, e->h_length);
     addr->sin_port = htons(port);
 
-    // Restore original string (which was manipulated in-place)
-    *(port_str - 1) = ':';
+    if (port_str)
+        // Restore original string (which was manipulated in-place)
+        *(port_str - 1) = ':';
 }
 
 //TODO: Deprecated with recent client interface update
@@ -185,7 +193,7 @@ unsigned int ramp_num_steps = 0;   // number of ramp-up steps
 char *ramp_fname = NULL;
 
 #define MAX_HOST_STRING 31
-char serverhost[MAX_HOST_STRING] = "127.0.0.1:7891";
+char serverhost[MAX_HOST_STRING] = DEFAULT_ADDR ":" DEFAULT_PORT;
 char clienthost[MAX_HOST_STRING] = "0.0.0.0:0";
 
 struct sockaddr_in serveraddr;
@@ -442,8 +450,8 @@ int main(int argc, char *argv[]) {
         //client interface
         if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
             printf(
-                "Usage: dw_client [-h|--help] [-cl hostname:port] "
-                "[-sv hostname:port] [-n num_pkts] [-p period(us)] "
+                "Usage: dw_client [-h|--help] [-cl host[:port]|:port] "
+                "[-sv host[:port]|:port] [-n num_pkts] [-p period(us)] "
                 "[-r|--rate rate] [-ea|--exp-arrivals] [-ws|--wait-spin] "
                 "[-rss|--ramp-step-secs secs] [-rdr|--ramp-delta-rate r] "
                 "[-rns|--ramp-num-steps n] [-rfn|--rate-file-name "
@@ -457,8 +465,8 @@ int main(int argc, char *argv[]) {
                 "\n"
                 "Options:\n"
                 "  -h|--help ....................... This help message\n"
-                "  -sv hostname:port ............... Set Server host\n"
-                "  -cl hostname:port ............... Set Client host\n"
+                "  -sv host[:port] ................. Set Server host\n"
+                "  -cl host[:port] ................. Set Client host\n"
                 "  -n num_pkts ..................... Set number of packets "
                 "sent by each thread (across all sessions)\n"
                 "  -p period(us) ................... Set inter-send period for "
