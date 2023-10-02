@@ -73,7 +73,7 @@ int pd_parse(pd_spec_t *p, char *s) {
     }
     double k = NAN, scale = NAN; // for Gamma
     while ((tok = strsep(&s, ",")) != NULL) {
-        printf("Processing tok: %s\n", tok);
+        cw_log("Processing tok: %s\n", tok);
         if (sscanf(tok, "min=%lf", &p->min) == 1
             || sscanf(tok, "max=%lf", &p->max) == 1
             || sscanf(tok, "std=%lf", &p->std) == 1
