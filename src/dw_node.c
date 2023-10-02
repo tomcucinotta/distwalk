@@ -138,6 +138,7 @@ pthread_mutex_t socks_mtx;
 typedef struct {
     int req_id;
     int conn_id;
+    int fwd_replies_left;
 } req_info_t;
 
 req_info_t reqs[MAX_REQS];
@@ -451,7 +452,13 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
     int sock = conns[fwd_conn_id].sock;
     assert(sock != -1);
     message_t *m_dst = (message_t *) get_send_buf(fwd_conn_id, m->cmds[cmd_id].u.fwd.pkt_size);
-    int forwarded = copy_tail(m, m_dst, cmd_id + 1);
+
+    int j = cmd_id + 1;
+    while (j < m->num && m->cmds[j].cmd == MULTI_FORWARD) {
+        j++;
+    }
+
+    int forwarded = copy_tail(m, m_dst, j);
     m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
 
     cw_log("Forwarding req %u to %s:%d\n", m->req_id,
@@ -465,37 +472,50 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
 
     if (!start_send(fwd_conn_id, m_dst->req_size))
         return 0;
+        
+    if (cmd_id == 0 || m->cmds[cmd_id-1].cmd != MULTI_FORWARD) {
+        reqs[m->req_id % MAX_REQS].req_id = m->req_id;
+        reqs[m->req_id % MAX_REQS].conn_id = conn_id;
+        reqs[m->req_id % MAX_REQS].fwd_replies_left = m->cmds[cmd_id + 1 + forwarded].u.resp.n_ack;
+    }
 
-    reqs[m->req_id % MAX_REQS].req_id = m->req_id;
-    reqs[m->req_id % MAX_REQS].conn_id = conn_id;
-    conns[conn_id].status |= FORWARDING;
+    if (j == cmd_id + 1) {
+        conns[conn_id].status |= FORWARDING;
+        return forwarded;
+    }
 
-    return forwarded;
+    return 1;
 }
 
 int process_messages(int conn_id, int epollfd, thread_info_t* infos);
 
 // Call this once we received a REPLY from a socket matching a req_id we forwarded
-int handle_forward_reply(int conn_id, int epollfd, thread_info_t* infos) {
-    // TODO: really continue processing req even if FORWARD failed?
-    conns[conn_id].status &= ~FORWARDING;
-    return process_messages(conn_id, epollfd, infos);
-    /* message_t *m = (message_t *) conns[conn_id].buf; */
-    /* int fwd_reply_id = conns[conn_id].fwd_reply_id; */
-    /* cw_log("  f: cmd_id=%d, num=%d, fwd_repl_id=%d, forwarded=%d\n", cmd_id, m->num, fwd_reply_id, forwarded); */
-    /* check(fwd_reply_id < m->num && m->cmds[fwd_reply_id].cmd == REPLY); */
-    /* cw_log("  f: waiting for resp_size=%d bytes\n", m->cmds[fwd_reply_id].u.resp_size); */
-    /* if (!recv_all(conns[conn_id].sock, conns[conn_id].reply_buf, m->cmds[fwd_reply_id].u.resp_size)) */
+int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
+    if (reqs[req_id % MAX_REQS].req_id == req_id) {
+        cw_log("Found match with conn_id %d\n", reqs[req_id % MAX_REQS].conn_id);
+        int conn_id = reqs[req_id % MAX_REQS].conn_id;
+        
+        if (--reqs[req_id % MAX_REQS].fwd_replies_left == 0) {
+            reqs[req_id % MAX_REQS].req_id = -1;
+            conns[conn_id].status &= ~FORWARDING;
+
+            return process_messages(conn_id, epollfd, infos);
+        }
+    } else {
+        cw_log("Could not match a response to FORWARD, req_id=%d - Dropped\n", req_id);
+    }
+    
+    return 1;
 }
 
 // returns 1 if reply sent correctly, 0 otherwise
 int reply(int conn_id, message_t *m, int cmd_id) {
-    message_t *m_dst = (message_t *) get_send_buf(conn_id, m->cmds[cmd_id].u.resp_size);
+    message_t *m_dst = (message_t *) get_send_buf(conn_id, m->cmds[cmd_id].u.resp.resp_size);
 
     cw_log("m_dst: %p, send_buf: %p\n", m_dst, conns[conn_id].send_buf);
 
     m_dst->req_id = m->req_id;
-    m_dst->req_size = m->cmds[cmd_id].u.resp_size;
+    m_dst->req_size = m->cmds[cmd_id].u.resp.resp_size;
     m_dst->num = 0;
     cw_log("Replying to req %u (conn_id=%d)\n", m->req_id, conn_id);
     cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
@@ -605,24 +625,19 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
 #endif
         cw_log("conns[%d].curr_cmd_id=%d\n", conn_id, conns[conn_id].curr_cmd_id);
 
+        // FORWARD finished
         if (m->num == 0) {
-            cw_log("Handling response to FORWARD, req_id=%d\n", m->req_id);
-            if (reqs[m->req_id % MAX_REQS].req_id == m->req_id) {
-                cw_log("Found match with conn_id %d\n", reqs[m->req_id % MAX_REQS].conn_id);
-                reqs[m->req_id % MAX_REQS].req_id = -1;
-                if (!handle_forward_reply(reqs[m->req_id % MAX_REQS].conn_id, epollfd, infos)) {
+            cw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].inaddr}), 
+                                                                           ntohs(conns[conn_id].port), m->req_id);
+            if (!handle_forward_reply(m->req_id, epollfd, infos)) {
                     cw_log("handle_forward_reply() failed\n");
                     return 0;
-                }
-            } else {
-                fprintf(stderr, "Could not match a response to FORWARD, req_id=%d\n", m->req_id);
-                exit(1);
             }
         }
         for (int i = conns[conn_id].curr_cmd_id; i < m->num; i++) {
             if (m->cmds[i].cmd == COMPUTE) {
                 compute_for(m->cmds[i].u.comp_time_us);
-            } else if (m->cmds[i].cmd == FORWARD) {
+            } else if (m->cmds[i].cmd == FORWARD || m->cmds[i].cmd == MULTI_FORWARD) {
                 int to_skip = start_forward(conn_id, m, i, epollfd);
                 cw_log("to_skip=%d\n", to_skip);
                 if (to_skip == 0) {
@@ -632,10 +647,9 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
                     conns[conn_id].curr_cmd_id = i;
                     goto out_shift_messages;
                 }
-                // skip forwarded portion of cmds[]
-                i += to_skip + 1;
+      
                 if (conns[conn_id].status & FORWARDING) {
-                    conns[conn_id].curr_cmd_id = i;
+                    conns[conn_id].curr_cmd_id = i + to_skip + 1;
                     return 1;
                 }
             } else if (m->cmds[i].cmd == REPLY) {

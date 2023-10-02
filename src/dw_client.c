@@ -111,7 +111,7 @@ int sum_w = 0;
 int weights[3] = {0, 0, 0};  // 0 compute, 1 store, 2 load
 
 // Support "host[:port]" or ":port" syntaxes
-void host_net_config(char* host_str, struct sockaddr_in* addr) {
+void hostport_parse_and_config(char* host_str, struct sockaddr_in* addr) {
     char* hostname = DEFAULT_ADDR;
     int port = atoi(DEFAULT_PORT);
     char* port_str;
@@ -250,7 +250,7 @@ void *thread_sender(void *data) {
         m->req_size = pd_sample(&send_pkt_size_pd);
 
         cw_log("sending %u bytes (will expect %u bytes in response)...\n",
-               m->req_size, m->cmds[m->num-1].u.resp_size);
+               m->req_size, m->cmds[m->num-1].u.resp.resp_size);
         assert(m->req_size <= BUF_SIZE);
 #ifdef CW_DEBUG
         msg_log(m, "Sending msg: ");
@@ -488,7 +488,7 @@ int main(int argc, char *argv[]) {
                 "distributed per-request processing times\n"
                 "  -S|--store-data bytes ........... Set per-store data size\n"
                 "  -L|--load-data bytes ............ Set per-load data size\n"
-                "  -F|--forward hostname:port ...... FORWARD message \n"
+                "  -F|--forward ip:port[,ip:port,...][,nack=N] ... Send a number of FORWARD message to the ip:port list, wait for N replies\n"
                 "  -Cw|--comp-weight w ............. Set weight of COMPUTE in "
                 "weighted random choice of operation\n"
                 "  -Sw|--store-weight w ............ Set weight of STORE in "
@@ -609,16 +609,40 @@ int main(int argc, char *argv[]) {
             assert(argc >= 2);
 
             struct sockaddr_in addr;
-            host_net_config(argv[1], &addr);
-
-            // TODO: customize forward pkt size
+            command_type_t fwd_type = FORWARD;
             pd_spec_t val = pd_build_fixed(default_resp_size);
-            ccmd_add(ccmd, FORWARD, &val);
-            ccmd_last(ccmd)->fwd.fwd_port = addr.sin_port;
-            ccmd_last(ccmd)->fwd.fwd_host = addr.sin_addr.s_addr;
+
+            char *tok;
+            int n_ack = 0;
+            int i = 0;
+            
+            while ((tok = strsep(&argv[1], ",")) != NULL) {
+                if (sscanf(tok, "nack=%d", &n_ack) == 1)
+                    continue;
+                
+                hostport_parse_and_config(tok, &addr);
+
+                if (argv[1]) {
+                    fwd_type = MULTI_FORWARD;
+                }
+
+                // TODO: customize forward pkt size
+                ccmd_add(ccmd, fwd_type, &val);
+                ccmd_last_action(ccmd)->fwd.fwd_port = addr.sin_port;
+                ccmd_last_action(ccmd)->fwd.fwd_host = addr.sin_addr.s_addr;
+
+                i++;
+            }
+
+
+            // TODO: allow n_ack 0 ???
+            if (n_ack == 0 || (n_ack > 0 && n_ack > i)) {
+                n_ack = i;
+            }
 
             // TODO: customize forward-reply pkt size
             ccmd_add(ccmd, REPLY, &val);
+            ccmd_last(ccmd)->resp.n_ack = n_ack;
 
             argc--;
             argv++;
@@ -666,6 +690,7 @@ int main(int argc, char *argv[]) {
             val.max = BUF_SIZE;
             check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max));
             ccmd_attach_reply_size(ccmd, &val);
+            ccmd_last(ccmd)->resp.n_ack = 1;
 
             argc--;
             argv++;
@@ -699,7 +724,6 @@ int main(int argc, char *argv[]) {
         argv++;
     }
 
-
     if (n_compute + n_store + n_load > 0 && num_pkts <= 0){
         num_pkts = 1;
     }
@@ -720,6 +744,7 @@ int main(int argc, char *argv[]) {
     if (!ccmd->last_reply_called) {
         pd_spec_t val = pd_build_fixed(default_resp_size);
         ccmd_last_reply(ccmd, REPLY, &val);
+        ccmd_last(ccmd)->resp.n_ack = 1;
     }
 
     for (int i = 0; i < 3; i++) {
@@ -755,8 +780,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    host_net_config(serverhost, &serveraddr);
-    host_net_config(clienthost, &myaddr);
+    hostport_parse_and_config(serverhost, &serveraddr);
+    hostport_parse_and_config(clienthost, &myaddr);
 
     /* Set all bits of the padding field to 0 */
     memset(myaddr.sin_zero, '\0', sizeof(myaddr.sin_zero));

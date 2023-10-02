@@ -16,6 +16,7 @@ typedef struct ccmd_node_t {
     command_type_t cmd;
     pd_spec_t pd_val;
     fwd_opts_t fwd;
+    reply_opts_t resp;
     struct ccmd_node_t* next;
 } ccmd_node_t;
 
@@ -38,6 +39,6 @@ void ccmd_dump(ccmd_t* q, message_t* m);
 void ccmd_destroy(ccmd_t* q);
 void ccmd_log(ccmd_t* q);
 
-static inline ccmd_node_t *ccmd_last(ccmd_t *q) { return q->tail_actions; }
-
+static inline ccmd_node_t *ccmd_last_action(ccmd_t *q) { return q->tail_actions; }
+static inline ccmd_node_t *ccmd_last(ccmd_t *q) { return q->tail_replies; }
 #endif /* __CMD_H__ */

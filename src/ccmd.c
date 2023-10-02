@@ -121,9 +121,10 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
             case COMPUTE:
             case LOAD:
             case REPLY: 
-                // doesn't really matter if we're filling up comp_time_us, resp_size, ...
-                m->cmds[i++].u.comp_time_us = pd_sample(&curr->pd_val);
+                m->cmds[i].u.resp = curr->resp;
+                m->cmds[i++].u.resp.resp_size = pd_sample(&curr->pd_val);
                 break;
+            case MULTI_FORWARD:
             case FORWARD:
                 m->cmds[i].u.fwd = curr->fwd;
                 m->cmds[i++].u.fwd.pkt_size = pd_sample(&curr->pd_val);
@@ -171,11 +172,12 @@ void ccmd_log(ccmd_t* q) {
             case LOAD:
                 sprintf(opts, "%sb", pd_str(&curr->pd_val));
                 break;
+            case MULTI_FORWARD:
             case FORWARD:
-                sprintf(opts, "%s:%d,%s", inet_ntoa((struct in_addr) {curr->fwd.fwd_host}), ntohs(curr->fwd.fwd_port), pd_str(&curr->pd_val));
+                sprintf(opts, "%s:%d,%sb", inet_ntoa((struct in_addr) {curr->fwd.fwd_host}), ntohs(curr->fwd.fwd_port), pd_str(&curr->pd_val));
                 break;
             case REPLY:
-                sprintf(opts, "%sb", pd_str(&curr->pd_val));
+                sprintf(opts, "%sb,%d", pd_str(&curr->pd_val), curr->resp.n_ack);
                 break;
             default: 
                 fprintf(stderr, "ccmd_log() - Unknown command type\n");

@@ -10,7 +10,7 @@
 
 #define BUF_SIZE (16*1024*1024)
 
-typedef enum { COMPUTE, STORE, LOAD, FORWARD, REPLY } command_type_t;
+typedef enum { COMPUTE, STORE, LOAD, FORWARD, MULTI_FORWARD, REPLY } command_type_t;
 
 typedef struct {
   uint32_t pkt_size;    // size of forwarded packet
@@ -23,10 +23,11 @@ typedef struct {
   uint64_t offset;
   uint32_t pkt_size;   // size of forwarded packet
 } store_opts_t;
-
+*/
 typedef struct {
-  uint32_t pkt_size;    // size of forwarded packet
-} reply_opts_t;*/
+  uint32_t resp_size;      // REPLY pkt size
+  uint8_t n_ack;         // reply concern
+} reply_opts_t;
 
 // TODO: Here we need all quantities to be network-ordered
 typedef struct {
@@ -34,11 +35,11 @@ typedef struct {
   int worker_id; // worker currently processing the message
   
   union {
-    uint32_t comp_time_us;  // COMPUTE time (usecs)
-    uint32_t store_nbytes;  // STORE data size
-    uint32_t load_nbytes;   // LOAD data size
-    uint32_t resp_size;     // REPLY pkt size
-    fwd_opts_t fwd;         // FORWARD host+port and pkt size
+    uint32_t     comp_time_us; // COMPUTE time (usecs)
+    uint32_t     store_nbytes; // STORE data size
+    uint32_t     load_nbytes;  // LOAD data size
+    reply_opts_t resp;         // REPLY pkt size and concern
+    fwd_opts_t   fwd;          // FORWARD host+port and pkt size
   } u;
 } command_t;
 
@@ -56,6 +57,7 @@ static inline const char* get_command_name(command_type_t cmd) {
     case STORE: return "STORE";
     case LOAD: return "LOAD";
     case FORWARD: return "FORWARD";
+    case MULTI_FORWARD: return "MULTI_FORWARD";
     case REPLY: return "REPLY";
     default: 
       printf("Unknown command type\n");
@@ -80,11 +82,12 @@ static inline const void msg_log(message_t* m, char* padding) {
         case LOAD:
             sprintf(opts, "%db", m->cmds[i].u.load_nbytes);
             break;
+        case MULTI_FORWARD:
         case FORWARD:
             sprintf(opts, "%s:%d,%u", inet_ntoa((struct in_addr) {m->cmds[i].u.fwd.fwd_host}), ntohs(m->cmds[i].u.fwd.fwd_port), m->cmds[i].u.fwd.pkt_size);
             break;
         case REPLY:
-            sprintf(opts, "%db", m->cmds[i].u.resp_size);
+            sprintf(opts, "%db,%d", m->cmds[i].u.resp.resp_size, m->cmds[i].u.resp.n_ack);
             break;
         default: 
             printf("Unknown command type\n");
