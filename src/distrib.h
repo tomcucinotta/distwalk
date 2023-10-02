@@ -10,7 +10,8 @@ typedef enum {
     UNIF,               // uniformly distributed value in range [.min, .max)
     EXPON,              // exponentially distributed value with average .val
     NORM,               // Normal distribution with average .val and sigma .std
-    GAMMA               // Gamma distribution with average .val and sigma .std (can be specified as k, scale as well)
+    GAMMA,              // Gamma distribution with average .val and sigma .std (can be specified as k, scale as well)
+    TRACE               // Trace-based distribution (read from file)
 } pd_type_t;
 
 // Probabilistic distribution spec
@@ -20,6 +21,9 @@ typedef struct {
     double std;        // standard deviation of the distribution
     double min;        // lower-bound saturation if !isnan()
     double max;        // upper-bound saturation if !isnan()
+    double *samples;   // trace-based samples (pre-loaded from file)
+    int num_samples;   // number of elems in samples[]
+    int cur_sample;    // index of next sampled elem in samples[]
 } pd_spec_t;
 
 double expon(double lambda);
