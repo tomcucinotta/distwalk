@@ -150,8 +150,10 @@ int no_delay = 1;
 
 int use_odirect = 0;
 int nthread = 1;
-int thread_affinity = 0;
 volatile int running = 1;
+
+int thread_affinity = 0;
+char* thread_affinity_list;
 
 const char *conn_status_str(int s) {
     static char str[16];
@@ -228,6 +230,34 @@ void sigint_cleanup(int _) {
     }
 
     eventfd_write(storage_info.terminationfd, 1);
+}
+
+// Based on taskset human-readable format
+void core_list_parse(char *str, cpu_set_t* mask) {
+    char* tok;
+    int min;
+    int val;
+    int max;
+
+    CPU_ZERO(mask);
+    while ((tok = strsep(&str, ",")) != NULL) {
+        if (sscanf(tok, "%d-%d", &min, &max) == 2) {
+            if (min > max) {
+                int tmp = max;
+
+                max = min;
+                min = tmp;
+            }
+            
+            for (int i=min; i<=max; i++) {
+                CPU_SET(i, mask);
+            }
+        }
+        else if (sscanf(tok, "%d", &val) == 1) {
+            CPU_SET(val, mask);
+        }
+        // else: format error
+    }
 }
 
 int pin_to_core(int core_id) {
@@ -1257,6 +1287,12 @@ int main(int argc, char *argv[]) {
             use_odirect = 1;
         } else if (strcmp(argv[0], "--thread-affinity") == 0) {
             thread_affinity = 1;
+
+            if (argc >= 2 && argv[1][0] != '-') {
+                thread_affinity_list = argv[1];
+                argc--;
+                argv++;
+            }
         } else {
             fprintf(stderr, "Error: Unrecognized option: %s\n", argv[0]);
             exit(EXIT_FAILURE);
@@ -1271,9 +1307,16 @@ int main(int argc, char *argv[]) {
     long core_it = 0;
     long nproc = sysconf(_SC_NPROCESSORS_ONLN);
 
+    cw_log("nproc=%ld (system capacity)\n", nproc);
+
     if (thread_affinity) {
-        CPU_ZERO(&mask);
-        sys_check(sched_getaffinity(0, sizeof(cpu_set_t), &mask));
+        if (thread_affinity_list) {
+            core_list_parse(thread_affinity_list, &mask);
+        }
+        else {
+            CPU_ZERO(&mask);
+            sys_check(sched_getaffinity(0, sizeof(cpu_set_t), &mask));
+        }
 
         // Point BEFORE first pinnable core
         while (!CPU_ISSET(core_it, &mask)) {
