@@ -50,10 +50,40 @@ void pd_init(long int seed) {
     srand48_r(seed, &rnd_buf);
 }
 
+void pd_load_file(pd_spec_t *p, char *fname, int col) {
+    FILE *f = fopen(fname, "r");
+    check(f != NULL, "Could not open file: %s\n", fname);
+    int n = 0;
+    static char line[256];
+    while (fgets(line, sizeof(line), f))
+        n++;
+    p->samples = malloc(n * sizeof(*p->samples));
+    check(p->samples != NULL, "Could not allocate %lu bytes for file\n", n * sizeof(*p->samples));
+    rewind(f);
+    n = 0;
+    while (fgets(line, sizeof(line), f)) {
+        char *colstr;
+        char *s = line;
+        int c = col;
+        do {
+            colstr = strsep(&s, ",");
+        } while (c-- > 0 && colstr != NULL);
+        check(c == -1 && colstr != NULL, "Could not find col %d in line %d of file %s: %s\n", col, n, fname, line);
+        double val;
+        // ignore lines where values were not recognized
+        if (sscanf(colstr, "%lf", &val) == 1)
+            p->samples[n++] = val;
+    }
+    fclose(f);
+    p->num_samples = n;
+    p->cur_sample = 0;
+}
+
 int pd_parse(pd_spec_t *p, char *s) {
     *p = (pd_spec_t) { .prob = FIXED, .val = NAN, .std = NAN, .min = NAN, .max = NAN, .samples = NULL };
     char *tok = strsep(&s, ":");
-    int col = 0; // used by TRACE
+    int col = 0;        // used by SFILE
+    char *fname = NULL; // used by SFILE
     check(tok, "Wrong value/distribution syntax\n");
     if (strcmp(tok, "unif") == 0)
         p->prob = UNIF;
@@ -63,8 +93,8 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->prob = NORM;
     else if (strcmp(tok, "gamma") == 0)
         p->prob = GAMMA;
-    else if (strcmp(tok, "trace") == 0)
-        p->prob = TRACE;
+    else if (strcmp(tok, "file") == 0)
+        p->prob = SFILE;
     else if (sscanf(tok, "%lf", &p->val) == 1)
         p->prob = FIXED;
     else {
@@ -82,39 +112,18 @@ int pd_parse(pd_spec_t *p, char *s) {
             || sscanf(tok, "avg=%lf", &p->val) == 1
             || sscanf(tok, "%lf", &p->val) == 1)
                 continue;
-        if (p->prob == TRACE) {
+        if (p->prob == SFILE) {
             if (sscanf(tok, "col=%d", &col) == 1)
                 continue;
-            FILE *f = fopen(tok, "r");
-            check(f != NULL, "Could not open trace file: %s\n", tok);
-            int n = 0;
-            static char line[256];
-            while (fgets(line, sizeof(line), f))
-                n++;
-            p->samples = malloc(n * sizeof(*p->samples));
-            check(p->samples != NULL, "Could not allocate %lu bytes for trace file\n", n * sizeof(*p->samples));
-            rewind(f);
-            n = 0;
-            while (fgets(line, sizeof(line), f)) {
-                char *colstr;
-                char *s = line;
-                int c = col;
-                do {
-                    colstr = strsep(&s, ",");
-                } while (c-- > 0 && colstr != NULL);
-                check(colstr != NULL, "Could not find col %d in trace line: %s\n", col, line);
-                double val;
-                // ignore lines where values were not recognized
-                if (sscanf(colstr, "%lf", &val) == 1)
-                    p->samples[n++] = val;
-            }
-            fclose(f);
-            p->num_samples = n;
-            p->cur_sample = 0;
+            fname = tok;
             continue;
         }
         fprintf(stderr, "Unrecognized token in value/distribution syntax: %s\n", tok);
         exit(EXIT_FAILURE);
+    }
+    if (p->prob == SFILE) {
+        check(fname != NULL, "Missing filename for file: value/distribution syntax\n");
+        pd_load_file(p, fname, col);
     }
     if (p->prob == GAMMA && !isnan(k) && !isnan(scale)) {
         p->val = k * scale;
@@ -149,7 +158,7 @@ double pd_sample(pd_spec_t *p) {
     case GAMMA:
         val = distr_gamma(p->val, p->std);
         break;
-    case TRACE:
+    case SFILE:
         val = p->samples[p->cur_sample++];
         p->cur_sample %= p->num_samples;
         break;
@@ -185,8 +194,8 @@ char *pd_str(pd_spec_t *p) {
         int k = lrint(p->val / scale);
         sprintf(s, "gamma:%g,k=%d,scale=%g", p->val, k, scale);
         break;
-    case TRACE:
-        sprintf(s, "trace:num_samples=%d,[0]=%g", p->num_samples, p->samples[0]);
+    case SFILE:
+        sprintf(s, "file:num_samples=%d,[0]=%g", p->num_samples, p->samples[0]);
         break;
     default:
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
