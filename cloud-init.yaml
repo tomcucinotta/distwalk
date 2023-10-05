@@ -1,0 +1,49 @@
+#cloud-config
+
+# Distwalk VM image for OpenStack
+# NOTE: Requires internet connection
+
+users:
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users,admin
+    shell: /bin/bash
+    lock_passwd: false #if true, disable password login
+    ssh_authorized_keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQClO467WZb9g+Htw08krQJg2OP2s15g7YV2spy8cRUFXdCPLQommtjlMN1bp7Z4BMCcFN4TYh5chpfP6+lFQGHyVPbrAp7mkNEO1ZjtLJC6K7XuapsvJWhJHtuqQwKpnFpHz1SbAGdt4UexS2BU6YqOQgRDuc7PX/lK1R+NqlD605i8g5fOfxD1en9rsDPurScgULbaOwkc4gc1ixE3WtV+ZeDfXqObDcukDgtSeHT9vTF+LLoz12WUV68Wg5WAAxfrl/+lZ21DghYHzXzXlfJG3sZFsDBU2/umXvkA7G3UpUo77i7tgvUULSy3wefKQ1mOm6sCXEInRw7FkWHxa2EF remokey 
+
+ssh_pwauth: false # Enable/disable password auth. with ssh
+disable_root: false # Enable/disable root login
+
+# Set inital passwords
+chpasswd:
+  list: |
+      root:password
+      ubuntu:ubuntu
+  expire: False
+
+package_update: true
+packages:
+  - qemu-guest-agent
+  - net-tools
+  - build-essential
+  - nmap
+  - wget
+  - ntp # to synchronise clock
+  - nfs-common # for shared filesystem (openstack manila)
+  - silversearcher-ag # useful search cmd
+  - stress-ng #noise-producing tool
+
+runcmd:
+  # Set timezone (needed for monasca alarms)
+  - [ timedatectl, set-timezone, Europe/Rome ]
+  # Get latest version of distwalk
+  - [ wget, "https://github.com/tomcucinotta/distwalk/archive/refs/tags/latest.tar.gz", -P, /home/ubuntu ]
+  - [ su, ubuntu, -c, "tar -xzf /home/ubuntu/latest.tar.gz -C /home/ubuntu" ]
+  - [ su, ubuntu, -c, "mv /home/ubuntu/distwalk-latest /home/ubuntu/distwalk" ]
+  - [ su, ubuntu, -c, "cd /home/ubuntu/distwalk && make clean & make" ]
+ 
+##############################################################
+
+# Written to /var/log/cloud-init.log, /var/log/messages
+final_message: "The system is finally prepared, after $UPTIME seconds"

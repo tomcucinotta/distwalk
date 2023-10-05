@@ -1,0 +1,9 @@
+# Minimal docker image with the whole repository
+FROM gcc:latest as build
+COPY . /src
+WORKDIR /src
+RUN make clean && make
+
+FROM busybox:glibc AS distwalk
+COPY --from=build /src /src
+WORKDIR /src
