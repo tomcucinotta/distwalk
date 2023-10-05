@@ -73,7 +73,7 @@ typedef struct {
 
 #define MAX_CONNS 16
 // used with --per-client-thread
-#define MAX_THREADS 8
+#define MAX_THREADS 32
 
 typedef struct {
     int listen_sock;
@@ -1302,7 +1302,7 @@ int main(int argc, char *argv[]) {
         argv++;
     }
 
-    assert(nthread > 0 && nthread <= MAX_THREADS);
+    check(nthread > 0 && nthread <= MAX_THREADS, "--threads needs an argument between 1 and %d\n", MAX_THREADS);
 
     // Retrieve cpu set for thread-core pinning
     long core_it = 0;
