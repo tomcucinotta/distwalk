@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <netdb.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -1386,8 +1387,17 @@ int main(int argc, char *argv[]) {
     serverAddr.sin_family = AF_INET;
     /* Set port number, using htons function to use proper byte order */
     serverAddr.sin_port = htons(bind_port);
-    /* Set IP address to localhost */
-    serverAddr.sin_addr.s_addr = inet_addr(bind_name);
+
+    // Resolve hostname
+    cw_log("Resolving %s...\n", bind_name);
+    struct hostent *e = gethostbyname(bind_name);
+    check(e != NULL);
+    cw_log("Host %s resolved to %d bytes: %s\n", bind_name, e->h_length,
+           inet_ntoa(*(struct in_addr *)e->h_addr));
+
+    /* Set IP address */
+    memmove((char *) &serverAddr.sin_addr.s_addr, (char *)e->h_addr, e->h_length);
+
     /* Set all bits of the padding field to 0 */
     memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
 
@@ -1405,7 +1415,7 @@ int main(int argc, char *argv[]) {
         sys_check(bind(thread_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
                         sizeof(serverAddr)));
 
-        cw_log("Node binded to %s:%d\n", bind_name, bind_port);
+        cw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), bind_port);
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
         sys_check(listen(thread_infos[i].listen_sock, 5));
