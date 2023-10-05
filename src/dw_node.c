@@ -463,7 +463,7 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
         cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {m->cmds[cmd_id].u.fwd.fwd_host}),
                ntohs(m->cmds[cmd_id].u.fwd.fwd_port));
         struct sockaddr_in addr;
-        bzero((char *) &addr, sizeof(addr));
+        memset((char *) &addr, '\0', sizeof(addr));
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = m->cmds[cmd_id].u.fwd.fwd_host;
         addr.sin_port = m->cmds[cmd_id].u.fwd.fwd_port;
@@ -736,7 +736,7 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
                 "Moving %lu leftover bytes back to beginning of buf with "
                 "conn_id %d",
                 leftover, conn_id);
-            memmove(conns[conn_id].recv_buf, conns[conn_id].curr_proc_buf, leftover);
+            memmove(conns[conn_id].curr_proc_buf, conns[conn_id].recv_buf, leftover);
             conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf + leftover;
             conns[conn_id].curr_recv_size = BUF_SIZE - leftover;
         }
@@ -1016,7 +1016,7 @@ void* storage_worker(void* args) {
         }
 
         struct itimerspec ts;
-        bzero(&ts,sizeof(ts));
+        memset(&ts, 0, sizeof(ts));
 
         struct timespec ts_template;
         ts_template.tv_sec =  infos->periodic_sync_msec / 1000;

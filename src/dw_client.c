@@ -144,9 +144,9 @@ void hostport_parse_and_config(char* host_str, struct sockaddr_in* addr) {
            inet_ntoa(*(struct in_addr *)e->h_addr));
 
     // Build Internet address
-    bzero((char *) addr, sizeof(struct sockaddr_in));
+    memset((char *) addr, '\0', sizeof(struct sockaddr_in));
     addr->sin_family = AF_INET;
-    bcopy((char *)e->h_addr, (char *) &addr->sin_addr.s_addr, e->h_length);
+    memmove((char *) &addr->sin_addr.s_addr, (char *)e->h_addr, e->h_length);
     addr->sin_port = htons(port);
 
     if (port_str)
@@ -412,9 +412,8 @@ void *thread_receiver(void *data) {
                 }
                 // make sure we reset the send timestamp and elapsed array to
                 // zeros for the next session
-                bzero(&usecs_send[thread_id][0], sizeof(usecs_send[thread_id]));
-                bzero(&usecs_elapsed[thread_id][0],
-                      sizeof(usecs_elapsed[thread_id]));
+                memset(&usecs_send[thread_id][0], 0, sizeof(usecs_send[thread_id]));
+                memset(&usecs_elapsed[thread_id][0], 0, sizeof(usecs_elapsed[thread_id]));
             }
             cw_log("Joining sender thread\n");
             pthread_join(sender[thread_id], NULL);
