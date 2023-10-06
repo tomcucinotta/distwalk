@@ -139,13 +139,13 @@ int pd_parse(pd_spec_t *p, char *s) {
 
 double pd_sample(pd_spec_t *p) {
     double val;
+    double x;
  retry:
     switch (p->prob) {
     case FIXED:
         // no need to check boundaries in this case
         return p->val;
     case UNIF:
-        double x;
         drand48_r(&rnd_buf, &x);
         // no need to check boundaries in this case
         return p->min + (p->max - p->min) * x;
@@ -176,6 +176,8 @@ static char s[64];
 
 // stringify spec into static array and return it
 char *pd_str(pd_spec_t *p) {
+    double scale;
+    int k;
     switch (p->prob) {
     case FIXED:
         sprintf(s, "%g", p->val);
@@ -190,8 +192,8 @@ char *pd_str(pd_spec_t *p) {
         sprintf(s, "norm:%g", p->val);
         break;
     case GAMMA:
-        double scale = p->std * p->std / p->val;
-        int k = lrint(p->val / scale);
+        scale = p->std * p->std / p->val;
+        k = lrint(p->val / scale);
         sprintf(s, "gamma:%g,k=%d,scale=%g", p->val, k, scale);
         break;
     case SFILE:
