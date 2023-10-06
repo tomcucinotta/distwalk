@@ -132,9 +132,10 @@ void hostport_parse_and_config(char* host_str, struct sockaddr_in* addr) {
         port = strtol(port_str, &end_ptr, 10);
         check(!*end_ptr, "Port '%s' is not a numeric value!\n", port_str);
     }
-    cw_log("host_str: %s\n", hostname);
+
     if (strlen(host_str) > 0)
         hostname = host_str;
+    cw_log("host_str: %s\n", hostname);
 
     // Resolve hostname
     cw_log("Resolving %s...\n", hostname);
