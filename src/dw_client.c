@@ -436,12 +436,17 @@ void *thread_receiver(void *data) {
     return 0;
 }
 
-int script_parse(char *fname, int *argc, char **argv, int size) {
+int parse_args(int argc, char *argv[]);
+
+int script_parse(char *fname) {
     FILE *f = fopen(fname, "r");
-    *argc = 0;
     check(f != NULL, "Could not open script file: %s\n", fname);
+    int size = 0;
+    int argc = 0;
+    char **argv = NULL;
+
     while (!feof(f)) {
-        char line[256];
+        static char line[1024];
         char *s = fgets(line, sizeof(line), f);
         if (s == NULL)
             break;
@@ -451,10 +456,18 @@ int script_parse(char *fname, int *argc, char **argv, int size) {
                 // comment, ignore till end of line
                 if (tok[0] == '#')
                     break;
-                check(*argc < size, "Script file too big\n");
-                argv[(*argc)++] = strdup(tok);
+                if (argc == size) {
+                    size += 4;
+                    argv = realloc(argv, sizeof(char*) * size);
+                    check(argv != NULL, "realloc() failed: %s\n", strerror(errno));
+                }
+                argv[argc++] = strdup(tok);
             }
         }
+    }
+    if (argc > 0) {
+        parse_args(argc, argv);
+        free(argv);
     }
     return 0;
 }
@@ -536,10 +549,7 @@ int parse_args(int argc, char *argv[]) {
             exit(EXIT_SUCCESS);
         } else if (strcmp(argv[0], "-s") == 0 || strcmp(argv[0], "--script") == 0) {
             assert(argc >= 2);
-            int script_argc;
-            char **script_argv = malloc(sizeof(char*) * 1024);
-            check(script_parse(argv[1], &script_argc, script_argv, 1024) == 0, "Wrong syntax in script %s\n", argv[1]);
-            parse_args(script_argc, script_argv);
+            check(script_parse(argv[1]) == 0, "Wrong syntax in script %s\n", argv[1]);
             argc--;
             argv++;
         } else if (strcmp(argv[0], "-sv") == 0) {
@@ -659,7 +669,6 @@ int parse_args(int argc, char *argv[]) {
 
                 i++;
             }
-
 
             // TODO: allow n_ack 0 ???
             if (n_ack == 0 || (n_ack > 0 && n_ack > i)) {
