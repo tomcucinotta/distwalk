@@ -436,13 +436,30 @@ void *thread_receiver(void *data) {
     return 0;
 }
 
-int main(int argc, char *argv[]) {
-    check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
+int script_parse(char *fname, int *argc, char **argv, int size) {
+    FILE *f = fopen(fname, "r");
+    *argc = 0;
+    check(f != NULL, "Could not open script file: %s\n", fname);
+    while (!feof(f)) {
+        char line[256];
+        char *s = fgets(line, sizeof(line), f);
+        if (s == NULL)
+            break;
+        char *tok;
+        while ((tok = strsep(&s, " \n")) != NULL) {
+            if (strlen(tok) > 0) {
+                // comment, ignore till end of line
+                if (tok[0] == '#')
+                    break;
+                check(*argc < size, "Script file too big\n");
+                argv[(*argc)++] = strdup(tok);
+            }
+        }
+    }
+    return 0;
+}
 
-    ccmd_init(&ccmd);
-
-    argc--;
-    argv++;
+int parse_args(int argc, char *argv[]) {
     while (argc > 0) {
         //TODO: Remove all weight parameters, as they do not work with the new
         //client interface
@@ -511,11 +528,20 @@ int main(int argc, char *argv[]) {
                 "  -pso|--per-session-output ....... Output response times at "
                 "end of each session (implies some delay between sessions but "
                 "saves memory)\n"
+                "  -s|--script fname ............... Continue reading commands from script file (can be intermixed with regular options)\n"
                 "\n"
                 "  Notes:\n"
                 "    Packet sizes are in bytes and do not consider headers "
                 "added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n");
             exit(EXIT_SUCCESS);
+        } else if (strcmp(argv[0], "-s") == 0 || strcmp(argv[0], "--script") == 0) {
+            assert(argc >= 2);
+            int script_argc;
+            char **script_argv = malloc(sizeof(char*) * 1024);
+            check(script_parse(argv[1], &script_argc, script_argv, 1024) == 0, "Wrong syntax in script %s\n", argv[1]);
+            parse_args(script_argc, script_argv);
+            argc--;
+            argv++;
         } else if (strcmp(argv[0], "-sv") == 0) {
             assert(argc >= 2);
             strncpy(serverhost, argv[1], MAX_HOST_STRING-1);
@@ -717,12 +743,23 @@ int main(int argc, char *argv[]) {
             argc--;
             argv++;
         } else {
-            printf("Unrecognized option: %s\n", argv[0]);
+            printf("Unrecognized option: '%s'\n", argv[0]);
             exit(EXIT_FAILURE);
         }
         argc--;
         argv++;
     }
+    return 0;
+}
+
+int main(int argc, char *argv[]) {
+    check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
+
+    ccmd_init(&ccmd);
+
+    argc--;
+    argv++;
+    check(parse_args(argc, argv) == 0);
 
     if (n_compute + n_store + n_load > 0 && num_pkts <= 0){
         num_pkts = 1;
