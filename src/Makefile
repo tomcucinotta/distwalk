@@ -10,16 +10,18 @@ all: $(PROGRAMS)
 clean:
 	rm -f *.o *~ $(PROGRAMS)
 
-dw_client: ccmd.o dw_client.o distrib.o
-dw_client_debug: ccmd_debug.o dw_client_debug.o distrib_debug.o 
-dw_node: dw_node.o
-dw_node_debug: dw_node_debug.o
+dw_client: ccmd.o dw_client.o distrib.o thread_affinity.o
+dw_client_debug: ccmd_debug.o dw_client_debug.o distrib_debug.o thread_affinity_debug.o
+dw_node: dw_node.o thread_affinity.o
+dw_node_debug: dw_node_debug.o thread_affinity_debug.o
+dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o
+
 test_distrib: test_distrib.o distrib.o
 test_distrib_debug: test_distrib_debug.o distrib_debug.o
 test_ccmd: ccmd.o test_ccmd.o distrib.o
 
 %_tsan: %_tsan.o
-	$(CC) -fsanitize=thread -o $@ $< $(LDLIBS)
+	$(CC) -fsanitize=thread -o $@ $^ $(LDLIBS)
 
 %_debug.o: %.c
 	$(CC) -c $(CFLAGS_DEBUG) $(CPPFLAGS_DEBUG) -o $@ $<
@@ -34,10 +36,11 @@ dep:
 
 ccmd.o: ccmd.h message.h distrib.h cw_debug.h
 distrib.o: distrib.h cw_debug.h
-dw_client.o: cw_debug.h distrib.h message.h timespec.h ccmd.h
-dw_node.o: cw_debug.h message.h timespec.h
-dw_node_epoll_new_squashed.o: cw_debug.h message.h timespec.h
-dw_node_master.o: cw_debug.h message.h timespec.h
-node-fwd.o: message.h timespec.h cw_debug.h
+thread_affinity.o: thread_affinity.h
+dw_client.o: cw_debug.h distrib.h message.h timespec.h ccmd.h thread_affinity.h
+dw_node.o: cw_debug.h message.h timespec.h thread_affinity.h
+dw_node_tsan.o: cw_debug.h message.h timespec.h thread_affinity.h
+thread_affinity_tsan.o: thread_affinity.h
+
 test_ccmd.o: ccmd.h message.h distrib.h
 test_distrib.o: distrib.h

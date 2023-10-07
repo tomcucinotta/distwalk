@@ -23,6 +23,7 @@
 #include "cw_debug.h"
 #include "message.h"
 #include "timespec.h"
+#include "thread_affinity.h"
 
 #define MAX_EVENTS 10
 
@@ -231,46 +232,6 @@ void sigint_cleanup(int _) {
     }
 
     eventfd_write(storage_info.terminationfd, 1);
-}
-
-// Based on taskset human-readable format
-void core_list_parse(char *str, cpu_set_t* mask) {
-    char* tok;
-    int min;
-    int val;
-    int max;
-
-    CPU_ZERO(mask);
-    while ((tok = strsep(&str, ",")) != NULL) {
-        if (sscanf(tok, "%d-%d", &min, &max) == 2) {
-            if (min > max) {
-                int tmp = max;
-
-                max = min;
-                min = tmp;
-            }
-            
-            for (int i=min; i<=max; i++) {
-                CPU_SET(i, mask);
-            }
-        }
-        else if (sscanf(tok, "%d", &val) == 1) {
-            CPU_SET(val, mask);
-        }
-        // else: format error
-    }
-}
-
-int pin_to_core(int core_id) {
-   int ncpu = sysconf(_SC_NPROCESSORS_ONLN);
-   if (core_id < 0 || core_id >= ncpu)
-      return EINVAL;
-
-   cpu_set_t mask;
-   CPU_ZERO(&mask);
-   CPU_SET(core_id, &mask);
-
-   return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &mask);
 }
 
 int conn_alloc(int conn_sock);
@@ -1116,7 +1077,7 @@ void* conn_worker(void* args) {
     thread_info_t *infos = (thread_info_t *)args;
 
     if (thread_affinity) {
-        pin_to_core(infos->core_id);
+        sys_check(aff_pin_to(infos->core_id));
         cw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
     }
 
@@ -1305,26 +1266,22 @@ int main(int argc, char *argv[]) {
     check(nthread > 0 && nthread <= MAX_THREADS, "--threads needs an argument between 1 and %d\n", MAX_THREADS);
 
     // Retrieve cpu set for thread-core pinning
-    long core_it = 0;
+    int core_it = 0;
     long nproc = sysconf(_SC_NPROCESSORS_ONLN);
 
     cw_log("nproc=%ld (system capacity)\n", nproc);
 
     if (thread_affinity) {
         if (thread_affinity_list) {
-            core_list_parse(thread_affinity_list, &mask);
+            aff_list_parse(thread_affinity_list, &mask, nproc);
         }
         else {
             CPU_ZERO(&mask);
             sys_check(sched_getaffinity(0, sizeof(cpu_set_t), &mask));
         }
 
-        // Point BEFORE first pinnable core
-        while (!CPU_ISSET(core_it, &mask)) {
-            core_it++;
-            core_it = core_it % nproc;
-        }
-        core_it--;
+        // Point to first pinnable core
+        core_it = aff_it_init(&mask, nproc);
     }
 
     // Tag all conn_info_t as unused
@@ -1425,12 +1382,9 @@ int main(int argc, char *argv[]) {
 
         // Round-robin thread-core pinning
         if (thread_affinity) {
-            do {
-                core_it++;
-                core_it = core_it % nproc;
-            } while (!CPU_ISSET(core_it, &mask));
-
             thread_infos[i].core_id = core_it;
+
+            aff_it_next(&core_it, &mask, nproc);
         }
 
         thread_infos[i].worker_id = i;
