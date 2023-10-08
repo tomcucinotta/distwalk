@@ -9,7 +9,7 @@ fi
 
 for i in $(seq 1 1 $1)
 do
-        ../src/dw_client -n 10 -l 10 -L 10000 &
+        ../src/dw_client -S 1000 -n 4 &
 done
 
 sleep 2

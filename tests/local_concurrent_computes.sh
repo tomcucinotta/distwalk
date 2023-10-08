@@ -1,15 +1,15 @@
 #!/bin/bash
 
 if [ "$1" = "" ]; then
-    echo "Usage: $0 nclients"
+    echo "Usage: $0 <nclients>"
     exit -1
 fi
 
-../src/dw_node -s ../src/test.data &
+../src/dw_node &
 
 for i in $(seq 1 1 $1)
 do
-        ../src/dw_client -n 2 -s 2 -S 100000 &
+	../src/dw_client -C 1000 -n 10 &
 done
 
 sleep 2
