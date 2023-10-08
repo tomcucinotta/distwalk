@@ -559,7 +559,8 @@ void store(storage_info_t* storage_info, unsigned char* buf, size_t bytes) {
 
     storage_info->storage_offset += bytes;
 
-    fsync(storage_info->storage_fd);
+    if (storage_info->periodic_sync_msec < 0)
+        fsync(storage_info->storage_fd);
 
     if (storage_info->storage_offset > storage_info->storage_eof) {
         storage_info->storage_eof = storage_info->storage_offset;
