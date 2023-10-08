@@ -10,7 +10,7 @@
 
 #define BUF_SIZE (16*1024*1024)
 
-typedef enum { COMPUTE, STORE, LOAD, FORWARD, MULTI_FORWARD, REPLY } command_type_t;
+typedef enum { COMPUTE, STORE, LOAD, PSKIP, FORWARD, MULTI_FORWARD, REPLY } command_type_t;
 
 typedef struct {
   uint32_t pkt_size;    // size of forwarded packet
@@ -56,6 +56,7 @@ static inline const char* get_command_name(command_type_t cmd) {
     case COMPUTE: return "COMPUTE";
     case STORE: return "STORE";
     case LOAD: return "LOAD";
+    case PSKIP: return "SKIP";
     case FORWARD: return "FORWARD";
     case MULTI_FORWARD: return "MULTI_FORWARD";
     case REPLY: return "REPLY";

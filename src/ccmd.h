@@ -17,6 +17,7 @@ typedef struct ccmd_node_t {
     pd_spec_t pd_val;
     fwd_opts_t fwd;
     reply_opts_t resp;
+    int n_skip;
     struct ccmd_node_t* next;
 } ccmd_node_t;
 
@@ -32,7 +33,7 @@ typedef struct ccmd_queue_t {
 } ccmd_t;
 
 void ccmd_init(ccmd_t** q);
-void ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec);
+ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec);
 void ccmd_attach_reply_size(ccmd_t* q, pd_spec_t *p_pd_spec);
 void ccmd_last_reply(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec);
 void ccmd_dump(ccmd_t* q, message_t* m);

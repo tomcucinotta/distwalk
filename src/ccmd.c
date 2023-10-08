@@ -2,6 +2,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <assert.h>
 
 #include "ccmd.h"
 #include "message.h"
@@ -20,7 +21,7 @@ void ccmd_init(ccmd_t** q) {
     (*q)->tail_replies = NULL;
 }
 
-void ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
+ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     if (!q) {
         printf("ccmd_add() error - Initialize queue first\n");
         exit(EXIT_FAILURE);
@@ -54,6 +55,8 @@ void ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     }
 
     q->num++;
+
+    return new_node;
 }
 
 void ccmd_attach_reply_size(ccmd_t* q, pd_spec_t *p_pd_spec) {
@@ -106,11 +109,38 @@ void ccmd_last_reply(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     q->last_reply_called = 1;
 }
 
+extern __thread struct drand48_data rnd_buf;
+
+ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
+    int prev_was_mfwd = 0;
+    while (n-- > 0) {
+        if (curr->cmd == FORWARD || (curr->cmd == MULTI_FORWARD && !prev_was_mfwd)) {
+            int nested_fwd = 0;
+            do {
+                check(curr != NULL);
+                prev_was_mfwd = (curr->cmd == MULTI_FORWARD);
+                curr = curr->next;
+                if (curr->cmd == REPLY) {
+                    if (nested_fwd == 0)
+                        break;
+                    else
+                        nested_fwd--;
+                } else if (curr->cmd == FORWARD || (curr->cmd == MULTI_FORWARD && !prev_was_mfwd))
+                    nested_fwd++;
+            } while (1);
+        }
+        prev_was_mfwd = (curr->cmd == MULTI_FORWARD);
+        curr = curr->next;
+    }
+    return curr;
+}
+
 void ccmd_dump(ccmd_t* q, message_t* m) {
     check(q, "ccmd_dump() error - Initialize queue first");
     check(m, "ccmd_dump() error - NullPointer message_t*");
 
     ccmd_node_t* curr = q->head_actions;
+    int num = q->num;
 
     int i = 0;
     while (curr) {
@@ -123,6 +153,16 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
             case REPLY: 
                 m->cmds[i].u.resp = curr->resp;
                 m->cmds[i++].u.resp.resp_size = pd_sample(&curr->pd_val);
+                break;
+            case PSKIP:
+                double x;
+                drand48_r(&rnd_buf, &x);
+                cw_log("skip: x=%g, prob=%g\n", x, curr->pd_val.val);
+                if (x <= curr->pd_val.val) {
+                    num -= curr->n_skip;
+                    curr = ccmd_skip(curr, curr->n_skip);
+                }
+                num--;
                 break;
             case MULTI_FORWARD:
             case FORWARD:
@@ -137,7 +177,7 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
         curr = curr->next;
     }
 
-    m->num = q->num;
+    m->num = num;
 }
 
 void ccmd_destroy(ccmd_t* q) {
@@ -171,6 +211,12 @@ void ccmd_log(ccmd_t* q) {
                 break;
             case LOAD:
                 sprintf(opts, "%sb", pd_str(&curr->pd_val));
+                break;
+            case PSKIP:
+                if (curr->pd_val.val < 1.0)
+                    sprintf(opts, "%d,prob=%s", curr->n_skip, pd_str(&curr->pd_val));
+                else
+                    sprintf(opts, "%d", curr->n_skip);
                 break;
             case MULTI_FORWARD:
             case FORWARD:

@@ -518,6 +518,7 @@ int parse_args(int argc, char *argv[]) {
                 "distributed per-request processing times\n"
                 "  -S|--store-data bytes ........... Set per-store data size\n"
                 "  -L|--load-data bytes ............ Set per-load data size\n"
+                "  -s|--skip n[,prob=val] .......... Skip (with given probability) the next n commands\n"
                 "  -F|--forward ip:port[,ip:port,...][,nack=N] ... Send a number of FORWARD message to the ip:port list, wait for N replies\n"
                 "  -Cw|--comp-weight w ............. Set weight of COMPUTE in "
                 "weighted random choice of operation\n"
@@ -636,6 +637,30 @@ int parse_args(int argc, char *argv[]) {
             pd_spec_t val;
             assert(pd_parse(&val, argv[1]));
             ccmd_add(ccmd, LOAD, &val);
+
+            n_load++;
+            argc--;
+            argv++;
+        } else if (strcmp(argv[0], "-s") == 0 ||
+                   strcmp(argv[0], "--skip") == 0) {
+            assert(argc >= 2);
+
+            pd_spec_t val = pd_build_fixed(1.0);
+            int n_skip = -1;
+            char *tok;
+            while ((tok = strsep(&argv[1], ",")) != NULL) {
+                if (sscanf(tok, "%d", &n_skip) == 1)
+                    check(n_skip >=1, "arg to --skip must be a positive integer");
+                else if (sscanf(tok, "prob=%lf", &val.val) == 1)
+                    check(val.val > 0.0 && val.val <= 1.0, "prob= in --skip needs a value > 0 and <= 1.0\n");
+                else {
+                    fprintf(stderr, "Wrong syntax for --skip args\n");
+                    exit(EXIT_FAILURE);
+                }
+            }
+            check(n_skip != -1, "--skip needs a positive integer as arg\n");
+            ccmd_node_t *p = ccmd_add(ccmd, PSKIP, &val);
+            p->n_skip = n_skip;
 
             n_load++;
             argc--;
