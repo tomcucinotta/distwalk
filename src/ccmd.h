@@ -34,12 +34,12 @@ typedef struct ccmd_queue_t {
 
 void ccmd_init(ccmd_t** q);
 ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec);
-void ccmd_attach_reply_size(ccmd_t* q, pd_spec_t *p_pd_spec);
-void ccmd_last_reply(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec);
+void ccmd_match_rs(ccmd_t* q, pd_spec_t *p_pd_spec);
+void ccmd_attach_last_reply(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec);
 void ccmd_dump(ccmd_t* q, message_t* m);
 void ccmd_destroy(ccmd_t* q);
 void ccmd_log(ccmd_t* q);
 
 static inline ccmd_node_t *ccmd_last_action(ccmd_t *q) { return q->tail_actions; }
-static inline ccmd_node_t *ccmd_last(ccmd_t *q) { return q->tail_replies; }
+static inline ccmd_node_t *ccmd_last_reply(ccmd_t *q) { return q->tail_replies; }
 #endif /* __CMD_H__ */

@@ -59,33 +59,33 @@ ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     return new_node;
 }
 
-void ccmd_attach_reply_size(ccmd_t* q, pd_spec_t *p_pd_spec) {
+void ccmd_match_rs(ccmd_t* q, pd_spec_t *p_pd_spec) {
     if (!q) {
-        printf("ccmd_attach_reply_size() error - Initialize queue first\n");
+        printf("ccmd_match_rs() error - Initialize queue first\n");
         exit(EXIT_FAILURE);
     }
 
     if (!q->head_replies) {
-        ccmd_last_reply(q, REPLY, p_pd_spec);
+        ccmd_attach_last_reply(q, REPLY, p_pd_spec);
     } else {
         q->head_replies->pd_val = *p_pd_spec;
     }
 }
 
 // No LIFO for last reply of the command chain
-void ccmd_last_reply(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
+void ccmd_attach_last_reply(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     if (!q) {
-        printf("ccmd_last_reply() error - Initialize queue first\n");
+        printf("ccmd_attach_last_reply() error - Initialize queue first\n");
         exit(EXIT_FAILURE);
     }
 
     if (cmd != REPLY) {
-        printf("ccmd_last_reply() error - Wrong command type\n");
+        printf("ccmd_attach_last_reply() error - Wrong command type\n");
         exit(EXIT_FAILURE);
     }
 
     if (q->last_reply_called) {
-        printf("ccmd_last_reply() warning - you already called it, skipping...\n");
+        printf("ccmd_attach_last_reply() warning - you already called it, skipping...\n");
         return;
     }
 

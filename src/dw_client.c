@@ -702,7 +702,7 @@ int parse_args(int argc, char *argv[]) {
 
             // TODO: customize forward-reply pkt size
             ccmd_add(ccmd, REPLY, &val);
-            ccmd_last(ccmd)->resp.n_ack = n_ack;
+            ccmd_last_reply(ccmd)->resp.n_ack = n_ack;
 
             argc--;
             argv++;
@@ -749,8 +749,8 @@ int parse_args(int argc, char *argv[]) {
             val.min = MIN_REPLY_SIZE;
             val.max = BUF_SIZE;
             check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max));
-            ccmd_attach_reply_size(ccmd, &val);
-            ccmd_last(ccmd)->resp.n_ack = 1;
+            ccmd_match_rs(ccmd, &val);
+            ccmd_last_reply(ccmd)->resp.n_ack = 1;
 
             argc--;
             argv++;
@@ -814,8 +814,8 @@ int main(int argc, char *argv[]) {
     // TODO: should be optional
     if (!ccmd->last_reply_called) {
         pd_spec_t val = pd_build_fixed(default_resp_size);
-        ccmd_last_reply(ccmd, REPLY, &val);
-        ccmd_last(ccmd)->resp.n_ack = 1;
+        ccmd_attach_last_reply(ccmd, REPLY, &val);
+        ccmd_last_reply(ccmd)->resp.n_ack = 1;
     }
 
     for (int i = 0; i < 3; i++) {
