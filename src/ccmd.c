@@ -143,6 +143,7 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
     int num = q->num;
 
     int i = 0;
+    double x = 0;
     while (curr) {
         m->cmds[i].cmd = curr->cmd;
 
@@ -155,7 +156,6 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
                 m->cmds[i++].u.resp.resp_size = pd_sample(&curr->pd_val);
                 break;
             case PSKIP:
-                double x;
                 drand48_r(&rnd_buf, &x);
                 cw_log("skip: x=%g, prob=%g\n", x, curr->pd_val.val);
                 if (x <= curr->pd_val.val) {
