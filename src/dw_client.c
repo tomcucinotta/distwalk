@@ -541,13 +541,13 @@ int parse_args(int argc, char *argv[]) {
                 "  -pso|--per-session-output ....... Output response times at "
                 "end of each session (implies some delay between sessions but "
                 "saves memory)\n"
-                "  -s|--script fname ............... Continue reading commands from script file (can be intermixed with regular options)\n"
+                "  -f|--file fname ................. Continue reading commands from script file (can be intermixed with regular options)\n"
                 "\n"
                 "  Notes:\n"
                 "    Packet sizes are in bytes and do not consider headers "
                 "added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n");
             exit(EXIT_SUCCESS);
-        } else if (strcmp(argv[0], "-s") == 0 || strcmp(argv[0], "--script") == 0) {
+        } else if (strcmp(argv[0], "-f") == 0 || strcmp(argv[0], "--file") == 0) {
             assert(argc >= 2);
             check(script_parse(argv[1]) == 0, "Wrong syntax in script %s\n", argv[1]);
             argc--;
