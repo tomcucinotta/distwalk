@@ -7,7 +7,7 @@ metadata:
 spec:
   containers:
   - name: dw-client
-    image: remoandreoli/dw:latest
+    image: remoandreoli/distwalk:latest
     imagePullPolicy: Always
     command: ["/bin/sh", "-c"]
     args: ['./src/dw_client_debug -sv dw-node -C 1000']
