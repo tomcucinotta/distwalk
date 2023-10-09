@@ -135,6 +135,8 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
             case STORE:
             case COMPUTE:
             case LOAD:
+                m->cmds[i++].u.comp_time_us = pd_sample(&curr->pd_val);
+                break;
             case REPLY: 
                 m->cmds[i].u.resp = curr->resp;
                 m->cmds[i++].u.resp.resp_size = pd_sample(&curr->pd_val);
@@ -157,7 +159,7 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
                 fprintf(stderr, "ccmd_dump() - Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
-        //printf("%s\n", get_command_name(curr->cmd->cmd));
+        //printf("%s\n", get_command_name(curr->cmd));
         curr = curr->next;
     }
 
