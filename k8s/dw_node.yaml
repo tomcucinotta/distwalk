@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dw-node
+  labels:
+    app: dw-node
+spec:
+  containers:
+  - name: dw-node
+    image: remoandreoli/dw:latest
+    imagePullPolicy: Always
+    command: ["/bin/sh", "-c"]
+    args: ['./src/dw_node_debug -b dw-node']
+    ports:
+    - containerPort: 7891
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dw-node
+spec:
+  #clusterIP: None
+  selector:
+    app: dw-node
+  ports:
+  - protocol: TCP
+    port:  7891
+    targetPort: 7891
