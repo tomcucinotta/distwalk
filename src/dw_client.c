@@ -473,6 +473,8 @@ int script_parse(char *fname) {
 }
 
 int parse_args(int argc, char *argv[]) {
+    pd_spec_t resp_size_buf = pd_build_fixed(default_resp_size);;
+
     while (argc > 0) {
         //TODO: Remove all weight parameters, as they do not work with the new
         //client interface
@@ -749,8 +751,13 @@ int parse_args(int argc, char *argv[]) {
             val.min = MIN_REPLY_SIZE;
             val.max = BUF_SIZE;
             check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max));
-            ccmd_match_rs(ccmd, &val);
-            ccmd_last_reply(ccmd)->resp.n_ack = 1;
+            
+            if (ccmd_last_reply(ccmd)) {
+                ccmd_last_reply(ccmd)->pd_val = val;
+            }
+            else {
+                resp_size_buf = val;
+            }
 
             argc--;
             argv++;
@@ -783,6 +790,12 @@ int parse_args(int argc, char *argv[]) {
         argc--;
         argv++;
     }
+
+    // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
+    // TODO: should be optional
+    ccmd_attach_last_reply(ccmd, &resp_size_buf);
+    ccmd_last_reply(ccmd)->resp.n_ack = 1;
+
     return 0;
 }
 
@@ -808,14 +821,6 @@ int main(int argc, char *argv[]) {
         ccmd_add(ccmd, COMPUTE, &val);
 
         n_compute++;
-    }
-
-    // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
-    // TODO: should be optional
-    if (!ccmd->last_reply_called) {
-        pd_spec_t val = pd_build_fixed(default_resp_size);
-        ccmd_attach_last_reply(ccmd, REPLY, &val);
-        ccmd_last_reply(ccmd)->resp.n_ack = 1;
     }
 
     for (int i = 0; i < 3; i++) {
