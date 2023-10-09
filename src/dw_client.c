@@ -32,7 +32,7 @@ unsigned int n_compute = 0;  // Number of COMPUTE requests
 
 unsigned int default_compute_us = 1000;
 
-pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 128, .std = NAN, .min = NAN, .max = NAN };
+pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 1024, .std = NAN, .min = NAN, .max = NAN };
 pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 10000, .std = NAN, .min = NAN, .max = NAN };
 
 unsigned long default_resp_size = 128;
@@ -252,7 +252,8 @@ void *thread_sender(void *data) {
 
         cw_log("sending %u bytes (will expect %u bytes in response)...\n",
                m->req_size, m->cmds[m->num-1].u.resp.resp_size);
-        assert(m->req_size <= BUF_SIZE);
+        assert(m->req_size <= BUF_SIZE && m->req_size >= m->num * sizeof(command_t));
+
 #ifdef CW_DEBUG
         msg_log(m, "Sending msg: ");
 #endif
@@ -751,7 +752,7 @@ int parse_args(int argc, char *argv[]) {
             val.min = MIN_REPLY_SIZE;
             val.max = BUF_SIZE;
             check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max));
-            
+
             if (ccmd_last_reply(ccmd)) {
                 ccmd_last_reply(ccmd)->pd_val = val;
             }
