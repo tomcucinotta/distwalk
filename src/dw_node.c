@@ -468,7 +468,7 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
     if (cmd_id == 0 || m->cmds[cmd_id-1].cmd != MULTI_FORWARD) {
         reqs[m->req_id % MAX_REQS].req_id = m->req_id;
         reqs[m->req_id % MAX_REQS].conn_id = conn_id;
-        reqs[m->req_id % MAX_REQS].fwd_replies_left = m->cmds[cmd_id + 1 + forwarded].u.resp.n_ack;
+        reqs[m->req_id % MAX_REQS].fwd_replies_left = m->cmds[j + forwarded - 1].u.resp.n_ack;
     }
 
     if (j == cmd_id + 1) {
