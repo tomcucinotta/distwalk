@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dw-client
+  labels:
+    app: dw-client
+spec:
+  containers:
+  - name: dw-client
+    image: remoandreoli/distwalk:latest
+    imagePullPolicy: Always
+    command: ["/bin/sh", "-c"]
+    args: ['./dw_client_debug -sv dw-node-0 -C 1000 -F dw-node-1,dw-node-2,dw-node-3,nack=3 -C 1000 -S 10000 -C 100 -n 1']
+    ports:
+    - containerPort: 7891
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dw-client
+spec:
+  selector:
+    app: dw-client
+  ports:
+  - protocol: TCP
+    port:  7891
+    targetPort: 7891

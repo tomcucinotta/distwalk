@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dw-node-3
+  labels:
+    app: dw-node-3
+spec:
+  containers:
+    - name: dw-node-3
+      image: remoandreoli/distwalk:latest
+      imagePullPolicy: Always
+      command: ["/bin/sh", "-c"]
+      args: ['./dw_node_debug -s ./data/data.data']
+      volumeMounts:
+        - name: storage
+          mountPath: /distwalk/data
+      ports:
+        - containerPort: 7891
+  volumes:
+    - name: storage
+      emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dw-node-3
+  labels:
+    app: dw-node-3
+spec:
+  #clusterIP: None
+  selector:
+    app: dw-node-3
+  ports:
+    - protocol: TCP
+      port: 7891
+      targetPort: 7891
