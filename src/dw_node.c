@@ -52,11 +52,13 @@ typedef enum {
     LISTEN,
     TERMINATION,
     STORAGE,
+    TIMER,
     SOCKET,   
 } event_type;
 
 typedef struct {
     int sock;                     // -1 for unused conn_info_t
+    int timer;                    // timer file descriptor to handle timeout
     req_status status;
 
     in_addr_t inaddr;             // target IP
@@ -469,6 +471,19 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
     cw_log("  f: cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
 
+    if (m->cmds[cmd_id].u.fwd.timeout) {
+        struct itimerspec timerspec = {0};
+        timerspec.it_value.tv_sec = (m->cmds[cmd_id].u.fwd.timeout / 1000000);
+        timerspec.it_value.tv_nsec = (m->cmds[cmd_id].u.fwd.timeout % 1000000) * 1000;
+        sys_check(timerfd_settime(conns[conn_id].timer, 0, &timerspec, NULL));
+
+        struct epoll_event ev;
+        ev.events = EPOLLIN | EPOLLONESHOT;
+        ev.data.u64 = i2l(TIMER, conn_id);
+        cw_log("Adding timer(%d usecs) fd %d to epollfd %d\n", m->cmds[cmd_id].u.fwd.timeout, conns[conn_id].timer, epollfd);
+        sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, conns[conn_id].timer, &ev));
+    }
+
     if (!start_send(fwd_conn_id, m_dst->req_size))
         return 0;
         
@@ -497,6 +512,11 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
         if (--reqs[req_id % MAX_REQS].fwd_replies_left == 0) {
             reqs[req_id % MAX_REQS].req_id = -1;
             conns[conn_id].status &= ~FORWARDING;
+            int rv = epoll_ctl(epollfd, EPOLL_CTL_DEL, conns[conn_id].timer, NULL);
+            if (rv < 0 && errno != ENOENT) {
+                perror("Error while deregistry timer");
+                exit(EXIT_FAILURE);
+            }
 
             return process_messages(conn_id, epollfd, infos);
         }
@@ -726,6 +746,7 @@ void conn_free(int conn_id) {
     free(conns[conn_id].send_buf);   conns[conn_id].send_buf = NULL;
     free(conns[conn_id].store_buf);  conns[conn_id].store_buf = NULL;
     conns[conn_id].sock = -1;
+    sys_check(close(conns[conn_id].timer));
 
     if (nthread > 1)
         sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
@@ -763,6 +784,7 @@ int conn_alloc(int conn_sock) {
         goto continue_free;
 
     conns[conn_id].sock = conn_sock;
+    conns[conn_id].timer = timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
     conns[conn_id].status = 0;
     conns[conn_id].recv_buf = new_recv_buf;
     conns[conn_id].send_buf = new_send_buf;
@@ -892,12 +914,25 @@ void setnonblocking(int fd) {
     assert(fcntl(fd, F_SETFL, flags) == 0);
 }
 
+void handle_timeout(int conn_id, thread_info_t *info) {
+    message_t *m = (message_t *)conns[conn_id].curr_proc_buf;
+    if(reqs[m->req_id % MAX_REQS].req_id == m->req_id){
+        reqs[m->req_id % MAX_REQS].req_id = -1;
+    }
+}
+
 void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* infos) {
     int id;
     event_type type;
     l2i(p_ev->data.u64, (uint32_t*)&type, (uint32_t*) &id);
     
     cw_log("event_type=%d, id=%d\n", type, id);
+
+    if (type == TIMER) {
+        cw_log("conn: %d timer expired\n", id);
+        handle_timeout(id, infos);
+        return;
+    }
 
     if (type == SOCKET && (conns[id].sock == -1 || conns[id].recv_buf == NULL))
             return;

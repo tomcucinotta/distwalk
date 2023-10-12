@@ -694,6 +694,10 @@ int parse_args(int argc, char *argv[]) {
                 ccmd_add(ccmd, fwd_type, &val);
                 ccmd_last_action(ccmd)->fwd.fwd_port = addr.sin_port;
                 ccmd_last_action(ccmd)->fwd.fwd_host = addr.sin_addr.s_addr;
+                // TODO: customize forward timeout and opts
+                ccmd_last_action(ccmd)->fwd.timeout = 0;
+                ccmd_last_action(ccmd)->fwd.retries = 0;
+                ccmd_last_action(ccmd)->fwd.on_fail_skip = 0;
 
                 i++;
             }
