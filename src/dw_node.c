@@ -23,7 +23,6 @@
 #include "cw_debug.h"
 #include "message.h"
 #include "timespec.h"
-#include "thread_affinity.h"
 
 #define MAX_EVENTS 10
 
@@ -82,7 +81,7 @@ typedef struct {
 
 #define MAX_CONNS 16
 // used with --per-client-thread
-#define MAX_THREADS 32
+#define MAX_THREADS 8
 
 typedef struct {
     int listen_sock;
@@ -153,6 +152,7 @@ typedef struct {
 } req_info_t;
 
 req_info_t reqs[MAX_REQS];
+int last_reqs = 0;
 
 char *bind_name = "0.0.0.0";
 int bind_port = 7891;
@@ -161,7 +161,7 @@ int no_delay = 1;
 
 int use_odirect = 0;
 int nthread = 1;
-_Atomic volatile int running = 1;
+volatile int running = 1;
 
 int thread_affinity = 0;
 char* thread_affinity_list;
@@ -223,6 +223,19 @@ int conn_find_sock(int sock) {
     return rv;
 }
 
+message_t* req_get_message(int req_id){
+    assert(reqs[req_id % MAX_REQS].req_id == req_id);
+
+    int conn_id = reqs[req_id % MAX_REQS].conn_id;
+    message_t *m = (message_t *)conns[conn_id].curr_proc_buf;
+    unsigned long msg_size = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
+    
+    assert(msg_size >= m->req_size);
+    assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
+    
+    return m;
+}
+
 #define MAX_STORAGE_SIZE 1000000
 char *storage_path = NULL;
 
@@ -241,6 +254,46 @@ void sigint_cleanup(int _) {
     }
 
     eventfd_write(storage_info.terminationfd, 1);
+}
+
+// Based on taskset human-readable format
+void core_list_parse(char *str, cpu_set_t* mask) {
+    char* tok;
+    int min;
+    int val;
+    int max;
+
+    CPU_ZERO(mask);
+    while ((tok = strsep(&str, ",")) != NULL) {
+        if (sscanf(tok, "%d-%d", &min, &max) == 2) {
+            if (min > max) {
+                int tmp = max;
+
+                max = min;
+                min = tmp;
+            }
+            
+            for (int i=min; i<=max; i++) {
+                CPU_SET(i, mask);
+            }
+        }
+        else if (sscanf(tok, "%d", &val) == 1) {
+            CPU_SET(val, mask);
+        }
+        // else: format error
+    }
+}
+
+int pin_to_core(int core_id) {
+   int ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+   if (core_id < 0 || core_id >= ncpu)
+      return EINVAL;
+
+   cpu_set_t mask;
+   CPU_ZERO(&mask);
+   CPU_SET(core_id, &mask);
+
+   return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &mask);
 }
 
 int conn_alloc(int conn_sock);
@@ -396,6 +449,26 @@ int copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
     return m_dst->num;
 }
 
+int skip_cmds(message_t* m, int cmd_id, int to_skip) {
+    int i = cmd_id, skipped = to_skip;
+
+    while (i < m->num && skipped > 0) {
+        int nested_fwd = 0;
+
+        do {
+            if (m->cmds[i].cmd == FORWARD)
+                nested_fwd++;
+            if (m->cmds[i].cmd == REPLY)
+                nested_fwd--;
+            i++;
+        } while (i < m->num && nested_fwd > 0);
+
+        skipped--;
+    }
+
+    return i;
+}
+
 void setnonblocking(int fd);
 
 unsigned char *get_send_buf(int conn_id, size_t size);
@@ -460,9 +533,10 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
     }
 
     int forwarded = copy_tail(m, m_dst, j);
+    m_dst->req_id = __atomic_fetch_add(&last_reqs, 1, __ATOMIC_SEQ_CST);
     m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
 
-    cw_log("Forwarding req %u to %s:%d\n", m->req_id,
+    cw_log("Forwarding req %u to %s:%d\n", m_dst->req_id,
            inet_ntoa((struct in_addr){m->cmds[cmd_id].u.fwd.fwd_host}),
            ntohs(m->cmds[cmd_id].u.fwd.fwd_port));
 #ifdef CW_DEBUG
@@ -483,17 +557,17 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
 
         struct epoll_event ev;
         ev.events = EPOLLIN | EPOLLONESHOT;
-        ev.data.u64 = i2l(TIMER, m->req_id % MAX_REQS);
+        ev.data.u64 = i2l(TIMER, m_dst->req_id);
         cw_log("Adding timer(%d usecs) fd %d to epollfd %d\n", m->cmds[cmd_id].u.fwd.timeout, timerfd, epollfd);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, timerfd, &ev));
 
-        reqs[m->req_id % MAX_REQS].timer = timerfd;
+        reqs[m_dst->req_id % MAX_REQS].timer = timerfd;
     }
 
-    if (cmd_id == 0 || m->cmds[cmd_id-1].cmd != MULTI_FORWARD) {
-        reqs[m->req_id % MAX_REQS].req_id = m->req_id;
-        reqs[m->req_id % MAX_REQS].conn_id = conn_id;
-        reqs[m->req_id % MAX_REQS].fwd_replies_left = m->cmds[j + forwarded - 1].u.resp.n_ack;
+    if (cmd_id == 0 || m->cmds[cmd_id - 1].cmd != MULTI_FORWARD) {
+        reqs[m_dst->req_id % MAX_REQS].req_id = m_dst->req_id;
+        reqs[m_dst->req_id % MAX_REQS].conn_id = conn_id;
+        reqs[m_dst->req_id % MAX_REQS].fwd_replies_left = m->cmds[cmd_id + 1 + forwarded].u.resp.n_ack;
     }
 
     if (j == cmd_id + 1) {
@@ -508,23 +582,27 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos);
 
 // Call this once we received a REPLY from a socket matching a req_id we forwarded
 int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
-    if (reqs[req_id % MAX_REQS].req_id == req_id) {
-        cw_log("Found match with conn_id %d\n", reqs[req_id % MAX_REQS].conn_id);
-        int conn_id = reqs[req_id % MAX_REQS].conn_id;
-        
-        if (--reqs[req_id % MAX_REQS].fwd_replies_left == 0) {
-            reqs[req_id % MAX_REQS].req_id = -1;
-            conns[conn_id].status &= ~FORWARDING;
-            int rv = epoll_ctl(epollfd, EPOLL_CTL_DEL, reqs[req_id % MAX_REQS].timer, NULL);
-            if (rv < 0 && errno != ENOENT) {
-                perror("Error while deregistry timer");
-                exit(EXIT_FAILURE);
-            }
-
-            return process_messages(conn_id, epollfd, infos);
-        }
-    } else {
+    if (reqs[req_id % MAX_REQS].req_id != req_id) {
         cw_log("Could not match a response to FORWARD, req_id=%d - Dropped\n", req_id);
+        return 1;
+    }
+
+    cw_log("Found match with conn_id %d\n", reqs[req_id % MAX_REQS].conn_id);
+    int conn_id = reqs[req_id % MAX_REQS].conn_id;
+        
+    if (--reqs[req_id % MAX_REQS].fwd_replies_left == 0) {
+        message_t *m = req_get_message(req_id);
+
+        reqs[req_id % MAX_REQS].req_id = -1;
+        conns[conn_id].status &= ~FORWARDING;
+        conns[conn_id].curr_cmd_id = skip_cmds(m, conns[conn_id].curr_cmd_id, 1);
+        int rv = epoll_ctl(epollfd, EPOLL_CTL_DEL, reqs[req_id % MAX_REQS].timer, NULL);
+        if (rv < 0 && errno != ENOENT) {
+            perror("Error while deregistry timer");
+            exit(EXIT_FAILURE);
+        }
+
+        return process_messages(conn_id, epollfd, infos);
     }
     
     return 1;
@@ -589,8 +667,7 @@ void store(storage_info_t* storage_info, unsigned char* buf, size_t bytes) {
 
     storage_info->storage_offset += bytes;
 
-    if (storage_info->periodic_sync_msec < 0)
-        fsync(storage_info->storage_fd);
+    fsync(storage_info->storage_fd);
 
     if (storage_info->storage_offset > storage_info->storage_eof) {
         storage_info->storage_eof = storage_info->storage_offset;
@@ -672,7 +749,8 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
                 }
       
                 if (conns[conn_id].status & FORWARDING) {
-                    conns[conn_id].curr_cmd_id = i + to_skip + 1;
+                    conns[conn_id].curr_cmd_id = i;
+                    //conns[conn_id].curr_cmd_id = i + to_skip + 1;
                     return 1;
                 }
             } else if (m->cmds[i].cmd == REPLY) {
@@ -915,11 +993,27 @@ void setnonblocking(int fd) {
     assert(fcntl(fd, F_SETFL, flags) == 0);
 }
 
-void handle_timeout(int req_id, thread_info_t *info) {
-    if(reqs[req_id].req_id == req_id){
-        reqs[req_id].req_id = -1;
-        close(reqs[req_id].timer);
+void handle_timeout(int req_id, int epollfd, thread_info_t *info) {
+    if (reqs[req_id % MAX_REQS].req_id != req_id)
+        return;
+    int conn_id = reqs[req_id % MAX_REQS].conn_id;
+    message_t *m = req_get_message(req_id);
+
+    close(reqs[req_id % MAX_REQS].timer);
+    if (m->cmds[conns[conn_id].curr_cmd_id].u.fwd.retries > 0) {
+        cw_log("timer expired, retry: %d\n", m->cmds[conns[conn_id].curr_cmd_id].u.fwd.retries);
+        
+        m->cmds[conns[conn_id].curr_cmd_id].u.fwd.retries--;
+        process_messages(conn_id, epollfd, info);
+    } else if (m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip > 0) {
+        cw_log("timer expired, failed, skipping: %d\n", m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip);
+        
+        conns[conn_id].curr_cmd_id = skip_cmds(m, conns[conn_id].curr_cmd_id, m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip);
+        process_messages(conn_id, epollfd, info);
+    } else {
+        cw_log("timer expired, failed\n");
     }
+    reqs[req_id % MAX_REQS].req_id = -1;
 }
 
 void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* infos) {
@@ -930,8 +1024,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     cw_log("event_type=%d, id=%d\n", type, id);
 
     if (type == TIMER) {
-        cw_log("conn: %d timer expired\n", id);
-        handle_timeout(id, infos);
+        handle_timeout(id, epollfd, infos);
         return;
     }
 
@@ -1122,7 +1215,7 @@ void* conn_worker(void* args) {
     thread_info_t *infos = (thread_info_t *)args;
 
     if (thread_affinity) {
-        sys_check(aff_pin_to(infos->core_id));
+        pin_to_core(infos->core_id);
         cw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
     }
 
@@ -1248,7 +1341,7 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
             printf(
                 "Usage: dw_node [-h|--help] [-b bindname] [-bp bindport] "
-                "[-s|--storage path/to/storage/file] [--nt|--num-threads n] [--thread-affinity] "
+                "[-s|--storage path/to/storage/file] [--threads n] [--thread-affinity] "
                 "[-m|--max-storage-size bytes] "
                 "[--sync msec ]"
                 "[--odirect]\n");
@@ -1286,8 +1379,7 @@ int main(int argc, char *argv[]) {
             storage_info.max_storage_size = atoi(argv[1]);
             argc--;
             argv++;
-        } else if (strcmp(argv[0], "-nt") == 0 || 
-                   strcmp(argv[0], "--num-threads") == 0) {
+        } else if (strcmp(argv[0], "--threads") == 0) {
             assert(argc >= 2);
             nthread = atoi(argv[1]);
             argc--;
@@ -1297,7 +1389,7 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[0], "--thread-affinity") == 0) {
             thread_affinity = 1;
 
-            if (argc >= 2 && argv[1][0] != '-') {
+            if (argc >= 2) {
                 thread_affinity_list = argv[1];
                 argc--;
                 argv++;
@@ -1310,25 +1402,29 @@ int main(int argc, char *argv[]) {
         argv++;
     }
 
-    check(nthread > 0 && nthread <= MAX_THREADS, "--threads needs an argument between 1 and %d\n", MAX_THREADS);
+    assert(nthread > 0 && nthread <= MAX_THREADS);
 
     // Retrieve cpu set for thread-core pinning
-    int core_it = 0;
+    long core_it = 0;
     long nproc = sysconf(_SC_NPROCESSORS_ONLN);
 
     cw_log("nproc=%ld (system capacity)\n", nproc);
 
     if (thread_affinity) {
         if (thread_affinity_list) {
-            aff_list_parse(thread_affinity_list, &mask, nproc);
+            core_list_parse(thread_affinity_list, &mask);
         }
         else {
             CPU_ZERO(&mask);
             sys_check(sched_getaffinity(0, sizeof(cpu_set_t), &mask));
         }
 
-        // Point to first pinnable core
-        core_it = aff_it_init(&mask, nproc);
+        // Point BEFORE first pinnable core
+        while (!CPU_ISSET(core_it, &mask)) {
+            core_it++;
+            core_it = core_it % nproc;
+        }
+        core_it--;
     }
 
     // Tag all conn_info_t as unused
@@ -1400,7 +1496,7 @@ int main(int argc, char *argv[]) {
            inet_ntoa(*(struct in_addr *)e->h_addr));
 
     /* Set IP address */
-    memmove((char *) &serverAddr.sin_addr.s_addr, (char *)e->h_addr, e->h_length);
+    memmove((char *)e->h_addr, (char *) &serverAddr.sin_addr.s_addr, e->h_length);
 
     /* Set all bits of the padding field to 0 */
     memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
@@ -1419,7 +1515,7 @@ int main(int argc, char *argv[]) {
         sys_check(bind(thread_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
                         sizeof(serverAddr)));
 
-        cw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), bind_port);
+        cw_log("Node binded to %s:%d\n", inet_ntoa(serverAddr.sin_addr), bind_port);
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
         sys_check(listen(thread_infos[i].listen_sock, 5));
@@ -1429,9 +1525,12 @@ int main(int argc, char *argv[]) {
 
         // Round-robin thread-core pinning
         if (thread_affinity) {
-            thread_infos[i].core_id = core_it;
+            do {
+                core_it++;
+                core_it = core_it % nproc;
+            } while (!CPU_ISSET(core_it, &mask));
 
-            aff_it_next(&core_it, &mask, nproc);
+            thread_infos[i].core_id = core_it;
         }
 
         thread_infos[i].worker_id = i;
