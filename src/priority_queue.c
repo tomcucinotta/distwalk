@@ -13,15 +13,6 @@ struct pqueue_t{
 	int size, container_size;
 };
 
-void pqueue_print(pqueue_t *queue) {
-	printf("[");
-	for(int i = 0; i < queue->size; i++){
-		printf("%d, ", queue->nodes[queue->heap[i]].key);
-	}
-	printf("]\n");
-	fflush(stdout);
-}
-
 pqueue_t* pqueue_alloc(uint32_t container_size){
 	pqueue_t *res = (pqueue_t*) malloc(sizeof(pqueue_t));
 	res->nodes = (pqueue_node_t*) malloc(container_size * sizeof(pqueue_node_t));
@@ -43,7 +34,7 @@ void pqueue_free(pqueue_t *queue){
 	free(queue->stack);
 }
 
-void swap_node(pqueue_t *queue, pqueue_node_t *node0, pqueue_node_t *node1){
+static void swap_node(pqueue_t *queue, pqueue_node_t *node0, pqueue_node_t *node1){
 	uint32_t i0 = node0->heap_id, i1 = node1->heap_id;
 
 	uint32_t temp = queue->heap[i0];
@@ -54,14 +45,14 @@ void swap_node(pqueue_t *queue, pqueue_node_t *node0, pqueue_node_t *node1){
 	node1->heap_id = i0;
 }
 
-pqueue_node_t* get_parent_node(pqueue_t *queue, pqueue_node_t* node){
+static pqueue_node_t* get_parent_node(pqueue_t *queue, pqueue_node_t* node){
 	if(node->heap_id == 0)
 		return NULL;
 	uint32_t parent_idx = (node->heap_id - 1) / 2;
 	return &queue->nodes[queue->heap[parent_idx]];
 }
 
-pqueue_node_t* get_child_node(pqueue_t *queue, pqueue_node_t* node){
+static pqueue_node_t* get_child_node(pqueue_t *queue, pqueue_node_t* node){
 	uint32_t child1_idx, child2_idx;
 	child1_idx = 2 * node->heap_id + 1;
 	child2_idx = 2 * node->heap_id + 2;
@@ -75,11 +66,11 @@ pqueue_node_t* get_child_node(pqueue_t *queue, pqueue_node_t* node){
 	return child1->key < child2->key ? child1 : child2;
 }
 
-uint32_t get_node_id(pqueue_t *queue, pqueue_node_t *node){
+static uint32_t get_node_id(pqueue_t *queue, pqueue_node_t *node){
 	return (node - queue->nodes);
 }
 
-void up(pqueue_t *queue, pqueue_node_t *node){
+static void up(pqueue_t *queue, pqueue_node_t *node){
 	pqueue_node_t *curr_node, *parent_node;
 
 	curr_node = node;
@@ -92,7 +83,7 @@ void up(pqueue_t *queue, pqueue_node_t *node){
 	}
 }
 
-void down(pqueue_t *queue, pqueue_node_t *node){
+static void down(pqueue_t *queue, pqueue_node_t *node){
 	pqueue_node_t *curr_node, *child_node;
 
 	curr_node = node;
