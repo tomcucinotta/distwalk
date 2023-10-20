@@ -471,31 +471,35 @@ void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros){
 
 }
 
-void remove_timeout(thread_info_t* infos, int req_id, int epollfd){
+// remove a timeout from a request and returns the time remained before timeout
+int remove_timeout(thread_info_t* infos, int req_id, int epollfd){
     if(!reqs[req_id % MAX_REQS].timeout_node)
-        return;
+        return -1;
 
     pqueue_node_t *top = pqueue_top(infos->timeout_queue);
-    int dT = pqueue_node_key(top);
+    struct itimerspec timerspec = {0};
+    int time_elapsed, req_timeout;
     bool is_top = (top == reqs[req_id % MAX_REQS].timeout_node);
+
+    req_timeout = pqueue_node_key(reqs[req_id % MAX_REQS].timeout_node);
+    sys_check(timerfd_gettime(infos->timerfd, &timerspec));
+    time_elapsed = pqueue_node_key(top) - timerspec_to_micros(timerspec);
 
     pqueue_remove(infos->timeout_queue, reqs[req_id % MAX_REQS].timeout_node);
     reqs[req_id % MAX_REQS].timeout_node = NULL;
 
     if(!is_top){
         cw_log("TIMER removed, req_id: %d, unqueued\n", req_id);
-        return;
+        return req_timeout - time_elapsed;
     }
 
-    struct itimerspec timerspec = {0};
     if(pqueue_size(infos->timeout_queue) > 0) {
-        int micros = pqueue_node_key(pqueue_top(infos->timeout_queue));
+        int next_timeout = pqueue_node_key(pqueue_top(infos->timeout_queue));
         sys_check(timerfd_gettime(infos->timerfd, &timerspec));
-        infos->time_elapsed = dT - timerspec_to_micros(timerspec);
-        timerspec = micros_to_timerspec(micros - infos->time_elapsed);
+        infos->time_elapsed = time_elapsed;
+        timerspec = micros_to_timerspec(next_timeout - time_elapsed);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
-        cw_log("TIMER removed, req_id: %d, next interrupt: %dus\n", req_id, micros - infos->time_elapsed);
-
+        cw_log("TIMER removed, req_id: %d, next interrupt: %dus\n", req_id, next_timeout - time_elapsed);
     } else {
         infos->time_elapsed = 0;
         timerspec = micros_to_timerspec(0);
@@ -503,6 +507,8 @@ void remove_timeout(thread_info_t* infos, int req_id, int epollfd){
         cw_log("TIMER removed, req_id: %d, timer disarmed.\n", req_id);
 
     }
+
+    return req_timeout - time_elapsed;
 }
 
 void setnonblocking(int fd);
