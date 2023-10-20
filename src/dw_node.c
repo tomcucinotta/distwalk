@@ -19,11 +19,13 @@
 #include <sys/stat.h>
 #include <sys/types.h> /* See NOTES */
 #include <unistd.h>
+#include <stdbool.h>
 
 #include "cw_debug.h"
 #include "message.h"
 #include "timespec.h"
 #include "thread_affinity.h"
+#include "priority_queue.h"
 
 #define MAX_EVENTS 10
 
@@ -56,6 +58,8 @@ typedef enum {
     SOCKET,
 } event_type;
 
+typedef struct req_info_t req_info_t;
+
 typedef struct {
     int sock;                     // -1 for unused conn_info_t
     req_status status;
@@ -77,6 +81,8 @@ typedef struct {
 
     int fwd_reply_id;
     int curr_cmd_id;              // index in ((message_t*)recv_buf)->cmds[]
+
+    req_info_t *req_list;
     pthread_mutex_t mtx;
 } conn_info_t;
 
@@ -87,6 +93,10 @@ typedef struct {
 typedef struct {
     int listen_sock;
     int terminationfd;  // special eventfd to handle termination
+    int timerfd;
+
+    pqueue_t *timeout_queue;
+    int time_elapsed;
 
     // communication with storage
     int storefd; // write
@@ -145,12 +155,13 @@ pthread_mutex_t socks_mtx;
 // only forwarded requests need to go here
 // We assume a limited number of consecutive request IDs to be in flight at any time,
 // so we use a static array here, accessed via req_id % MAX_REQS
-typedef struct {
+struct req_info_t{
     int req_id;
     int conn_id;
     int fwd_replies_left;
-    int timer;
-} req_info_t;
+    pqueue_node_t *timeout_node;
+    req_info_t *prev, *next;
+};
 
 req_info_t reqs[MAX_REQS];
 int last_reqs = 0;
@@ -224,17 +235,58 @@ int conn_find_sock(int sock) {
     return rv;
 }
 
-message_t* req_get_message(int req_id){
-    assert(reqs[req_id % MAX_REQS].req_id == req_id);
+message_t* req_get_message(req_info_t *r){
 
-    int conn_id = reqs[req_id % MAX_REQS].conn_id;
-    message_t *m = (message_t *)conns[conn_id].curr_proc_buf;
-    unsigned long msg_size = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
+    conn_info_t *conn = &conns[r->conn_id];
+    message_t *m = (message_t *)(conn->curr_proc_buf);
+    unsigned long msg_size = (conn->curr_recv_buf - conn->curr_proc_buf);
     
     assert(msg_size >= m->req_size);
     assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
     
     return m;
+}
+
+req_info_t* req_remove(req_info_t* r){
+    cw_log("removing request req_id:%d\n", r->req_id);
+
+    req_info_t *next;
+
+    r->req_id = -1;
+    next = r->next;
+    if(conns[r->conn_id].req_list == r)
+        conns[r->conn_id].req_list = next;
+    if(r->next != NULL)
+        r->next->prev = r->prev;
+    if(r->prev != NULL)
+        r->prev->next = r->next;
+    r->next = NULL;
+    r->prev = NULL;
+
+    return next;
+}
+
+req_info_t* req_create(int conn_id){
+    int req_id = __atomic_fetch_add(&last_reqs, 1, __ATOMIC_SEQ_CST);
+    req_info_t *r = &reqs[req_id % MAX_REQS];
+
+    cw_log("creating request req_id:%d by conn_id:%d\n", req_id, conn_id);
+
+    r->req_id = req_id;
+    r->conn_id = conn_id;
+    r->next = conns[conn_id].req_list;
+    if(r->next)
+        r->next->prev = r;
+    r->prev = NULL;
+    conns[conn_id].req_list = r;
+
+    return r;
+}
+
+req_info_t *req_get_by_id(int req_id){
+    if(reqs[req_id % MAX_REQS].req_id != req_id)
+        return NULL;
+    return &reqs[req_id % MAX_REQS];
 }
 
 #define MAX_STORAGE_SIZE 1000000
@@ -430,6 +482,86 @@ int skip_cmds(message_t* m, int cmd_id, int to_skip) {
     return i;
 }
 
+int timerspec_to_micros(struct itimerspec t){
+    return t.it_value.tv_sec * 1000000 + t.it_value.tv_nsec / 1000;
+}
+
+struct itimerspec micros_to_timerspec(int micros) {
+    struct itimerspec timerspec = {0};
+    timerspec.it_value.tv_sec = (micros / 1000000);
+    timerspec.it_value.tv_nsec = (micros % 1000000) * 1000;
+    return timerspec;
+}
+
+void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros){
+    data_t data = {.value=req_id};
+    req_info_t *req = req_get_by_id(req_id);
+    int new_micros = micros;
+
+    if(req == NULL)
+        return;
+
+    if (pqueue_size(infos->timeout_queue) > 0) {
+        struct itimerspec timerspec = {0};
+        sys_check(timerfd_gettime(infos->timerfd, &timerspec));
+        new_micros += infos->time_elapsed;
+        new_micros += pqueue_node_key(pqueue_top(infos->timeout_queue));
+        new_micros -= timerspec_to_micros(timerspec);
+    } else {
+        infos->time_elapsed = 0;
+    }
+
+    req->timeout_node = pqueue_insert(infos->timeout_queue, new_micros, data);
+    if (req->timeout_node == pqueue_top(infos->timeout_queue)) {
+        struct itimerspec timerspec = micros_to_timerspec(micros);
+        sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
+    }
+
+    cw_log("TIMER inserted, req_id: %d, timeout: %dus\n", req_id, micros);
+
+}
+
+// remove a timeout from a request and returns the time remained before timeout
+int remove_timeout(thread_info_t* infos, int req_id, int epollfd){
+    req_info_t *req = req_get_by_id(req_id);
+    if(!req || !req->timeout_node)
+        return -1;
+
+    pqueue_node_t *top = pqueue_top(infos->timeout_queue);
+    struct itimerspec timerspec = {0};
+    int time_elapsed, req_timeout;
+    bool is_top = (top == req->timeout_node);
+
+    req_timeout = pqueue_node_key(req->timeout_node);
+    sys_check(timerfd_gettime(infos->timerfd, &timerspec));
+    time_elapsed = pqueue_node_key(top) - timerspec_to_micros(timerspec);
+
+    pqueue_remove(infos->timeout_queue, req->timeout_node);
+    req->timeout_node = NULL;
+
+    if(!is_top){
+        cw_log("TIMER removed, req_id: %d, unqueued\n", req_id);
+        return req_timeout - time_elapsed;
+    }
+
+    if(pqueue_size(infos->timeout_queue) > 0) {
+        int next_timeout = pqueue_node_key(pqueue_top(infos->timeout_queue));
+        sys_check(timerfd_gettime(infos->timerfd, &timerspec));
+        infos->time_elapsed = time_elapsed;
+        timerspec = micros_to_timerspec(next_timeout - time_elapsed);
+        sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
+        cw_log("TIMER removed, req_id: %d, next interrupt: %dus\n", req_id, next_timeout - time_elapsed);
+    } else {
+        infos->time_elapsed = 0;
+        timerspec = micros_to_timerspec(0);
+        sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
+        cw_log("TIMER removed, req_id: %d, timer disarmed.\n", req_id);
+
+    }
+
+    return req_timeout - time_elapsed;
+}
+
 void setnonblocking(int fd);
 
 unsigned char *get_send_buf(int conn_id, size_t size);
@@ -441,7 +573,7 @@ int start_send(int conn_id, size_t size);
 //
 // returns number of forwarded commands as found in m, 0 if a problem occurred,
 // or -1 if command cannot be completed now (asynchronous FORWARD)
-int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
+int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd, thread_info_t *infos) {
     int fwd_conn_id = conn_find_addr(m->cmds[cmd_id].u.fwd.fwd_host,
                                      m->cmds[cmd_id].u.fwd.fwd_port);
     if (fwd_conn_id == -1) {
@@ -494,7 +626,8 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
     }
 
     int forwarded = copy_tail(m, m_dst, j);
-    m_dst->req_id = __atomic_fetch_add(&last_reqs, 1, __ATOMIC_SEQ_CST);
+    req_info_t *req = req_create(conn_id);
+    m_dst->req_id = req->req_id;
     m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
 
     cw_log("Forwarding req %u to %s:%d\n", m_dst->req_id,
@@ -510,25 +643,11 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
         return 0;
         
     if (m->cmds[cmd_id].u.fwd.timeout) {
-        struct itimerspec timerspec = {0};
-        int timerfd = timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
-        timerspec.it_value.tv_sec = (m->cmds[cmd_id].u.fwd.timeout / 1000000);
-        timerspec.it_value.tv_nsec = (m->cmds[cmd_id].u.fwd.timeout % 1000000) * 1000;
-        sys_check(timerfd_settime(timerfd, 0, &timerspec, NULL));
-
-        struct epoll_event ev;
-        ev.events = EPOLLIN | EPOLLONESHOT;
-        ev.data.u64 = i2l(TIMER, m_dst->req_id);
-        cw_log("Adding timer(%d usecs) fd %d to epollfd %d\n", m->cmds[cmd_id].u.fwd.timeout, timerfd, epollfd);
-        sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, timerfd, &ev));
-
-        reqs[m_dst->req_id % MAX_REQS].timer = timerfd;
+        insert_timeout(infos, req->req_id, epollfd, m->cmds[cmd_id].u.fwd.timeout);
     }
 
     if (cmd_id == 0 || m->cmds[cmd_id - 1].cmd != MULTI_FORWARD) {
-        reqs[m_dst->req_id % MAX_REQS].req_id = m_dst->req_id;
-        reqs[m_dst->req_id % MAX_REQS].conn_id = conn_id;
-        reqs[m_dst->req_id % MAX_REQS].fwd_replies_left = m->cmds[cmd_id + 1 + forwarded].u.resp.n_ack;
+        req->fwd_replies_left = m->cmds[cmd_id + 1 + forwarded].u.resp.n_ack;
     }
 
     if (j == cmd_id + 1) {
@@ -543,25 +662,23 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos);
 
 // Call this once we received a REPLY from a socket matching a req_id we forwarded
 int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
-    if (reqs[req_id % MAX_REQS].req_id != req_id) {
+    req_info_t *req = req_get_by_id(req_id);
+
+    if (!req) {
         cw_log("Could not match a response to FORWARD, req_id=%d - Dropped\n", req_id);
         return 1;
     }
 
-    cw_log("Found match with conn_id %d\n", reqs[req_id % MAX_REQS].conn_id);
-    int conn_id = reqs[req_id % MAX_REQS].conn_id;
+    cw_log("Found match with conn_id %d\n", req->conn_id);
+    int conn_id = req->conn_id;
         
-    if (--reqs[req_id % MAX_REQS].fwd_replies_left == 0) {
-        message_t *m = req_get_message(req_id);
+    if (--(req->fwd_replies_left) == 0) {
+        message_t *m = req_get_message(req);
 
-        reqs[req_id % MAX_REQS].req_id = -1;
         conns[conn_id].status &= ~FORWARDING;
         conns[conn_id].curr_cmd_id = skip_cmds(m, conns[conn_id].curr_cmd_id, 1);
-        int rv = epoll_ctl(epollfd, EPOLL_CTL_DEL, reqs[req_id % MAX_REQS].timer, NULL);
-        if (rv < 0 && errno != ENOENT) {
-            perror("Error while deleting timer");
-            exit(EXIT_FAILURE);
-        }
+        
+        remove_timeout(infos, req_id, epollfd);
 
         return process_messages(conn_id, epollfd, infos);
     }
@@ -584,6 +701,9 @@ int reply(int conn_id, message_t *m, int cmd_id) {
 #ifdef CW_DEBUG
     msg_log(m_dst, "  ");
 #endif
+
+    if(conns[conn_id].req_list != NULL)
+        req_remove(conns[conn_id].req_list);
     return start_send(conn_id, m_dst->req_size);
 }
 
@@ -700,7 +820,7 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
             if (m->cmds[i].cmd == COMPUTE) {
                 compute_for(m->cmds[i].u.comp_time_us);
             } else if (m->cmds[i].cmd == FORWARD || m->cmds[i].cmd == MULTI_FORWARD) {
-                int to_skip = start_forward(conn_id, m, i, epollfd);
+                int to_skip = start_forward(conn_id, m, i, epollfd, infos);
                 cw_log("to_skip=%d\n", to_skip);
                 if (to_skip == 0) {
                     fprintf(stderr, "Error: could not execute FORWARD\n");
@@ -785,6 +905,10 @@ void conn_free(int conn_id) {
     if (nthread > 1)
         sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
 
+    req_info_t *temp = conns[conn_id].req_list;
+    while(temp){
+        temp = req_remove(temp);
+    }
     free(conns[conn_id].recv_buf);   conns[conn_id].recv_buf = NULL;
     free(conns[conn_id].send_buf);   conns[conn_id].send_buf = NULL;
     free(conns[conn_id].store_buf);  conns[conn_id].store_buf = NULL;
@@ -955,27 +1079,34 @@ void setnonblocking(int fd) {
     assert(fcntl(fd, F_SETFL, flags) == 0);
 }
 
-void handle_timeout(int req_id, int epollfd, thread_info_t *info) {
-    if (reqs[req_id % MAX_REQS].req_id != req_id)
+void handle_timeout(int epollfd, thread_info_t *infos) {
+    if(!pqueue_size(infos->timeout_queue))
         return;
-    int conn_id = reqs[req_id % MAX_REQS].conn_id;
-    message_t *m = req_get_message(req_id);
 
-    close(reqs[req_id % MAX_REQS].timer);
+    int req_id = pqueue_node_data(pqueue_top(infos->timeout_queue)).value;
+    req_info_t *req = req_get_by_id(req_id);
+    if (!req)
+        return;
+    int conn_id = req->conn_id;
+    message_t *m = req_get_message(req);
+
+    remove_timeout(infos, req_id, epollfd);
+
     if (m->cmds[conns[conn_id].curr_cmd_id].u.fwd.retries > 0) {
         cw_log("timer expired, retry: %d\n", m->cmds[conns[conn_id].curr_cmd_id].u.fwd.retries);
         
         m->cmds[conns[conn_id].curr_cmd_id].u.fwd.retries--;
-        process_messages(conn_id, epollfd, info);
+        process_messages(conn_id, epollfd, infos);
     } else if (m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip > 0) {
         cw_log("timer expired, failed, skipping: %d\n", m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip);
         
         conns[conn_id].curr_cmd_id = skip_cmds(m, conns[conn_id].curr_cmd_id, m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip);
-        process_messages(conn_id, epollfd, info);
+        process_messages(conn_id, epollfd, infos);
+         req_remove(req);
     } else {
         cw_log("timer expired, failed\n");
+         req_remove(req);
     }
-    reqs[req_id % MAX_REQS].req_id = -1;
 }
 
 void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* infos) {
@@ -986,7 +1117,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     cw_log("event_type=%d, id=%d\n", type, id);
 
     if (type == TIMER) {
-        handle_timeout(id, epollfd, infos);
+        handle_timeout(epollfd, infos);
         return;
     }
 
@@ -1196,6 +1327,11 @@ void* conn_worker(void* args) {
     ev.data.u64 = i2l(TERMINATION, infos->terminationfd);
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev));
 
+    // Add timer fd
+    ev.events = EPOLLIN;
+    ev.data.u64 = i2l(TIMER, infos->timerfd);
+    sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev));
+
     // Add storage reply fd
     if (storage_path) {
         ev.events = EPOLLIN;
@@ -1396,6 +1532,7 @@ int main(int argc, char *argv[]) {
 
     // Tag all req as unused
     for (int i = 0; i < MAX_REQS; i++) {
+        memset(&reqs[i], 0, sizeof(req_info_t));
         reqs[i].req_id = -1;
         reqs[i].conn_id = -1;
     }
@@ -1481,6 +1618,8 @@ int main(int argc, char *argv[]) {
         cw_log("Accepting new connections...\n");
 
         thread_infos[i].terminationfd = eventfd(0, 0);
+        thread_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
+        thread_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
 
         // Round-robin thread-core pinning
         if (thread_affinity) {
