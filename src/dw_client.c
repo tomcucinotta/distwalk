@@ -308,6 +308,8 @@ void *thread_receiver(void *data) {
     check(recv_buf != NULL);
 
     for (int i = 0; i < num_pkts; i++) {
+        thread_data_t thr_data;
+
         if (i % pkts_per_session == 0) {
             /*---- Create the socket. The three arguments are: ----*/
             /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
@@ -334,9 +336,11 @@ void *thread_receiver(void *data) {
                               (struct sockaddr *)&serveraddr, addr_size));
 
             /* spawn sender once connection is established */
-            thread_data_t thr_data = {.thread_id = thread_id,
-                                      .first_pkt_id = i,
-                                      .num_send_pkts = pkts_per_session};
+
+            // TODO (?) thr_data is allocated in the stck and reused for every thread, possible (but completly improbable) race condition
+            thr_data.thread_id = thread_id;
+            thr_data.first_pkt_id = i,
+            thr_data.num_send_pkts = pkts_per_session;
             assert(pthread_create(&sender[thread_id], NULL, thread_sender,
                                   (void *)&thr_data) == 0);
         }

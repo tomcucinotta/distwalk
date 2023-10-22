@@ -235,12 +235,11 @@ int conn_find_sock(int sock) {
     return rv;
 }
 
-message_t* req_get_message(int req_id){
-    assert(reqs[req_id % MAX_REQS].req_id == req_id);
+message_t* req_get_message(req_info_t *r){
 
-    int conn_id = reqs[req_id % MAX_REQS].conn_id;
-    message_t *m = (message_t *)conns[conn_id].curr_proc_buf;
-    unsigned long msg_size = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
+    conn_info_t *conn = &conns[r->conn_id];
+    message_t *m = (message_t *)(conn->curr_proc_buf);
+    unsigned long msg_size = (conn->curr_recv_buf - conn->curr_proc_buf);
     
     assert(msg_size >= m->req_size);
     assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
@@ -249,6 +248,8 @@ message_t* req_get_message(int req_id){
 }
 
 req_info_t* req_remove(req_info_t* r){
+    cw_log("removing request req_id:%d\n", r->req_id);
+
     req_info_t *next;
 
     r->req_id = -1;
@@ -269,6 +270,8 @@ req_info_t* req_create(int conn_id){
     int req_id = __atomic_fetch_add(&last_reqs, 1, __ATOMIC_SEQ_CST);
     req_info_t *r = &reqs[req_id % MAX_REQS];
 
+    cw_log("creating request req_id:%d by conn_id:%d\n", req_id, conn_id);
+
     r->req_id = req_id;
     r->conn_id = conn_id;
     r->next = conns[conn_id].req_list;
@@ -278,6 +281,12 @@ req_info_t* req_create(int conn_id){
     conns[conn_id].req_list = r;
 
     return r;
+}
+
+req_info_t *req_get_by_id(int req_id){
+    if(reqs[req_id % MAX_REQS].req_id != req_id)
+        return NULL;
+    return &reqs[req_id % MAX_REQS];
 }
 
 #define MAX_STORAGE_SIZE 1000000
@@ -486,7 +495,11 @@ struct itimerspec micros_to_timerspec(int micros) {
 
 void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros){
     data_t data = {.value=req_id};
+    req_info_t *req = req_get_by_id(req_id);
     int new_micros = micros;
+
+    if(req == NULL)
+        return;
 
     if (pqueue_size(infos->timeout_queue) > 0) {
         struct itimerspec timerspec = {0};
@@ -498,8 +511,8 @@ void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros){
         infos->time_elapsed = 0;
     }
 
-    reqs[req_id % MAX_REQS].timeout_node = pqueue_insert(infos->timeout_queue, new_micros, data);
-    if (reqs[req_id % MAX_REQS].timeout_node == pqueue_top(infos->timeout_queue)) {
+    req->timeout_node = pqueue_insert(infos->timeout_queue, new_micros, data);
+    if (req->timeout_node == pqueue_top(infos->timeout_queue)) {
         struct itimerspec timerspec = micros_to_timerspec(micros);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
     }
@@ -510,20 +523,21 @@ void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros){
 
 // remove a timeout from a request and returns the time remained before timeout
 int remove_timeout(thread_info_t* infos, int req_id, int epollfd){
-    if(!reqs[req_id % MAX_REQS].timeout_node)
+    req_info_t *req = req_get_by_id(req_id);
+    if(!req || !req->timeout_node)
         return -1;
 
     pqueue_node_t *top = pqueue_top(infos->timeout_queue);
     struct itimerspec timerspec = {0};
     int time_elapsed, req_timeout;
-    bool is_top = (top == reqs[req_id % MAX_REQS].timeout_node);
+    bool is_top = (top == req->timeout_node);
 
-    req_timeout = pqueue_node_key(reqs[req_id % MAX_REQS].timeout_node);
+    req_timeout = pqueue_node_key(req->timeout_node);
     sys_check(timerfd_gettime(infos->timerfd, &timerspec));
     time_elapsed = pqueue_node_key(top) - timerspec_to_micros(timerspec);
 
-    pqueue_remove(infos->timeout_queue, reqs[req_id % MAX_REQS].timeout_node);
-    reqs[req_id % MAX_REQS].timeout_node = NULL;
+    pqueue_remove(infos->timeout_queue, req->timeout_node);
+    req->timeout_node = NULL;
 
     if(!is_top){
         cw_log("TIMER removed, req_id: %d, unqueued\n", req_id);
@@ -648,23 +662,24 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos);
 
 // Call this once we received a REPLY from a socket matching a req_id we forwarded
 int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
-    if (reqs[req_id % MAX_REQS].req_id != req_id) {
+    req_info_t *req = req_get_by_id(req_id);
+
+    if (!req) {
         cw_log("Could not match a response to FORWARD, req_id=%d - Dropped\n", req_id);
         return 1;
     }
 
-    cw_log("Found match with conn_id %d\n", reqs[req_id % MAX_REQS].conn_id);
-    int conn_id = reqs[req_id % MAX_REQS].conn_id;
+    cw_log("Found match with conn_id %d\n", req->conn_id);
+    int conn_id = req->conn_id;
         
-    if (--reqs[req_id % MAX_REQS].fwd_replies_left == 0) {
-        message_t *m = req_get_message(req_id);
+    if (--(req->fwd_replies_left) == 0) {
+        message_t *m = req_get_message(req);
 
         conns[conn_id].status &= ~FORWARDING;
         conns[conn_id].curr_cmd_id = skip_cmds(m, conns[conn_id].curr_cmd_id, 1);
         
         remove_timeout(infos, req_id, epollfd);
 
-        req_remove(&reqs[req_id % MAX_REQS]);
         return process_messages(conn_id, epollfd, infos);
     }
     
@@ -686,6 +701,9 @@ int reply(int conn_id, message_t *m, int cmd_id) {
 #ifdef CW_DEBUG
     msg_log(m_dst, "  ");
 #endif
+
+    if(conns[conn_id].req_list != NULL)
+        req_remove(conns[conn_id].req_list);
     return start_send(conn_id, m_dst->req_size);
 }
 
@@ -1066,11 +1084,11 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
         return;
 
     int req_id = pqueue_node_data(pqueue_top(infos->timeout_queue)).value;
-
-    if (reqs[req_id % MAX_REQS].req_id != req_id)
+    req_info_t *req = req_get_by_id(req_id);
+    if (!req)
         return;
-    int conn_id = reqs[req_id % MAX_REQS].conn_id;
-    message_t *m = req_get_message(req_id);
+    int conn_id = req->conn_id;
+    message_t *m = req_get_message(req);
 
     remove_timeout(infos, req_id, epollfd);
 
@@ -1084,11 +1102,11 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
         
         conns[conn_id].curr_cmd_id = skip_cmds(m, conns[conn_id].curr_cmd_id, m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip);
         process_messages(conn_id, epollfd, infos);
+         req_remove(req);
     } else {
         cw_log("timer expired, failed\n");
+         req_remove(req);
     }
-
-    req_remove(&reqs[req_id % MAX_REQS]);
 }
 
 void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* infos) {
