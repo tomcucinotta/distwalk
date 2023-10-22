@@ -58,6 +58,8 @@ typedef enum {
     SOCKET,   
 } event_type;
 
+typedef struct req_info_t req_info_t;
+
 typedef struct {
     int sock;                     // -1 for unused conn_info_t
     req_status status;
@@ -79,6 +81,8 @@ typedef struct {
 
     int fwd_reply_id;
     int curr_cmd_id;              // index in ((message_t*)recv_buf)->cmds[]
+
+    req_info_t *req_list;
     pthread_mutex_t mtx;
 } conn_info_t;
 
@@ -151,12 +155,13 @@ pthread_mutex_t socks_mtx;
 // only forwarded requests need to go here
 // We assume a limited number of consecutive request IDs to be in flight at any time,
 // so we use a static array here, accessed via req_id % MAX_REQS
-typedef struct {
+struct req_info_t{
     int req_id;
     int conn_id;
     int fwd_replies_left;
     pqueue_node_t *timeout_node;
-} req_info_t;
+    req_info_t *prev, *next;
+};
 
 req_info_t reqs[MAX_REQS];
 int last_reqs = 0;
@@ -241,6 +246,38 @@ message_t* req_get_message(int req_id){
     assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
     
     return m;
+}
+
+req_info_t* req_remove(req_info_t* r){
+    req_info_t *next;
+
+    r->req_id = -1;
+    next = r->next;
+    if(conns[r->conn_id].req_list == r)
+        conns[r->conn_id].req_list = next;
+    if(r->next != NULL)
+        r->next->prev = r->prev;
+    if(r->prev != NULL)
+        r->prev->next = r->next;
+    r->next = NULL;
+    r->prev = NULL;
+
+    return next;
+}
+
+req_info_t* req_create(int conn_id){
+    int req_id = __atomic_fetch_add(&last_reqs, 1, __ATOMIC_SEQ_CST);
+    req_info_t *r = &reqs[req_id % MAX_REQS];
+
+    r->req_id = req_id;
+    r->conn_id = conn_id;
+    r->next = conns[conn_id].req_list;
+    if(r->next)
+        r->next->prev = r;
+    r->prev = NULL;
+    conns[conn_id].req_list = r;
+
+    return r;
 }
 
 #define MAX_STORAGE_SIZE 1000000
@@ -575,7 +612,8 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd, thread_inf
     }
 
     int forwarded = copy_tail(m, m_dst, j);
-    m_dst->req_id = __atomic_fetch_add(&last_reqs, 1, __ATOMIC_SEQ_CST);
+    req_info_t *req = req_create(conn_id);
+    m_dst->req_id = req->req_id;
     m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
 
     cw_log("Forwarding req %u to %s:%d\n", m_dst->req_id,
@@ -591,13 +629,11 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd, thread_inf
         return 0;
         
     if (m->cmds[cmd_id].u.fwd.timeout) {
-        insert_timeout(infos, m_dst->req_id, epollfd, m->cmds[cmd_id].u.fwd.timeout);
+        insert_timeout(infos, req->req_id, epollfd, m->cmds[cmd_id].u.fwd.timeout);
     }
 
     if (cmd_id == 0 || m->cmds[cmd_id - 1].cmd != MULTI_FORWARD) {
-        reqs[m_dst->req_id % MAX_REQS].req_id = m_dst->req_id;
-        reqs[m_dst->req_id % MAX_REQS].conn_id = conn_id;
-        reqs[m_dst->req_id % MAX_REQS].fwd_replies_left = m->cmds[cmd_id + 1 + forwarded].u.resp.n_ack;
+        req->fwd_replies_left = m->cmds[cmd_id + 1 + forwarded].u.resp.n_ack;
     }
 
     if (j == cmd_id + 1) {
@@ -623,12 +659,12 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
     if (--reqs[req_id % MAX_REQS].fwd_replies_left == 0) {
         message_t *m = req_get_message(req_id);
 
-        reqs[req_id % MAX_REQS].req_id = -1;
         conns[conn_id].status &= ~FORWARDING;
         conns[conn_id].curr_cmd_id = skip_cmds(m, conns[conn_id].curr_cmd_id, 1);
         
         remove_timeout(infos, req_id, epollfd);
 
+        req_remove(&reqs[req_id % MAX_REQS]);
         return process_messages(conn_id, epollfd, infos);
     }
     
@@ -851,6 +887,10 @@ void conn_free(int conn_id) {
     if (nthread > 1)
         sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
 
+    req_info_t *temp = conns[conn_id].req_list;
+    while(temp){
+        temp = req_remove(temp);
+    }
     free(conns[conn_id].recv_buf);   conns[conn_id].recv_buf = NULL;
     free(conns[conn_id].send_buf);   conns[conn_id].send_buf = NULL;
     free(conns[conn_id].store_buf);  conns[conn_id].store_buf = NULL;
@@ -1047,7 +1087,8 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
     } else {
         cw_log("timer expired, failed\n");
     }
-    reqs[req_id % MAX_REQS].req_id = -1;
+
+    req_remove(&reqs[req_id % MAX_REQS]);
 }
 
 void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* infos) {
@@ -1473,9 +1514,9 @@ int main(int argc, char *argv[]) {
 
     // Tag all req as unused
     for (int i = 0; i < MAX_REQS; i++) {
+        memset(&reqs[i], 0, sizeof(req_info_t));
         reqs[i].req_id = -1;
         reqs[i].conn_id = -1;
-        reqs[i].timeout_node = NULL;
     }
 
     // Open storage file, if any
