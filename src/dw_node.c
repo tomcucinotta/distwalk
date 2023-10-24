@@ -128,7 +128,7 @@ typedef struct {
 typedef struct {
     command_t cmd;
     int worker_id;
-    int conn_id;
+    int req_id;
 } wrapper_t;
 
 conn_info_t conns[MAX_CONNS];
@@ -837,14 +837,14 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos){
             wrapper_t w;
             w.cmd = m->cmds[i];
             w.worker_id = infos->worker_id;
-            w.conn_id = req->conn_id;
+            w.req_id = req->req_id;
 
             if (write(infos->storefd, &w, sizeof(w)) < 0) {
                 perror("storage worker write() failed");
                 return -1;
             }
 
-            req->curr_cmd_id = i+1;
+            req->curr_cmd_id = i + 1;
             return 0;
         default:
             fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
@@ -857,7 +857,6 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos){
 
 int process_messages(req_info_t *req, int epollfd, thread_info_t *infos) {
     int executed = process_single_message(req, epollfd, infos);
-    cw_log("PROCESS_MESSAGES %d, %d\n", executed, conns[req->conn_id].serialize_request);
     if(executed && conns[req->conn_id].serialize_request)
         return obtain_messages(req->conn_id, epollfd, infos);
     return executed;
@@ -1281,7 +1280,7 @@ void* storage_worker(void* args) {
                 wrapper_t w;
                 command_t storage_cmd;
                 int worker_id;
-                int conn_id;
+                int req_id;
 
                 if (read(fd, &w, sizeof(w)) < 0) {
                     perror("storage worker read()");
@@ -1291,23 +1290,23 @@ void* storage_worker(void* args) {
 
                 storage_cmd = w.cmd;
                 worker_id = w.worker_id;
-                conn_id = w.conn_id;
+                req_id = w.req_id;
 
-                cw_log("STORAGE cmd from conn_id %d\n", conn_id);
+                cw_log("STORAGE cmd from conn_id %d\n", req_id);
 
                 if (storage_cmd.cmd == STORE) {
-                    store(&storage_info, storage_info.store_buf, storage_cmd.u.store_nbytes);
+                    store(infos, infos->store_buf, storage_cmd.u.store_nbytes);
                 }
                 else if (storage_cmd.cmd == LOAD) {
                     size_t leftovers;
-                    load(&storage_info, storage_info.store_buf, storage_cmd.u.load_nbytes, &leftovers);
+                    load(infos, infos->store_buf, storage_cmd.u.load_nbytes, &leftovers);
                 }
                 else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");
                     continue;
                 }
 
-                safe_write(infos->store_replyfd[worker_id], (unsigned char*) &conn_id, sizeof(conn_id));
+                safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
             }
         }
     }
