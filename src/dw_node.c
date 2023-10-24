@@ -81,6 +81,7 @@ typedef struct {
     unsigned long curr_send_size; // size of leftover data to send
 
     req_info_t *req_list;
+    unsigned int serialize_request;
     pthread_mutex_t mtx;
 } conn_info_t;
 
@@ -158,7 +159,7 @@ struct req_info_t{
     int conn_id;
     int fwd_replies_left;
 
-    message_t *message;
+    unsigned char *message_ptr;
     
     int curr_cmd_id;
 
@@ -239,7 +240,7 @@ int conn_find_sock(int sock) {
 }
 
 message_t* req_get_message(req_info_t *r){
-    return r->message;
+    return (message_t*)r->message_ptr;
 }
 
 req_info_t* req_remove(req_info_t* r){
@@ -249,16 +250,25 @@ req_info_t* req_remove(req_info_t* r){
     conn_info_t *conn = &conns[r->conn_id];
 
     // compacting conn recv buffer
-    unsigned long req_size = r->message->req_size;
-    unsigned long leftover = conn->curr_recv_buf - ((unsigned char*)r->message + req_size);
-    memmove(r->message + r->message->req_size, r->message, leftover);
-    r->message = NULL;
+    unsigned long req_size = req_get_message(r)->req_size;
+    unsigned long leftover = conn->curr_recv_buf - (r->message_ptr + req_size);
+    memmove(r->message_ptr, r->message_ptr + req_size, leftover);
 
+    cw_log("DEFRAGMENT remove, conn_id:%d empty memory [%p, %p[\n", r->conn_id, r->message_ptr, r->message_ptr + req_size);
+
+    r->message_ptr = NULL;
     conn->curr_recv_buf -= req_size;
     conn->curr_proc_buf -= req_size;
     conn->curr_recv_size += req_size;
-    for(req_info_t *temp = r->next; temp != NULL; temp = temp->next)
-        temp->message -= req_size;
+    for(req_info_t *temp = r->prev; temp != NULL; temp = temp->prev){
+        cw_log("DEFRAGMENT update ptr, req_id:%d message [%p, %p[ -> [%p, %p[\n", 
+            temp->req_id,
+            temp->message_ptr,
+            temp->message_ptr + req_get_message(temp)->req_size,
+            temp->message_ptr - req_size,
+            temp->message_ptr - req_size + req_get_message(temp)->req_size);
+        temp->message_ptr -= req_size;
+    }
 
     r->req_id = -1;
     next = r->next;
@@ -791,11 +801,13 @@ void close_and_forget(int epollfd, int sock) {
     close(sock);
 }
 
-int process_messages(req_info_t *req, int epollfd, thread_info_t *infos) {
-    message_t *m = req->message;
+// returns 1 if the message has been completely executed, 0 if the message need more time, -1 if some error occured
+int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos){
+    message_t *m = req_get_message(req);
 
+    cw_log("PROCESS req_id: %d, rip: %d, total cmd: %d\n", req->req_id, req->curr_cmd_id, m->num);
     for (int i = req->curr_cmd_id; i < m->num; i++) {
-        cw_log("req_id: %d, execute command: %s\n", req->req_id, get_command_name(m->cmds[i].cmd));
+        cw_log("PROCESS req_id: %d,  rip: %d, command: %s\n", req->req_id, i, get_command_name(m->cmds[i].cmd));
 
         switch(m->cmds[i].cmd){
         case COMPUTE:
@@ -806,18 +818,18 @@ int process_messages(req_info_t *req, int epollfd, thread_info_t *infos) {
             int to_skip = start_forward(req, m, i, epollfd, infos);
             if (to_skip == 0) {
                 fprintf(stderr, "Error: could not execute FORWARD\n");
-                return 0;
+                return -1;
             }
             req->curr_cmd_id = i;
-            return 1;
+            return 0;
         case REPLY:
             cw_log("Handling REPLY: req_id=%d\n", m->req_id);
             if (!reply(req, m, i)) {
                 fprintf(stderr, "reply() failed\n");
-                return 0;
+                return -1;
             }
             // any further cmds[] for replied-to hop, not me
-            break;
+            return 1;
         case STORE:
         case LOAD:
             check(storage_path, "Error: Cannot execute LOAD/STORE cmd because no storage path has been defined");
@@ -833,7 +845,7 @@ int process_messages(req_info_t *req, int epollfd, thread_info_t *infos) {
             }
 
             req->curr_cmd_id = i+1;
-            return 1;
+            return 0;
         default:
             fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
             return 0;
@@ -843,10 +855,21 @@ int process_messages(req_info_t *req, int epollfd, thread_info_t *infos) {
     return 1;
 }
 
+int process_messages(req_info_t *req, int epollfd, thread_info_t *infos) {
+    int executed = process_single_message(req, epollfd, infos);
+    cw_log("PROCESS_MESSAGES %d, %d\n", executed, conns[req->conn_id].serialize_request);
+    if(executed && conns[req->conn_id].serialize_request)
+        return obtain_messages(req->conn_id, epollfd, infos);
+    return executed;
+}
+
 int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
     unsigned long msg_size = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
 
     // batch processing of multiple messages, if received more than 1
+    if(conns[conn_id].serialize_request && conns[conn_id].req_list != NULL)
+        return 1;
+
     do {
         if (msg_size < sizeof(message_t)) {
             cw_log("Got incomplete header [recv size:%lu, header size:%lu], need to recv() more...\n", msg_size, sizeof(message_t));
@@ -874,9 +897,13 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
             }
         } else {
             req_info_t *req = req_create(conn_id);
-            req->message = m;
+            req->message_ptr = (unsigned char*) m;
             req->curr_cmd_id = 0;
-            process_messages(req, epollfd, infos);
+            int executed = process_single_message(req, epollfd, infos);
+            if(!executed && conns[conn_id].serialize_request){
+                conns[conn_id].curr_proc_buf += m->req_size;
+                return 1;
+            }
         }
 
         conns[conn_id].curr_proc_buf += m->req_size;
@@ -952,6 +979,7 @@ int conn_alloc(int conn_sock) {
     conns[conn_id].curr_recv_size = BUF_SIZE;
     conns[conn_id].curr_send_buf = conns[conn_id].send_buf;
     conns[conn_id].curr_send_size = 0;
+    conns[conn_id].serialize_request = 0;
 
     if (nthread > 1)
         sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
@@ -1373,14 +1401,14 @@ void* conn_worker(void* args) {
                 // storage operation completed
                 // TODO: code
 
-                int conn_id_ACK;
-                if (safe_read(infos->store_replyfd, (unsigned char*) &conn_id_ACK, sizeof(conn_id_ACK)) < 0) {
+                int req_id_ACK;
+                if (safe_read(infos->store_replyfd, (unsigned char*) &req_id_ACK, sizeof(req_id_ACK)) < 0) {
                     perror("storage worker read() failed");
                     continue;
                 }
 
-                cw_log("STORAGE ACK for conn_id %d\n", conn_id_ACK);
-                //process_messages(conn_id_ACK, epollfd, infos);
+                cw_log("STORAGE ACK for req_id %d\n", req_id_ACK);
+                process_messages(req_get_by_id(req_id_ACK), epollfd, infos);
                 //exec_request(epollfd, &events[i], infos);
             } 
             else if (type == TERMINATION) {
