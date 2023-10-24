@@ -243,22 +243,33 @@ message_t* req_get_message(req_info_t *r){
 }
 
 req_info_t* req_remove(req_info_t* r){
-    cw_log("removing request req_id:%d\n", r->req_id);
+    cw_log("REQUEST remove req_id:%d\n", r->req_id);
 
     req_info_t *next;
+    conn_info_t *conn = &conns[r->conn_id];
+
+    // compacting conn recv buffer
+    unsigned long req_size = r->message->req_size;
+    unsigned long leftover = conn->curr_recv_buf - ((unsigned char*)r->message + req_size);
+    memmove(r->message + r->message->req_size, r->message, leftover);
+    r->message = NULL;
+
+    conn->curr_recv_buf -= req_size;
+    conn->curr_proc_buf -= req_size;
+    conn->curr_recv_size += req_size;
+    for(req_info_t *temp = r->next; temp != NULL; temp = temp->next)
+        temp->message -= req_size;
 
     r->req_id = -1;
     next = r->next;
-    if(conns[r->conn_id].req_list == r)
-        conns[r->conn_id].req_list = next;
+    if(conn->req_list == r)
+        conn->req_list = next;
     if(r->next != NULL)
         r->next->prev = r->prev;
     if(r->prev != NULL)
         r->prev->next = r->next;
     r->next = NULL;
     r->prev = NULL;
-
-    r->message = NULL;
 
     return next;
 }
@@ -267,7 +278,11 @@ req_info_t* req_create(int conn_id){
     int req_id = __atomic_fetch_add(&last_reqs, 1, __ATOMIC_SEQ_CST);
     req_info_t *r = &reqs[req_id % MAX_REQS];
 
-    cw_log("creating request req_id:%d by conn_id:%d\n", req_id, conn_id);
+    // discard old requests
+    if(r->req_id != -1)
+        req_remove(r);
+
+    cw_log("REQUEST create req_id:%d by conn_id:%d\n", req_id, conn_id);
 
     r->req_id = req_id;
     r->conn_id = conn_id;
@@ -515,7 +530,7 @@ void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros){
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
     }
 
-    cw_log("TIMER inserted, req_id: %d, timeout: %dus\n", req_id, micros);
+    cw_log("TIMEOUT inserted, req_id: %d, timeout: %dus\n", req_id, micros);
 
 }
 
@@ -538,7 +553,7 @@ int remove_timeout(thread_info_t* infos, int req_id, int epollfd){
     req->timeout_node = NULL;
 
     if(!is_top){
-        cw_log("TIMER removed, req_id: %d, unqueued\n", req_id);
+        cw_log("TIMEOUT removed, req_id: %d, unqueued\n", req_id);
         return req_timeout - time_elapsed;
     }
 
@@ -548,12 +563,12 @@ int remove_timeout(thread_info_t* infos, int req_id, int epollfd){
         infos->time_elapsed = time_elapsed;
         timerspec = micros_to_timerspec(next_timeout - time_elapsed);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
-        cw_log("TIMER removed, req_id: %d, next interrupt: %dus\n", req_id, next_timeout - time_elapsed);
+        cw_log("TIMEOUT removed, req_id: %d, next interrupt: %dus\n", req_id, next_timeout - time_elapsed);
     } else {
         infos->time_elapsed = 0;
         timerspec = micros_to_timerspec(0);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
-        cw_log("TIMER removed, req_id: %d, timer disarmed.\n", req_id);
+        cw_log("TIMEOUT removed, req_id: %d, timer disarmed.\n", req_id);
 
     }
 
@@ -572,7 +587,6 @@ int start_send(int conn_id, size_t size);
 // returns number of forwarded commands as found in m, 0 if a problem occurred,
 // or -1 if command cannot be completed now (asynchronous FORWARD)
 int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread_info_t *infos) {
-    int conn_id = req->conn_id;
     int fwd_conn_id = conn_find_addr(m->cmds[cmd_id].u.fwd.fwd_host,
                                      m->cmds[cmd_id].u.fwd.fwd_port);
     if (fwd_conn_id == -1) {
@@ -649,7 +663,6 @@ int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread
     }
 
     if (j == cmd_id + 1) {
-        conns[conn_id].status |= FORWARDING;
         return forwarded;
     }
 
@@ -669,12 +682,10 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
     }
 
     cw_log("Found match with conn_id %d\n", req->conn_id);
-    int conn_id = req->conn_id;
         
-    if (--(req->fwd_replies_left) == 0) {
+    if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
 
-        conns[conn_id].status &= ~FORWARDING;
         req->curr_cmd_id = skip_cmds(m, req->curr_cmd_id, 1);
         
         remove_timeout(infos, req_id, epollfd);
@@ -686,24 +697,23 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
 }
 
 // returns 1 if reply sent correctly, 0 otherwise
-int reply(int conn_id, message_t *m, int cmd_id) {
-    message_t *m_dst = (message_t *) get_send_buf(conn_id, m->cmds[cmd_id].u.resp.resp_size);
+int reply(req_info_t *req, message_t *m, int cmd_id) {
+    message_t *m_dst = (message_t *) get_send_buf(req->conn_id, m->cmds[cmd_id].u.resp.resp_size);
 
-    cw_log("m_dst: %p, send_buf: %p\n", m_dst, conns[conn_id].send_buf);
+    cw_log("m_dst: %p, send_buf: %p\n", m_dst, conns[req->conn_id].send_buf);
 
     m_dst->req_id = m->req_id;
     m_dst->req_size = m->cmds[cmd_id].u.resp.resp_size;
     m_dst->num = 0;
-    cw_log("Replying to req %u (conn_id=%d)\n", m->req_id, conn_id);
+    cw_log("Replying to req %u (conn_id=%d)\n", m->req_id, req->conn_id);
     cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
 #ifdef CW_DEBUG
     msg_log(m_dst, "  ");
 #endif
 
-    if(conns[conn_id].req_list != NULL)
-        req_remove(conns[conn_id].req_list);
-    return start_send(conn_id, m_dst->req_size);
+    req_remove(req);
+    return start_send(req->conn_id, m_dst->req_size);
 }
 
 size_t recv_message(int sock, unsigned char *buf, size_t len) {
@@ -783,35 +793,33 @@ void close_and_forget(int epollfd, int sock) {
 
 int process_messages(req_info_t *req, int epollfd, thread_info_t *infos) {
     message_t *m = req->message;
-    conn_info_t *conn = &conns[req->conn_id];
 
     for (int i = req->curr_cmd_id; i < m->num; i++) {
-        if (m->cmds[i].cmd == COMPUTE) {
+        cw_log("req_id: %d, execute command: %s\n", req->req_id, get_command_name(m->cmds[i].cmd));
+
+        switch(m->cmds[i].cmd){
+        case COMPUTE:
             compute_for(m->cmds[i].u.comp_time_us);
-        } else if (m->cmds[i].cmd == FORWARD || m->cmds[i].cmd == MULTI_FORWARD) {
+            break;
+        case FORWARD:
+        case MULTI_FORWARD:
             int to_skip = start_forward(req, m, i, epollfd, infos);
-            cw_log("to_skip=%d\n", to_skip);
             if (to_skip == 0) {
                 fprintf(stderr, "Error: could not execute FORWARD\n");
                 return 0;
-            } else if (to_skip == -1) {
-                req->curr_cmd_id = i;
-                goto out_shift_messages;
             }
-      
-            if (conn->status & FORWARDING) {
-                req->curr_cmd_id = i;
-                return 1;
-            }
-        } else if (m->cmds[i].cmd == REPLY) {
+            req->curr_cmd_id = i;
+            return 1;
+        case REPLY:
             cw_log("Handling REPLY: req_id=%d\n", m->req_id);
-            if (!reply(req->conn_id, m, i)) {
+            if (!reply(req, m, i)) {
                 fprintf(stderr, "reply() failed\n");
                 return 0;
             }
             // any further cmds[] for replied-to hop, not me
             break;
-        } else if (m->cmds[i].cmd == STORE || m->cmds[i].cmd == LOAD) {
+        case STORE:
+        case LOAD:
             check(storage_path, "Error: Cannot execute LOAD/STORE cmd because no storage path has been defined");
 
             wrapper_t w;
@@ -825,36 +833,12 @@ int process_messages(req_info_t *req, int epollfd, thread_info_t *infos) {
             }
 
             req->curr_cmd_id = i+1;
-            conn->status |= STORING;
             return 1;
-        } else {
+        default:
             fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
             return 0;
         }
     }
-
- out_shift_messages:
-
-    if (conn->curr_proc_buf == conn->curr_recv_buf) {
-        // all received data was processed, reset curr_* for next receive
-        conn->curr_recv_buf = conn->recv_buf;
-        conn->curr_recv_size = BUF_SIZE;
-    } else {
-        // leftover received data, move it to beginning of buf unless already
-        // there
-        if (conn->curr_proc_buf != conn->recv_buf) {
-            // TODO do this only if we're beyond a threshold in buf[]
-            unsigned long leftover = conn->curr_recv_buf - conn->curr_proc_buf;
-            cw_log(
-                "Moving %lu leftover bytes back to beginning of buf with "
-                "conn_id %d",
-                leftover, req->conn_id);
-            memmove(conn->curr_proc_buf, conn->recv_buf, leftover);
-            conn->curr_recv_buf = conn->recv_buf + leftover;
-            conn->curr_recv_size = BUF_SIZE - leftover;
-        }
-    }
-    conn->curr_proc_buf = conn->recv_buf;
 
     return 1;
 }
@@ -865,12 +849,11 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
     // batch processing of multiple messages, if received more than 1
     do {
         if (msg_size < sizeof(message_t)) {
-            cw_log("Got incomplete header [size:%lu], need to recv() more...\n", msg_size);
+            cw_log("Got incomplete header [recv size:%lu, header size:%lu], need to recv() more...\n", msg_size, sizeof(message_t));
             break;
         }
         message_t *m = (message_t *)conns[conn_id].curr_proc_buf;
-        /*cw_log("Processing %lu bytes, req_id=%u, req_size=%u, num=%d, curr_cmd_id=%d\n", msg_size,
-               m->req_id, m->req_size, m->num, req->curr_cmd_id);*/
+        
         if (msg_size < m->req_size) {
             cw_log("Got header but incomplete message [recv size:%lu, expected size:%d], need to recv() more...\n", msg_size, m->req_size);
             break;
@@ -1095,18 +1078,18 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
     remove_timeout(infos, req_id, epollfd);
 
     if (m->cmds[req->curr_cmd_id].u.fwd.retries > 0) {
-        cw_log("timer expired, retry: %d\n", m->cmds[req->curr_cmd_id].u.fwd.retries);
+        cw_log("TIMEOUT expired, retry: %d\n", m->cmds[req->curr_cmd_id].u.fwd.retries);
         
         m->cmds[req->curr_cmd_id].u.fwd.retries--;
         process_messages(req, epollfd, infos);
     } else if (m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip > 0) {
-        cw_log("timer expired, failed, skipping: %d\n", m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip);
+        cw_log("TIMEOUT expired, failed, skipping: %d\n", m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip);
         
         req->curr_cmd_id = skip_cmds(m, req->curr_cmd_id, m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip);
         process_messages(req, epollfd, infos);
          req_remove(req);
     } else {
-        cw_log("timer expired, failed\n");
+        cw_log("TIMEOUT expired, failed\n");
          req_remove(req);
     }
 }
@@ -1143,12 +1126,10 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
             goto err;
     }
     cw_log("conns[%d].status=%d (%s)\n", id, conns[id].status, conn_status_str(conns[id].status));
+    
     // check whether we have new or leftover messages to process
-    if (!(conns[id].status & (FORWARDING | STORING))) {
-        cw_log("calling proc_mesg()\n");
-        if (!obtain_messages(id, epollfd, infos))
-            goto err;
-    }
+    if (!obtain_messages(id, epollfd, infos))
+        goto err;
 
     if (conns[id].curr_send_size > 0 && !(conns[id].status & SENDING)) {
         struct epoll_event ev2;
@@ -1398,7 +1379,6 @@ void* conn_worker(void* args) {
                     continue;
                 }
 
-                conns[conn_id_ACK].status &= ~STORING;
                 cw_log("STORAGE ACK for conn_id %d\n", conn_id_ACK);
                 //process_messages(conn_id_ACK, epollfd, infos);
                 //exec_request(epollfd, &events[i], infos);
