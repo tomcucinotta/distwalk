@@ -8,6 +8,7 @@ dw_node_tsan
 
 test_distrib
 test_ccmd
+test_struct_tsan
 
 *.o
 *.data

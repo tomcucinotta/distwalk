@@ -43,18 +43,18 @@ static inline void l2i(uint64_t n, uint32_t* ln, uint32_t* rn) {
 
 // I could be doing 0, 1, 2 or more of these at the same time => bitmask
 typedef enum {
-    SENDING = 1,        // using EPOLLOUT while sending data to sock
-    LOADING = 2,        // loading data from disk
-    STORING = 4,        // storing data to disk
-    CONNECTING = 8,     // waiting for connection establishment during a FORWARD
-    FORWARDING = 16      // waiting for a FORWARD to complete
-} req_status;
+    NOT_INIT,
+    READY,
+    SENDING,
+    CONNECTING,           
+} conn_status;
 
 typedef enum {
     LISTEN,
     TERMINATION,
     STORAGE,
     TIMER,
+    CONNECT,
     SOCKET,
 } event_type;
 
@@ -62,7 +62,7 @@ typedef struct req_info_t req_info_t;
 
 typedef struct {
     int sock;                     // -1 for unused conn_info_t
-    req_status status;
+    conn_status status;
 
     in_addr_t inaddr;             // target IP
     uint16_t port;                // target port (for multiple nodes on same host)
@@ -79,10 +79,8 @@ typedef struct {
     unsigned char *curr_send_buf; // curr ptr in send buffer while SENDING
     unsigned long curr_send_size; // size of leftover data to send
 
-    int fwd_reply_id;
-    int curr_cmd_id;              // index in ((message_t*)recv_buf)->cmds[]
-
     req_info_t *req_list;
+    unsigned int serialize_request;
     pthread_mutex_t mtx;
 } conn_info_t;
 
@@ -129,7 +127,7 @@ typedef struct {
 typedef struct {
     command_t cmd;
     int worker_id;
-    int conn_id;
+    int req_id;
 } wrapper_t;
 
 conn_info_t conns[MAX_CONNS];
@@ -159,6 +157,11 @@ struct req_info_t{
     int req_id;
     int conn_id;
     int fwd_replies_left;
+
+    unsigned char *message_ptr;
+    
+    int curr_cmd_id;
+
     pqueue_node_t *timeout_node;
     req_info_t *prev, *next;
 };
@@ -179,20 +182,17 @@ int thread_affinity = 0;
 char* thread_affinity_list;
 
 const char *conn_status_str(int s) {
-    static char str[16];
-    str[0] = 0;
-    char *p = str;
-    if (s & SENDING)
-        sprintf(p++, "S");
-    if (s & LOADING)
-        sprintf(p++, "R");
-    if (s & STORING)
-        sprintf(p++, "W");
-    if (s & CONNECTING)
-        sprintf(p++, "C");
-    if (s & FORWARDING)
-        sprintf(p++, "F");
-    return str;
+    static const char *ready = "READY", *connecting = "CONNECTING", *sending = "SENDING", *not_init = "NOT INIT";
+    const char *ret;
+    if (s == READY)
+        ret = ready;
+    if (s == CONNECTING)
+        ret = connecting;
+    if (s == SENDING)
+        ret = sending;
+    if (s == NOT_INIT)
+        ret = not_init;
+    return ret;
 }
 
 // return index in conns[] of conn_info_t associated to inaddr:port, or -1 if not found
@@ -236,26 +236,40 @@ int conn_find_sock(int sock) {
 }
 
 message_t* req_get_message(req_info_t *r){
-
-    conn_info_t *conn = &conns[r->conn_id];
-    message_t *m = (message_t *)(conn->curr_proc_buf);
-    unsigned long msg_size = (conn->curr_recv_buf - conn->curr_proc_buf);
-    
-    assert(msg_size >= m->req_size);
-    assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
-    
-    return m;
+    return (message_t*)r->message_ptr;
 }
 
 req_info_t* req_remove(req_info_t* r){
-    cw_log("removing request req_id:%d\n", r->req_id);
+    cw_log("REQUEST remove req_id:%d\n", r->req_id);
 
     req_info_t *next;
+    conn_info_t *conn = &conns[r->conn_id];
+
+    // compacting conn recv buffer
+    unsigned long req_size = req_get_message(r)->req_size;
+    unsigned long leftover = conn->curr_recv_buf - (r->message_ptr + req_size);
+    memmove(r->message_ptr, r->message_ptr + req_size, leftover);
+
+    cw_log("DEFRAGMENT remove, conn_id:%d empty memory [%p, %p[\n", r->conn_id, r->message_ptr, r->message_ptr + req_size);
+
+    r->message_ptr = NULL;
+    conn->curr_recv_buf -= req_size;
+    conn->curr_proc_buf -= req_size;
+    conn->curr_recv_size += req_size;
+    for(req_info_t *temp = r->prev; temp != NULL; temp = temp->prev){
+        cw_log("DEFRAGMENT update ptr, req_id:%d message [%p, %p[ -> [%p, %p[\n", 
+            temp->req_id,
+            temp->message_ptr,
+            temp->message_ptr + req_get_message(temp)->req_size,
+            temp->message_ptr - req_size,
+            temp->message_ptr - req_size + req_get_message(temp)->req_size);
+        temp->message_ptr -= req_size;
+    }
 
     r->req_id = -1;
     next = r->next;
-    if(conns[r->conn_id].req_list == r)
-        conns[r->conn_id].req_list = next;
+    if(conn->req_list == r)
+        conn->req_list = next;
     if(r->next != NULL)
         r->next->prev = r->prev;
     if(r->prev != NULL)
@@ -270,10 +284,15 @@ req_info_t* req_create(int conn_id){
     int req_id = __atomic_fetch_add(&last_reqs, 1, __ATOMIC_SEQ_CST);
     req_info_t *r = &reqs[req_id % MAX_REQS];
 
-    cw_log("creating request req_id:%d by conn_id:%d\n", req_id, conn_id);
+    // discard old requests
+    if(r->req_id != -1)
+        req_remove(r);
+
+    cw_log("REQUEST create req_id:%d by conn_id:%d\n", req_id, conn_id);
 
     r->req_id = req_id;
     r->conn_id = conn_id;
+    r->curr_cmd_id = 0;
     r->next = conns[conn_id].req_list;
     if(r->next)
         r->next->prev = r;
@@ -517,7 +536,7 @@ void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros){
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
     }
 
-    cw_log("TIMER inserted, req_id: %d, timeout: %dus\n", req_id, micros);
+    cw_log("TIMEOUT inserted, req_id: %d, timeout: %dus\n", req_id, micros);
 
 }
 
@@ -540,7 +559,7 @@ int remove_timeout(thread_info_t* infos, int req_id, int epollfd){
     req->timeout_node = NULL;
 
     if(!is_top){
-        cw_log("TIMER removed, req_id: %d, unqueued\n", req_id);
+        cw_log("TIMEOUT removed, req_id: %d, unqueued\n", req_id);
         return req_timeout - time_elapsed;
     }
 
@@ -550,12 +569,12 @@ int remove_timeout(thread_info_t* infos, int req_id, int epollfd){
         infos->time_elapsed = time_elapsed;
         timerspec = micros_to_timerspec(next_timeout - time_elapsed);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
-        cw_log("TIMER removed, req_id: %d, next interrupt: %dus\n", req_id, next_timeout - time_elapsed);
+        cw_log("TIMEOUT removed, req_id: %d, next interrupt: %dus\n", req_id, next_timeout - time_elapsed);
     } else {
         infos->time_elapsed = 0;
         timerspec = micros_to_timerspec(0);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
-        cw_log("TIMER removed, req_id: %d, timer disarmed.\n", req_id);
+        cw_log("TIMEOUT removed, req_id: %d, timer disarmed.\n", req_id);
 
     }
 
@@ -573,7 +592,7 @@ int start_send(int conn_id, size_t size);
 //
 // returns number of forwarded commands as found in m, 0 if a problem occurred,
 // or -1 if command cannot be completed now (asynchronous FORWARD)
-int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd, thread_info_t *infos) {
+int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread_info_t *infos) {
     int fwd_conn_id = conn_find_addr(m->cmds[cmd_id].u.fwd.fwd_host,
                                      m->cmds[cmd_id].u.fwd.fwd_port);
     if (fwd_conn_id == -1) {
@@ -593,7 +612,7 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd, thread_inf
 
         struct epoll_event ev;
         ev.events = EPOLLOUT | EPOLLONESHOT;
-        ev.data.u64 = i2l(SOCKET, fwd_conn_id);
+        ev.data.u64 = i2l(CONNECT, fwd_conn_id);
         cw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
 
@@ -612,7 +631,7 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd, thread_inf
                 return 0;
             }
             // normal case of asynchronous connect
-            conns[fwd_conn_id].status |= CONNECTING;
+            conns[fwd_conn_id].status = CONNECTING;
         }
     }
 
@@ -626,7 +645,6 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd, thread_inf
     }
 
     int forwarded = copy_tail(m, m_dst, j);
-    req_info_t *req = req_create(conn_id);
     m_dst->req_id = req->req_id;
     m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
 
@@ -651,14 +669,14 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd, thread_inf
     }
 
     if (j == cmd_id + 1) {
-        conns[conn_id].status |= FORWARDING;
         return forwarded;
     }
 
     return 1;
 }
 
-int process_messages(int conn_id, int epollfd, thread_info_t* infos);
+int process_messages(req_info_t *req, int epollfd, thread_info_t* infos);
+int obtain_messages(int conn_id, int epollfd, thread_info_t* infos);
 
 // Call this once we received a REPLY from a socket matching a req_id we forwarded
 int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
@@ -670,41 +688,38 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
     }
 
     cw_log("Found match with conn_id %d\n", req->conn_id);
-    int conn_id = req->conn_id;
         
-    if (--(req->fwd_replies_left) == 0) {
+    if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
 
-        conns[conn_id].status &= ~FORWARDING;
-        conns[conn_id].curr_cmd_id = skip_cmds(m, conns[conn_id].curr_cmd_id, 1);
+        req->curr_cmd_id = skip_cmds(m, req->curr_cmd_id, 1);
         
         remove_timeout(infos, req_id, epollfd);
 
-        return process_messages(conn_id, epollfd, infos);
+        return process_messages(req, epollfd, infos);
     }
     
     return 1;
 }
 
 // returns 1 if reply sent correctly, 0 otherwise
-int reply(int conn_id, message_t *m, int cmd_id) {
-    message_t *m_dst = (message_t *) get_send_buf(conn_id, m->cmds[cmd_id].u.resp.resp_size);
+int reply(req_info_t *req, message_t *m, int cmd_id) {
+    message_t *m_dst = (message_t *) get_send_buf(req->conn_id, m->cmds[cmd_id].u.resp.resp_size);
 
-    cw_log("m_dst: %p, send_buf: %p\n", m_dst, conns[conn_id].send_buf);
+    cw_log("m_dst: %p, send_buf: %p\n", m_dst, conns[req->conn_id].send_buf);
 
     m_dst->req_id = m->req_id;
     m_dst->req_size = m->cmds[cmd_id].u.resp.resp_size;
     m_dst->num = 0;
-    cw_log("Replying to req %u (conn_id=%d)\n", m->req_id, conn_id);
+    cw_log("Replying to req %u (conn_id=%d)\n", m->req_id, req->conn_id);
     cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
 #ifdef CW_DEBUG
     msg_log(m_dst, "  ");
 #endif
 
-    if(conns[conn_id].req_list != NULL)
-        req_remove(conns[conn_id].req_list);
-    return start_send(conn_id, m_dst->req_size);
+    req_remove(req);
+    return start_send(req->conn_id, m_dst->req_size);
 }
 
 size_t recv_message(int sock, unsigned char *buf, size_t len) {
@@ -782,31 +797,92 @@ void close_and_forget(int epollfd, int sock) {
     close(sock);
 }
 
-int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
+// returns 1 if the message has been completely executed, 0 if the message need more time, -1 if some error occured
+int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos){
+    message_t *m = req_get_message(req);
+
+    cw_log("PROCESS req_id: %d, rip: %d, total cmd: %d\n", req->req_id, req->curr_cmd_id, m->num);
+    for (int i = req->curr_cmd_id; i < m->num; i++) {
+        cw_log("PROCESS req_id: %d,  rip: %d, command: %s\n", req->req_id, i, get_command_name(m->cmds[i].cmd));
+
+        switch(m->cmds[i].cmd){
+        case COMPUTE:
+            compute_for(m->cmds[i].u.comp_time_us);
+            break;
+        case FORWARD:
+        case MULTI_FORWARD:
+            int to_skip = start_forward(req, m, i, epollfd, infos);
+            if (to_skip == 0) {
+                fprintf(stderr, "Error: could not execute FORWARD\n");
+                return -1;
+            }
+            req->curr_cmd_id = i;
+            return 0;
+        case REPLY:
+            cw_log("Handling REPLY: req_id=%d\n", m->req_id);
+            if (!reply(req, m, i)) {
+                fprintf(stderr, "reply() failed\n");
+                return -1;
+            }
+            // any further cmds[] for replied-to hop, not me
+            return 1;
+        case STORE:
+        case LOAD:
+            check(storage_path, "Error: Cannot execute LOAD/STORE cmd because no storage path has been defined");
+
+            wrapper_t w;
+            w.cmd = m->cmds[i];
+            w.worker_id = infos->worker_id;
+            w.req_id = req->req_id;
+
+            if (write(infos->storefd, &w, sizeof(w)) < 0) {
+                perror("storage worker write() failed");
+                return -1;
+            }
+
+            req->curr_cmd_id = i+1;
+            return 0;
+        default:
+            fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+int process_messages(req_info_t *req, int epollfd, thread_info_t *infos) {
+    int executed = process_single_message(req, epollfd, infos);
+    cw_log("PROCESS_MESSAGES %d, %d\n", executed, conns[req->conn_id].serialize_request);
+    if(executed && conns[req->conn_id].serialize_request)
+        return obtain_messages(req->conn_id, epollfd, infos);
+    return executed;
+}
+
+int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
     unsigned long msg_size = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
 
     // batch processing of multiple messages, if received more than 1
+    if(conns[conn_id].serialize_request && conns[conn_id].req_list != NULL)
+        return 1;
+
     do {
-        cw_log("msg_size=%lu\n", msg_size);
         if (msg_size < sizeof(message_t)) {
-            cw_log("Got incomplete header, need to recv() more...\n");
+            cw_log("Got incomplete header [recv size:%lu, header size:%lu], need to recv() more...\n", msg_size, sizeof(message_t));
             break;
         }
         message_t *m = (message_t *)conns[conn_id].curr_proc_buf;
-        cw_log("Processing %lu bytes, req_id=%u, req_size=%u, num=%d, curr_cmd_id=%d\n", msg_size,
-               m->req_id, m->req_size, m->num, conns[conn_id].curr_cmd_id);
+        
         if (msg_size < m->req_size) {
-            cw_log(
-                "Got header but incomplete message, need to recv() more...\n");
+            cw_log("Got header but incomplete message [recv size:%lu, expected size:%d], need to recv() more...\n", msg_size, m->req_size);
             break;
         }
         assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
 
+        cw_log("Got complete ");
 #ifdef CW_DEBUG
         msg_log(m, "");
 #endif
-        cw_log("conns[%d].curr_cmd_id=%d\n", conn_id, conns[conn_id].curr_cmd_id);
-
         // FORWARD finished
         if (m->num == 0) {
             cw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].inaddr}), 
@@ -815,86 +891,20 @@ int process_messages(int conn_id, int epollfd, thread_info_t* infos) {
                     cw_log("handle_forward_reply() failed\n");
                     return 0;
             }
-        }
-        for (int i = conns[conn_id].curr_cmd_id; i < m->num; i++) {
-            if (m->cmds[i].cmd == COMPUTE) {
-                compute_for(m->cmds[i].u.comp_time_us);
-            } else if (m->cmds[i].cmd == FORWARD || m->cmds[i].cmd == MULTI_FORWARD) {
-                int to_skip = start_forward(conn_id, m, i, epollfd, infos);
-                cw_log("to_skip=%d\n", to_skip);
-                if (to_skip == 0) {
-                    fprintf(stderr, "Error: could not execute FORWARD\n");
-                    return 0;
-                } else if (to_skip == -1) {
-                    conns[conn_id].curr_cmd_id = i;
-                    goto out_shift_messages;
-                }
-      
-                if (conns[conn_id].status & FORWARDING) {
-                    conns[conn_id].curr_cmd_id = i;
-                    //conns[conn_id].curr_cmd_id = i + to_skip + 1;
-                    return 1;
-                }
-            } else if (m->cmds[i].cmd == REPLY) {
-                cw_log("Handling REPLY: req_id=%d\n", m->req_id);
-                if (!reply(conn_id, m, i)) {
-                    fprintf(stderr, "reply() failed\n");
-                    return 0;
-                }
-                // any further cmds[] for replied-to hop, not me
-                break;
-            } else if (m->cmds[i].cmd == STORE || m->cmds[i].cmd == LOAD) {
-                check(storage_path, "Error: Cannot execute LOAD/STORE cmd because no storage path has been defined");
-
-                wrapper_t w;
-                w.cmd = m->cmds[i];
-                w.worker_id = infos->worker_id;
-                w.conn_id = conn_id;
-
-                if (write(infos->storefd, &w, sizeof(w)) < 0) {
-                    perror("storage worker write() failed");
-                    return -1;
-                }
-
-                conns[conn_id].curr_cmd_id = i+1;
-                conns[conn_id].status |= STORING;
+        } else {
+            req_info_t *req = req_create(conn_id);
+            req->message_ptr = (unsigned char*) m;
+            req->curr_cmd_id = 0;
+            int executed = process_single_message(req, epollfd, infos);
+            if(!executed && conns[conn_id].serialize_request){
+                conns[conn_id].curr_proc_buf += m->req_size;
                 return 1;
-            } else {
-                fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
-                return 0;
             }
         }
 
-        // move to batch processing of next message if any
         conns[conn_id].curr_proc_buf += m->req_size;
-        conns[conn_id].curr_cmd_id = 0;
         msg_size = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
-        if (msg_size > 0)
-            cw_log("Repeating loop with msg_size=%lu\n", msg_size);
     } while (msg_size > 0);
-
- out_shift_messages:
-
-    if (conns[conn_id].curr_proc_buf == conns[conn_id].curr_recv_buf) {
-        // all received data was processed, reset curr_* for next receive
-        conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf;
-        conns[conn_id].curr_recv_size = BUF_SIZE;
-    } else {
-        // leftover received data, move it to beginning of buf unless already
-        // there
-        if (conns[conn_id].curr_proc_buf != conns[conn_id].recv_buf) {
-            // TODO do this only if we're beyond a threshold in buf[]
-            unsigned long leftover = conns[conn_id].curr_recv_buf - conns[conn_id].curr_proc_buf;
-            cw_log(
-                "Moving %lu leftover bytes back to beginning of buf with "
-                "conn_id %d",
-                leftover, conn_id);
-            memmove(conns[conn_id].curr_proc_buf, conns[conn_id].recv_buf, leftover);
-            conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf + leftover;
-            conns[conn_id].curr_recv_size = BUF_SIZE - leftover;
-        }
-    }
-    conns[conn_id].curr_proc_buf = conns[conn_id].recv_buf;
 
     return 1;
 }
@@ -950,7 +960,7 @@ int conn_alloc(int conn_sock) {
         goto continue_free;
 
     conns[conn_id].sock = conn_sock;
-    conns[conn_id].status = 0;
+    conns[conn_id].status = NOT_INIT;
     conns[conn_id].recv_buf = new_recv_buf;
     conns[conn_id].send_buf = new_send_buf;
     if (storage_path) conns[conn_id].store_buf = new_store_buf;
@@ -965,7 +975,7 @@ int conn_alloc(int conn_sock) {
     conns[conn_id].curr_recv_size = BUF_SIZE;
     conns[conn_id].curr_send_buf = conns[conn_id].send_buf;
     conns[conn_id].curr_send_size = 0;
-    conns[conn_id].curr_cmd_id = 0;
+    conns[conn_id].serialize_request = 0;
 
     if (nthread > 1)
         sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
@@ -1005,7 +1015,7 @@ int recv_messages(int conn_id) {
 // used during REPLYING or FORWARDING
 int send_messages(int conn_id) {
     int sock = conns[conn_id].sock;
-    cw_log("send_messages(): conn_id=%d, status=%d (%s), curr_send_size=%lu, sock=%d, curr_cmd_id=%d\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status), conns[conn_id].curr_send_size, sock, conns[conn_id].curr_cmd_id);
+    cw_log("send_messages(): conn_id=%d, status=%d (%s), curr_send_size=%lu, sock=%d\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status), conns[conn_id].curr_send_size, sock);
     size_t sent =
         send(sock, conns[conn_id].curr_send_buf, conns[conn_id].curr_send_size, MSG_NOSIGNAL);
     cw_log("send() returned: %d\n", (int)sent);
@@ -1046,7 +1056,7 @@ int start_send(int conn_id, size_t size) {
     // move end of send operation forward by size bytes
     conns[conn_id].curr_send_size += size;
 
-    if (conns[conn_id].status & CONNECTING)
+    if (conns[conn_id].status == CONNECTING || conns[conn_id].status == NOT_INIT)
         return 1;
     else
         return send_messages(conn_id);
@@ -1062,7 +1072,7 @@ int finalize_conn(int epollfd, int conn_id) {
         return 0;
     }
     // this may trigger send_messages() on return, if messages have already been enqueued
-    conns[conn_id].status &= ~CONNECTING;
+    conns[conn_id].status = READY;
 
     struct epoll_event ev;
     ev.events = EPOLLIN;
@@ -1087,24 +1097,23 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
     req_info_t *req = req_get_by_id(req_id);
     if (!req)
         return;
-    int conn_id = req->conn_id;
     message_t *m = req_get_message(req);
 
     remove_timeout(infos, req_id, epollfd);
 
-    if (m->cmds[conns[conn_id].curr_cmd_id].u.fwd.retries > 0) {
-        cw_log("timer expired, retry: %d\n", m->cmds[conns[conn_id].curr_cmd_id].u.fwd.retries);
+    if (m->cmds[req->curr_cmd_id].u.fwd.retries > 0) {
+        cw_log("TIMEOUT expired, retry: %d\n", m->cmds[req->curr_cmd_id].u.fwd.retries);
         
-        m->cmds[conns[conn_id].curr_cmd_id].u.fwd.retries--;
-        process_messages(conn_id, epollfd, infos);
-    } else if (m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip > 0) {
-        cw_log("timer expired, failed, skipping: %d\n", m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip);
+        m->cmds[req->curr_cmd_id].u.fwd.retries--;
+        process_messages(req, epollfd, infos);
+    } else if (m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip > 0) {
+        cw_log("TIMEOUT expired, failed, skipping: %d\n", m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip);
         
-        conns[conn_id].curr_cmd_id = skip_cmds(m, conns[conn_id].curr_cmd_id, m->cmds[conns[conn_id].curr_cmd_id].u.fwd.on_fail_skip);
-        process_messages(conn_id, epollfd, infos);
+        req->curr_cmd_id = skip_cmds(m, req->curr_cmd_id, m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip);
+        process_messages(req, epollfd, infos);
          req_remove(req);
     } else {
-        cw_log("timer expired, failed\n");
+        cw_log("TIMEOUT expired, failed\n");
          req_remove(req);
     }
 }
@@ -1121,7 +1130,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         return;
     }
 
-    if (type == SOCKET && (conns[id].sock == -1 || conns[id].recv_buf == NULL))
+    if ((type == SOCKET || type == CONNECT) && (conns[id].sock == -1 || conns[id].recv_buf == NULL))
             return;
 
     if (p_ev->events & EPOLLIN) {
@@ -1129,42 +1138,40 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         if (!recv_messages(id))
             goto err;
     }
-    if ((p_ev->events & EPOLLOUT) && (conns[id].status & CONNECTING)) {
+    if ((p_ev->events & EPOLLOUT) && (type == CONNECT)) {
         cw_log("calling final_conn()\n");
         if (!finalize_conn(epollfd, id))
             goto err;
         // we need the send_messages() below to still be tried afterwards
     }
-    if ((p_ev->events & EPOLLOUT) && (conns[id].curr_send_size > 0) && !(conns[id].status & CONNECTING)) {
+    if ((p_ev->events & EPOLLOUT) && (conns[id].curr_send_size > 0) && conns[id].status != CONNECTING && conns[id].status != NOT_INIT) {
         cw_log("calling send_mesg()\n");
         if (!send_messages(id))
             goto err;
     }
     cw_log("conns[%d].status=%d (%s)\n", id, conns[id].status, conn_status_str(conns[id].status));
+    
     // check whether we have new or leftover messages to process
-    if (!(conns[id].status & (FORWARDING | STORING))) {
-        cw_log("calling proc_mesg()\n");
-        if (!process_messages(id, epollfd, infos))
-            goto err;
-    }
+    if (!obtain_messages(id, epollfd, infos))
+        goto err;
 
-    if (conns[id].curr_send_size > 0 && !(conns[id].status & SENDING)) {
+    if (conns[id].curr_send_size > 0 && conns[id].status == READY) {
         struct epoll_event ev2;
         ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN | EPOLLOUT;
         cw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[id].sock, id, conns[id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
-        conns[id].status |= SENDING;
+        conns[id].status = SENDING;
     }
-    if (conns[id].curr_send_size == 0 && (conns[id].status & SENDING)) {
+    if (conns[id].curr_send_size == 0 && conns[id].status == SENDING) {
         struct epoll_event ev2;
         ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN;
         cw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[id].sock, id, conns[id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
-        conns[id].status &= ~SENDING;
+        conns[id].status = READY;
     }
 
     return;
@@ -1270,7 +1277,7 @@ void* storage_worker(void* args) {
                 wrapper_t w;
                 command_t storage_cmd;
                 int worker_id;
-                int conn_id;
+                int req_id;
 
                 if (read(fd, &w, sizeof(w)) < 0) {
                     perror("storage worker read()");
@@ -1280,23 +1287,23 @@ void* storage_worker(void* args) {
 
                 storage_cmd = w.cmd;
                 worker_id = w.worker_id;
-                conn_id = w.conn_id;
+                req_id = w.req_id;
 
-                cw_log("STORAGE cmd from conn_id %d\n", conn_id);
+                cw_log("STORAGE cmd from conn_id %d\n", req_id);
 
                 if (storage_cmd.cmd == STORE) {
-                    store(&storage_info, storage_info.store_buf, storage_cmd.u.store_nbytes);
+                    store(infos, infos->store_buf, storage_cmd.u.store_nbytes);
                 }
                 else if (storage_cmd.cmd == LOAD) {
                     size_t leftovers;
-                    load(&storage_info, storage_info.store_buf, storage_cmd.u.load_nbytes, &leftovers);
+                    load(infos, infos->store_buf, storage_cmd.u.load_nbytes, &leftovers);
                 }
                 else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");
                     continue;
                 }
 
-                safe_write(infos->store_replyfd[worker_id], (unsigned char*) &conn_id, sizeof(conn_id));
+                safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
             }
         }
     }
@@ -1380,6 +1387,7 @@ void* conn_worker(void* args) {
                     continue;
                 }
 
+                conns[conn_id].status = READY;
                 ev.events = EPOLLIN;
                 ev.data.u64 = i2l(SOCKET, conn_id);
 
@@ -1390,15 +1398,14 @@ void* conn_worker(void* args) {
                 // storage operation completed
                 // TODO: code
 
-                int conn_id_ACK;
-                if (safe_read(infos->store_replyfd, (unsigned char*) &conn_id_ACK, sizeof(conn_id_ACK)) < 0) {
+                int req_id_ACK;
+                if (safe_read(infos->store_replyfd, (unsigned char*) &req_id_ACK, sizeof(req_id_ACK)) < 0) {
                     perror("storage worker read() failed");
                     continue;
                 }
 
-                conns[conn_id_ACK].status &= ~STORING;
-                cw_log("STORAGE ACK for conn_id %d\n", conn_id_ACK);
-                process_messages(conn_id_ACK, epollfd, infos);
+                cw_log("STORAGE ACK for req_id %d\n", req_id_ACK);
+                process_messages(req_get_by_id(req_id_ACK), epollfd, infos);
                 //exec_request(epollfd, &events[i], infos);
             } 
             else if (type == TERMINATION) {
