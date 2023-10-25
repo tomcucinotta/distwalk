@@ -4,11 +4,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 
 #ifdef CW_DEBUG
 
 #define cw_log(msg, ...) do { \
-    printf(msg, ## __VA_ARGS__);  \
+    struct timespec __ts; \
+    clock_gettime(CLOCK_MONOTONIC, &__ts);\
+    printf("[%ld.%09ld] " msg, __ts.tv_sec, __ts.tv_nsec, ## __VA_ARGS__);  \
     fflush(stdout);  \
   } while (0);
 
