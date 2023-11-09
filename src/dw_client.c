@@ -337,7 +337,7 @@ void *thread_receiver(void *data) {
 
             /* spawn sender once connection is established */
 
-            // TODO (?) thr_data is allocated in the stck and reused for every thread, possible (but completly improbable) race condition
+            // TODO (?) thr_data is allocated in the stack and reused for every thread, possible (but completly improbable) race condition
             thr_data.thread_id = thread_id;
             thr_data.first_pkt_id = i,
             thr_data.num_send_pkts = pkts_per_session;

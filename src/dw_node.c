@@ -70,7 +70,6 @@ typedef struct {
 
     unsigned char *recv_buf;      // receive buffer
     unsigned char *send_buf;      // send buffer
-    unsigned char *store_buf;     // load/store buffer
 
     unsigned char *curr_recv_buf; // current pointer within receive buffer while receiving
     unsigned long curr_recv_size; // leftover space in receive buffer
@@ -924,7 +923,6 @@ void conn_free(int conn_id) {
     }
     free(conns[conn_id].recv_buf);   conns[conn_id].recv_buf = NULL;
     free(conns[conn_id].send_buf);   conns[conn_id].send_buf = NULL;
-    free(conns[conn_id].store_buf);  conns[conn_id].store_buf = NULL;
     conns[conn_id].sock = -1;
 
     if (nthread > 1)
@@ -934,19 +932,12 @@ void conn_free(int conn_id) {
 int conn_alloc(int conn_sock) {
     unsigned char *new_recv_buf = NULL;
     unsigned char *new_send_buf = NULL;
-    unsigned char *new_store_buf = NULL;
 
     new_recv_buf = malloc(BUF_SIZE);
     new_send_buf = malloc(BUF_SIZE);
 
-    if (storage_path)
-        new_store_buf =
-            (use_odirect
-             ? aligned_alloc(blk_size, BUF_SIZE + blk_size)
-             : malloc(BUF_SIZE));
-
     if (new_recv_buf == NULL || new_send_buf == NULL
-        || (storage_path && new_store_buf == NULL))
+        || storage_path)
         goto continue_free;
 
     int conn_id;
@@ -966,7 +957,6 @@ int conn_alloc(int conn_sock) {
     conns[conn_id].status = 0;
     conns[conn_id].recv_buf = new_recv_buf;
     conns[conn_id].send_buf = new_send_buf;
-    if (storage_path) conns[conn_id].store_buf = new_store_buf;
 
     if (nthread > 1)
         sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
@@ -989,7 +979,6 @@ int conn_alloc(int conn_sock) {
 
     if (new_recv_buf) free(new_recv_buf);
     if (new_send_buf) free(new_send_buf);
-    if (storage_path && new_store_buf) free(new_store_buf);
 
     return -1;
 }
@@ -1536,7 +1525,6 @@ int main(int argc, char *argv[]) {
         conns[i].sock = -1;
         conns[i].recv_buf = NULL;
         conns[i].send_buf = NULL;
-        conns[i].store_buf = NULL;
     }
 
     // Tag all req as unused
