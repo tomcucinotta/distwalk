@@ -43,12 +43,11 @@ static inline void l2i(uint64_t n, uint32_t* ln, uint32_t* rn) {
 
 // I could be doing 0, 1, 2 or more of these at the same time => bitmask
 typedef enum {
-    SENDING = 1,        // using EPOLLOUT while sending data to sock
-    LOADING = 2,        // loading data from disk
-    STORING = 4,        // storing data to disk
-    CONNECTING = 8,     // waiting for connection establishment during a FORWARD
-    FORWARDING = 16      // waiting for a FORWARD to complete
-} req_status;
+    NOT_INIT,
+    READY,
+    SENDING,
+    CONNECTING,           
+} conn_status;
 
 typedef enum {
     LISTEN,
@@ -56,14 +55,14 @@ typedef enum {
     STORAGE,
     TIMER,
     CONNECT,
-    RECEIVE,
+    SOCKET,
 } event_type;
 
 typedef struct req_info_t req_info_t;
 
 typedef struct {
     int sock;                     // -1 for unused conn_info_t
-    req_status status;
+    conn_status status;
 
     in_addr_t inaddr;             // target IP
     uint16_t port;                // target port (for multiple nodes on same host)
@@ -182,20 +181,17 @@ int thread_affinity = 0;
 char* thread_affinity_list;
 
 const char *conn_status_str(int s) {
-    static char str[16];
-    str[0] = 0;
-    char *p = str;
-    if (s & SENDING)
-        sprintf(p++, "S");
-    if (s & LOADING)
-        sprintf(p++, "R");
-    if (s & STORING)
-        sprintf(p++, "W");
-    if (s & CONNECTING)
-        sprintf(p++, "C");
-    if (s & FORWARDING)
-        sprintf(p++, "F");
-    return str;
+    static const char *ready = "READY", *connecting = "CONNECTING", *sending = "SENDING", *not_init = "NOT INIT";
+    const char *ret;
+    if (s == READY)
+        ret = ready;
+    if (s == CONNECTING)
+        ret = connecting;
+    if (s == SENDING)
+        ret = sending;
+    if (s == NOT_INIT)
+        ret = not_init;
+    return ret;
 }
 
 // return index in conns[] of conn_info_t associated to inaddr:port, or -1 if not found
@@ -634,7 +630,7 @@ int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread
                 return 0;
             }
             // normal case of asynchronous connect
-            conns[fwd_conn_id].status |= CONNECTING;
+            conns[fwd_conn_id].status = CONNECTING;
         }
     }
 
@@ -954,7 +950,7 @@ int conn_alloc(int conn_sock) {
         goto continue_free;
 
     conns[conn_id].sock = conn_sock;
-    conns[conn_id].status = 0;
+    conns[conn_id].status = NOT_INIT;
     conns[conn_id].recv_buf = new_recv_buf;
     conns[conn_id].send_buf = new_send_buf;
 
@@ -1048,7 +1044,7 @@ int start_send(int conn_id, size_t size) {
     // move end of send operation forward by size bytes
     conns[conn_id].curr_send_size += size;
 
-    if (conns[conn_id].status & CONNECTING)
+    if (conns[conn_id].status == CONNECTING || conns[conn_id].status == NOT_INIT)
         return 1;
     else
         return send_messages(conn_id);
@@ -1064,11 +1060,11 @@ int finalize_conn(int epollfd, int conn_id) {
         return 0;
     }
     // this may trigger send_messages() on return, if messages have already been enqueued
-    conns[conn_id].status &= ~CONNECTING;
+    conns[conn_id].status = READY;
 
     struct epoll_event ev;
     ev.events = EPOLLIN;
-    ev.data.u64 = i2l(RECEIVE, conn_id);
+    ev.data.u64 = i2l(SOCKET, conn_id);
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[conn_id].sock, &ev));
 
     return 1;
@@ -1122,7 +1118,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         return;
     }
 
-    if ((type == RECEIVE || type == CONNECT) && (conns[id].sock == -1 || conns[id].recv_buf == NULL))
+    if ((type == SOCKET || type == CONNECT) && (conns[id].sock == -1 || conns[id].recv_buf == NULL))
             return;
 
     if (p_ev->events & EPOLLIN) {
@@ -1136,7 +1132,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
             goto err;
         // we need the send_messages() below to still be tried afterwards
     }
-    if ((p_ev->events & EPOLLOUT) && (conns[id].curr_send_size > 0) && !(conns[id].status & CONNECTING)) {
+    if ((p_ev->events & EPOLLOUT) && (conns[id].curr_send_size > 0) && conns[id].status != CONNECTING && conns[id].status != NOT_INIT) {
         cw_log("calling send_mesg()\n");
         if (!send_messages(id))
             goto err;
@@ -1147,23 +1143,23 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     if (!obtain_messages(id, epollfd, infos))
         goto err;
 
-    if (conns[id].curr_send_size > 0 && !(conns[id].status & SENDING)) {
+    if (conns[id].curr_send_size > 0 && conns[id].status == READY) {
         struct epoll_event ev2;
-        ev2.data.u64 = i2l(RECEIVE, id);
+        ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN | EPOLLOUT;
         cw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[id].sock, id, conns[id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
-        conns[id].status |= SENDING;
+        conns[id].status = SENDING;
     }
-    if (conns[id].curr_send_size == 0 && (conns[id].status & SENDING)) {
+    if (conns[id].curr_send_size == 0 && conns[id].status == SENDING) {
         struct epoll_event ev2;
-        ev2.data.u64 = i2l(RECEIVE, id);
+        ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN;
         cw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[id].sock, id, conns[id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
-        conns[id].status &= ~SENDING;
+        conns[id].status = READY;
     }
 
     return;
@@ -1379,8 +1375,9 @@ void* conn_worker(void* args) {
                     continue;
                 }
 
+                conns[conn_id].status = READY;
                 ev.events = EPOLLIN;
-                ev.data.u64 = i2l(RECEIVE, conn_id);
+                ev.data.u64 = i2l(SOCKET, conn_id);
 
                 if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
