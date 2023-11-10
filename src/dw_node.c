@@ -186,62 +186,6 @@ size_t safe_read(int fd, unsigned char *buf, size_t len) {
     return leftovers;
 }
 
-// Copy req id from m into m_dst, and commands up to the matching REPLY (or the end of m),
-// skipping the first cmd_id elems in m->cmds[].
-//
-// Return the next comant pointer
-command_t* copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
-    // copy message header
-    m_dst->req_id = m->req_id;
-    m_dst->req_size = 0;
-    int nested_fwd = 0;
-    // left-shift m->cmds[] into m_dst->cmds[], removing m->cmds[cmd_id]
-    int i = 0;
-    command_t *itr = cmd;
-
-    while(itr->cmd != EOM){
-        if (itr->cmd == REPLY) {
-            if (nested_fwd == 0)
-                break;
-            else
-                nested_fwd--;
-        } else if (itr->cmd == FORWARD)
-            nested_fwd++;
-        i++;
-        itr = cmd_next(itr);
-    }
-    if (itr->cmd != EOM)
-        itr = cmd_next(itr);
-    int cmds_len = ((unsigned char*)itr - (unsigned char*)cmd);
-    memcpy(m_dst->cmds, cmd, cmds_len);
-    command_t* end_command = (command_t*)((unsigned char*)&m_dst->cmds[0] + cmds_len);
-    end_command->cmd = EOM;
-    m_dst->num = i + 1;
-
-    return itr;
-}
-
-command_t* skip_cmds(message_t* m, command_t *cmd, int to_skip) {
-    int skipped = to_skip;
-    command_t *itr = cmd;
-
-    while (itr->cmd != EOM && skipped > 0) {
-        int nested_fwd = 0;
-
-        do {
-            if (itr->cmd == FORWARD)
-                nested_fwd++;
-            if (itr->cmd == REPLY)
-                nested_fwd--;
-            itr = cmd_next(itr);
-        } while (itr->cmd != EOM && nested_fwd > 0);
-
-        skipped--;
-    }
-
-    return itr;
-}
-
 int timerspec_to_micros(struct itimerspec t) {
     return t.it_value.tv_sec * 1000000 + t.it_value.tv_nsec / 1000;
 }
@@ -395,7 +339,7 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
         c = cmd_next(c);
     }
 
-    command_t* reply_cmd = copy_tail(m, m_dst, c);
+    command_t* reply_cmd = message_copy_tail(m, m_dst, c);
     m_dst->req_id = req->req_id;
     m_dst->req_size = fwd.pkt_size;
 
@@ -437,7 +381,7 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
     if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
 
-        req->curr_cmd = skip_cmds(m, req->curr_cmd, 1);
+        req->curr_cmd = message_skip_cmds(m, req->curr_cmd, 1);
         
         remove_timeout(infos, req_id, epollfd);
 
@@ -677,7 +621,7 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
     } else if (fwd->on_fail_skip > 0) {
         cw_log("TIMEOUT expired, failed, skipping: %d\n", fwd->on_fail_skip);
         
-        req->curr_cmd = skip_cmds(m, req->curr_cmd, fwd->on_fail_skip);
+        req->curr_cmd = message_skip_cmds(m, req->curr_cmd, fwd->on_fail_skip);
         process_messages(req, epollfd, infos);
          conn_req_remove(conn, req);
     } else {
