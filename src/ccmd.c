@@ -126,20 +126,25 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
     ccmd_node_t* curr = q->head_actions;
     int num = q->num;
 
-    int i = 0;
     double x = 0;
+    command_t *cmd = message_first_cmd(m);
+
     while (curr) {
-        m->cmds[i].cmd = curr->cmd;
+        cmd->cmd = curr->cmd;
 
         switch (curr->cmd) {
             case STORE:
+                cmd_get_opts(store_opts_t, cmd)->store_nbytes = pd_sample(&curr->pd_val);
+                break;
             case COMPUTE:
+                cmd_get_opts(comp_opts_t, cmd)->comp_time_us = pd_sample(&curr->pd_val);
+                break;
             case LOAD:
-                m->cmds[i++].u.comp_time_us = pd_sample(&curr->pd_val);
+                cmd_get_opts(load_opts_t, cmd)->load_nbytes = pd_sample(&curr->pd_val);
                 break;
             case REPLY: 
-                m->cmds[i].u.resp = curr->resp;
-                m->cmds[i++].u.resp.resp_size = pd_sample(&curr->pd_val);
+                *cmd_get_opts(reply_opts_t, cmd) = curr->resp;
+                cmd_get_opts(reply_opts_t, cmd)->resp_size = pd_sample(&curr->pd_val);
                 break;
             case PSKIP:
                 drand48_r(&rnd_buf, &x);
@@ -152,18 +157,20 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
                 break;
             case MULTI_FORWARD:
             case FORWARD:
-                m->cmds[i].u.fwd = curr->fwd;
-                m->cmds[i++].u.fwd.pkt_size = pd_sample(&curr->pd_val);
+                *cmd_get_opts(fwd_opts_t, cmd) = curr->fwd;
+                cmd_get_opts(fwd_opts_t, cmd)->pkt_size = pd_sample(&curr->pd_val);
                 break;
             default: 
                 fprintf(stderr, "ccmd_dump() - Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
+        cmd = cmd_next(cmd);
         //printf("%s\n", get_command_name(curr->cmd));
         curr = curr->next;
     }
+    cmd->cmd = EOM;
 
-    m->num = num;
+    m->num = num + 1;
 }
 
 void ccmd_destroy(ccmd_t* q) {

@@ -200,8 +200,7 @@ void *thread_sender(void *data) {
         m->req_id = pkt_id;
         m->req_size = pd_sample(&send_pkt_size_pd);
 
-        cw_log("sending %u bytes (will expect %u bytes in response)...\n",
-               m->req_size, m->cmds[m->num-1].u.resp.resp_size);
+        cw_log("sending %u bytes...\n", m->req_size);
         assert(m->req_size <= BUF_SIZE && m->req_size >= m->num * sizeof(command_t));
 
 #ifdef CW_DEBUG

@@ -18,7 +18,7 @@ struct req_info_t{
 
     unsigned char *message_ptr;
     
-    int curr_cmd_id;
+    command_t *curr_cmd;
 
     pqueue_node_t *timeout_node;
     req_info_t *prev, *next;
