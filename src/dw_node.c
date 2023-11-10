@@ -106,7 +106,7 @@ typedef struct {
 } storage_info_t;
 
 typedef struct {
-    command_t cmd;
+    command_t *cmd;
     int worker_id;
     int req_id;
 } wrapper_t;
@@ -189,49 +189,57 @@ size_t safe_read(int fd, unsigned char *buf, size_t len) {
 // Copy req id from m into m_dst, and commands up to the matching REPLY (or the end of m),
 // skipping the first cmd_id elems in m->cmds[].
 //
-// Return the number of copied commands
-int copy_tail(message_t *m, message_t *m_dst, int cmd_id) {
+// Return the next comant pointer
+command_t* copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     // copy message header
     m_dst->req_id = m->req_id;
     m_dst->req_size = 0;
     int nested_fwd = 0;
     // left-shift m->cmds[] into m_dst->cmds[], removing m->cmds[cmd_id]
-    int i = cmd_id;
+    int i = 0;
+    command_t *itr = cmd;
 
-    for (; i < m->num; i++) {
-        m_dst->cmds[i - cmd_id] = m->cmds[i];
-        if (m->cmds[i].cmd == REPLY) {
+    while(itr->cmd != EOM){
+        if (itr->cmd == REPLY) {
             if (nested_fwd == 0)
                 break;
             else
                 nested_fwd--;
-        } else if (m->cmds[i].cmd == FORWARD)
+        } else if (itr->cmd == FORWARD)
             nested_fwd++;
+        i++;
+        itr = cmd_next(itr);
     }
+    if (itr->cmd != EOM)
+        itr = cmd_next(itr);
+    int cmds_len = ((unsigned char*)itr - (unsigned char*)cmd);
+    memcpy(m_dst->cmds, cmd, cmds_len);
+    command_t* end_command = (command_t*)((unsigned char*)&m_dst->cmds[0] + cmds_len);
+    end_command->cmd = EOM;
+    m_dst->num = i + 1;
 
-    m_dst->num = i - cmd_id + 1;
-
-    return m_dst->num;
+    return itr;
 }
 
-int skip_cmds(message_t* m, int cmd_id, int to_skip) {
-    int i = cmd_id, skipped = to_skip;
+command_t* skip_cmds(message_t* m, command_t *cmd, int to_skip) {
+    int skipped = to_skip;
+    command_t *itr = cmd;
 
-    while (i < m->num && skipped > 0) {
+    while (itr->cmd != EOM && skipped > 0) {
         int nested_fwd = 0;
 
         do {
-            if (m->cmds[i].cmd == FORWARD)
+            if (itr->cmd == FORWARD)
                 nested_fwd++;
-            if (m->cmds[i].cmd == REPLY)
+            if (itr->cmd == REPLY)
                 nested_fwd--;
-            i++;
-        } while (i < m->num && nested_fwd > 0);
+            itr = cmd_next(itr);
+        } while (itr->cmd != EOM && nested_fwd > 0);
 
         skipped--;
     }
 
-    return i;
+    return itr;
 }
 
 int timerspec_to_micros(struct itimerspec t) {
@@ -322,19 +330,20 @@ void setnonblocking(int fd);
 //
 // returns number of forwarded commands as found in m, 0 if a problem occurred,
 // or -1 if command cannot be completed now (asynchronous FORWARD)
-int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread_info_t *infos) {
+int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, thread_info_t *infos) {
+    fwd_opts_t fwd = *cmd_get_opts(fwd_opts_t, cmd);
+
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_addr = {.s_addr = m->cmds[cmd_id].u.fwd.fwd_host},
-        .sin_port = m->cmds[cmd_id].u.fwd.fwd_port,
+        .sin_addr = {.s_addr = fwd.fwd_host},
+        .sin_port = fwd.fwd_port,
     };
-    int fwd_conn_id = conn_find_existing(addr,
-                                     m->cmds[cmd_id].u.fwd.proto);
+    int fwd_conn_id = conn_find_existing(addr, fwd.proto);
     if (fwd_conn_id == -1) {
         int no_delay = 1;
         int clientSocket = 0;
 
-        if (m->cmds[cmd_id].u.fwd.proto == TCP) {
+        if (fwd.proto == TCP) {
             clientSocket = socket(AF_INET, SOCK_STREAM, 0);
             sys_check(setsockopt(clientSocket, IPPROTO_TCP,
                                  TCP_NODELAY, (void *)&no_delay,
@@ -344,7 +353,7 @@ int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread
         }
 
         setnonblocking(clientSocket);
-        fwd_conn_id = conn_alloc(clientSocket, addr, m->cmds[cmd_id].u.fwd.proto);
+        fwd_conn_id = conn_alloc(clientSocket, addr, fwd.proto);
 
         if (fwd_conn_id == -1) {
             fprintf(stderr, "conn_add() failed, closing\n");
@@ -352,15 +361,15 @@ int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread
             return 0;
         }
 
-        if (m->cmds[cmd_id].u.fwd.proto == TCP) {
+        if (fwd.proto == TCP) {
             struct epoll_event ev;
             ev.events = EPOLLOUT | EPOLLONESHOT;
             ev.data.u64 = i2l(CONNECT, fwd_conn_id);
             cw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
             sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
 
-            cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {m->cmds[cmd_id].u.fwd.fwd_host}),
-                   ntohs(m->cmds[cmd_id].u.fwd.fwd_port));
+            cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {fwd.fwd_host}),
+                   ntohs(fwd.fwd_port));
             memset((char *) &addr, '\0', sizeof(addr));
 
             int rv = connect(clientSocket, &addr, sizeof(addr));
@@ -379,20 +388,20 @@ int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread
     int sock = conns[fwd_conn_id].sock;
     assert(sock != -1);
     message_t *m_dst = conn_send_message(&conns[fwd_conn_id]);
-    assert(m_dst->req_size >= m->cmds[cmd_id].u.fwd.pkt_size);
+    assert(m_dst->req_size >= fwd.pkt_size);
 
-    int j = cmd_id + 1;
-    while (j < m->num && m->cmds[j].cmd == MULTI_FORWARD) {
-        j++;
+    command_t *c = cmd_next(cmd);
+    while (c->cmd != EOM && c->cmd == MULTI_FORWARD) {
+        c = cmd_next(c);
     }
 
-    int forwarded = copy_tail(m, m_dst, j);
+    command_t* reply_cmd = copy_tail(m, m_dst, c);
     m_dst->req_id = req->req_id;
-    m_dst->req_size = m->cmds[cmd_id].u.fwd.pkt_size;
+    m_dst->req_size = fwd.pkt_size;
 
     cw_log("Forwarding req %u to %s:%d\n", m_dst->req_id,
-           inet_ntoa((struct in_addr){m->cmds[cmd_id].u.fwd.fwd_host}),
-           ntohs(m->cmds[cmd_id].u.fwd.fwd_port));
+           inet_ntoa((struct in_addr){fwd.fwd_host}),
+           ntohs(fwd.fwd_port));
 #ifdef CW_DEBUG
     msg_log(m_dst, "  f: ");
 #endif
@@ -402,17 +411,11 @@ int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread
     if (conn_start_send(&conns[fwd_conn_id], addr) < 0)
         return 0;
         
-    if (m->cmds[cmd_id].u.fwd.timeout) {
-        insert_timeout(infos, req->req_id, epollfd, m->cmds[cmd_id].u.fwd.timeout);
+    if (fwd.timeout) {
+        insert_timeout(infos, req->req_id, epollfd, fwd.timeout);
     }
 
-    if (cmd_id == 0 || m->cmds[cmd_id - 1].cmd != MULTI_FORWARD) {
-        req->fwd_replies_left = m->cmds[cmd_id + 1 + forwarded].u.resp.n_ack;
-    }
-
-    if (j == cmd_id + 1) {
-        return forwarded;
-    }
+    req->fwd_replies_left = cmd_get_opts(reply_opts_t, reply_cmd)->n_ack;
 
     return 1;
 }
@@ -434,7 +437,7 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
     if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
 
-        req->curr_cmd_id = skip_cmds(m, req->curr_cmd_id, 1);
+        req->curr_cmd = skip_cmds(m, req->curr_cmd, 1);
         
         remove_timeout(infos, req_id, epollfd);
 
@@ -445,15 +448,18 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
 }
 
 // returns 1 if reply sent correctly, 0 otherwise
-int reply(req_info_t *req, message_t *m, int cmd_id) {
+int reply(req_info_t *req, message_t *m, command_t *cmd) {
     message_t *m_dst = conn_send_message(&conns[req->conn_id]);
-    assert(m_dst->req_size >= m->cmds[cmd_id].u.resp.resp_size);
+    reply_opts_t *opts = cmd_get_opts(reply_opts_t, cmd);
+    assert(m_dst->req_size >= opts->resp_size);
 
     cw_log("%d, m_dst: %p, send_buf: %p\n", req->conn_id, m_dst, conns[req->conn_id].send_buf);
 
     m_dst->req_id = m->req_id;
-    m_dst->req_size = m->cmds[cmd_id].u.resp.resp_size;
+    m_dst->req_size = opts->resp_size;
     m_dst->num = 0;
+    m_dst->cmds[0].cmd = EOM;
+
     cw_log("Replying to req %u (conn_id=%d)\n", m->req_id, req->conn_id);
     cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
@@ -530,26 +536,25 @@ void close_and_forget(int epollfd, int sock) {
 int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
     message_t *m = req_get_message(req);
 
-    cw_log("PROCESS req_id: %d, rip: %d, total cmd: %d\n", req->req_id, req->curr_cmd_id, m->num);
-    for (int i = req->curr_cmd_id; i < m->num; i++) {
-        cw_log("PROCESS req_id: %d,  rip: %d, command: %s\n", req->req_id, i, get_command_name(m->cmds[i].cmd));
+    for (command_t *cmd = req->curr_cmd; cmd->cmd != EOM; cmd = cmd_next(cmd)) {
+        cw_log("PROCESS req_id: %d,  command: %s\n", req->req_id, get_command_name(cmd->cmd));
 
-        switch(m->cmds[i].cmd) {
+        switch(cmd->cmd) {
         case COMPUTE:
-            compute_for(m->cmds[i].u.comp_time_us);
+            compute_for(cmd_get_opts(comp_opts_t, cmd)->comp_time_us);
             break;
         case FORWARD:
         case MULTI_FORWARD:
-            int to_skip = start_forward(req, m, i, epollfd, infos);
+            int to_skip = start_forward(req, m, cmd, epollfd, infos);
             if (to_skip == 0) {
                 fprintf(stderr, "Error: could not execute FORWARD\n");
                 return -1;
             }
-            req->curr_cmd_id = i;
+            req->curr_cmd = cmd;
             return 0;
         case REPLY:
             cw_log("Handling REPLY: req_id=%d\n", m->req_id);
-            if (!reply(req, m, i)) {
+            if (!reply(req, m, cmd)) {
                 fprintf(stderr, "reply() failed\n");
                 return -1;
             }
@@ -560,7 +565,7 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
             check(storage_path, "Error: Cannot execute LOAD/STORE cmd because no storage path has been defined");
 
             wrapper_t w;
-            w.cmd = m->cmds[i];
+            w.cmd = cmd;
             w.worker_id = infos->worker_id;
             w.req_id = req->req_id;
 
@@ -569,7 +574,7 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
                 return -1;
             }
 
-            req->curr_cmd_id = i + 1;
+            req->curr_cmd = cmd_next(cmd);
             return 0;
         default:
             fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
@@ -608,7 +613,7 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
         } else {
             req_info_t *req = conn_req_add(conn);
             req->message_ptr = (unsigned char*) m;
-            req->curr_cmd_id = 0;
+            req->curr_cmd = message_first_cmd(m);
             int executed = process_single_message(req, epollfd, infos);
             if (!executed && conns[conn_id].serialize_request) {
                 conns[conn_id].curr_proc_buf += m->req_size;
@@ -663,15 +668,16 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
 
     remove_timeout(infos, req_id, epollfd);
 
-    if (m->cmds[req->curr_cmd_id].u.fwd.retries > 0) {
-        cw_log("TIMEOUT expired, retry: %d\n", m->cmds[req->curr_cmd_id].u.fwd.retries);
+    fwd_opts_t *fwd = cmd_get_opts(fwd_opts_t, req->curr_cmd);
+    if (fwd->retries > 0) {
+        cw_log("TIMEOUT expired, retry: %d\n", fwd->retries);
         
-        m->cmds[req->curr_cmd_id].u.fwd.retries--;
+        fwd->retries--;
         process_messages(req, epollfd, infos);
-    } else if (m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip > 0) {
-        cw_log("TIMEOUT expired, failed, skipping: %d\n", m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip);
+    } else if (fwd->on_fail_skip > 0) {
+        cw_log("TIMEOUT expired, failed, skipping: %d\n", fwd->on_fail_skip);
         
-        req->curr_cmd_id = skip_cmds(m, req->curr_cmd_id, m->cmds[req->curr_cmd_id].u.fwd.on_fail_skip);
+        req->curr_cmd = skip_cmds(m, req->curr_cmd, fwd->on_fail_skip);
         process_messages(req, epollfd, infos);
          conn_req_remove(conn, req);
     } else {
@@ -837,7 +843,7 @@ void* storage_worker(void* args) {
             }
             else {
                 wrapper_t w;
-                command_t storage_cmd;
+                command_t *storage_cmd;
                 int worker_id;
                 int req_id;
 
@@ -853,12 +859,12 @@ void* storage_worker(void* args) {
 
                 cw_log("STORAGE cmd from conn_id %d\n", req_id);
 
-                if (storage_cmd.cmd == STORE) {
-                    store(infos, infos->store_buf, storage_cmd.u.store_nbytes);
+                if (storage_cmd->cmd == STORE) {
+                    store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd)->store_nbytes);
                 }
-                else if (storage_cmd.cmd == LOAD) {
+                else if (storage_cmd->cmd == LOAD) {
                     size_t leftovers;
-                    load(infos, infos->store_buf, storage_cmd.u.load_nbytes, &leftovers);
+                    load(infos, infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd)->load_nbytes, &leftovers);
                 }
                 else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");

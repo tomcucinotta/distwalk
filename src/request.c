@@ -43,7 +43,7 @@ req_info_t* req_alloc() {
         return NULL;
 
     r->req_id = req_id;
-    r->curr_cmd_id = 0;
+    r->curr_cmd = NULL;
     r->next = NULL;
     r->prev = NULL;
 
