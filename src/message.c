@@ -1,4 +1,10 @@
 #include "message.h"
+#include <string.h>
+#include <stdlib.h>
+
+#ifndef min
+#define min(a, b) ((a)>(b)?(b):(a))
+#endif
 
 inline const char* get_command_name(command_type_t cmd) {
   switch (cmd) {
@@ -16,9 +22,9 @@ inline const char* get_command_name(command_type_t cmd) {
   }
 }
 
-inline int cmd_size(command_t *c) {
+inline int cmd_type_size(command_type_t type) {
   int base = sizeof(command_t);
-  switch (c->cmd) {
+  switch (type) {
   case REPLY:
     return base + sizeof(reply_opts_t);
   case MULTI_FORWARD:
@@ -39,12 +45,68 @@ inline int cmd_size(command_t *c) {
 
 inline command_t* cmd_next(command_t *c) {
   unsigned char *ptr = (unsigned char*)c;
-  ptr += cmd_size(c);
+  ptr += cmd_type_size(c->cmd);
   return (command_t*) ptr;
 }
 
 inline command_t* message_first_cmd(message_t *m) {
   return &m->cmds[0];
+}
+
+// copy a message, and its commands starting from cmd until the final REPLY is found
+// m_dst->req_size should contain the available size
+command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
+    // copy message header
+    m_dst->req_id = m->req_id;
+    int nested_fwd = 0;
+    int i = 0;
+    command_t *itr = cmd;
+
+    while(itr->cmd != EOM) {
+        if (itr->cmd == REPLY) {
+            if (nested_fwd == 0)
+                break;
+            else
+                nested_fwd--;
+        } else if (itr->cmd == FORWARD)
+            nested_fwd++;
+        i++;
+        itr = cmd_next(itr);
+    }
+    if (itr->cmd != EOM)
+        itr = cmd_next(itr);
+    int cmds_len = ((unsigned char*)itr - (unsigned char*)cmd);
+    int skipped_len = ((unsigned char*)cmd - (unsigned char*)message_first_cmd(m));
+    if (m_dst->req_size < cmds_len + cmd_type_size(EOM))
+      return NULL;
+
+    memcpy(m_dst->cmds, cmd, cmds_len);
+    command_t* end_command = (command_t*)((unsigned char*)&m_dst->cmds[0] + cmds_len);
+    end_command->cmd = EOM;
+    m_dst->num = i + 1;
+    m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
+    return itr;
+}
+
+command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip) {
+    int skipped = to_skip;
+    command_t *itr = cmd;
+
+    while (itr->cmd != EOM && skipped > 0) {
+        int nested_fwd = 0;
+
+        do {
+            if (itr->cmd == FORWARD)
+                nested_fwd++;
+            if (itr->cmd == REPLY)
+                nested_fwd--;
+            itr = cmd_next(itr);
+        } while (itr->cmd != EOM && nested_fwd > 0);
+
+        skipped--;
+    }
+
+    return itr;
 }
 
 inline const void msg_log(message_t* m, char* padding) {

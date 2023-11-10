@@ -119,7 +119,8 @@ ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
     return curr;
 }
 
-void ccmd_dump(ccmd_t* q, message_t* m) {
+// returns 1 if the message has been succesfully copied, 0 if there is not enough space (saved in req_size field)
+int ccmd_dump(ccmd_t* q, message_t* m) {
     check(q, "ccmd_dump() error - Initialize queue first");
     check(m, "ccmd_dump() error - NullPointer message_t*");
 
@@ -131,6 +132,10 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
 
     while (curr) {
         cmd->cmd = curr->cmd;
+
+        if(m->req_size < cmd_type_size(curr->cmd))
+            return -1;
+        m->req_size -= cmd_type_size(curr->cmd);
 
         switch (curr->cmd) {
             case STORE:
@@ -168,9 +173,13 @@ void ccmd_dump(ccmd_t* q, message_t* m) {
         //printf("%s\n", get_command_name(curr->cmd));
         curr = curr->next;
     }
+    if(m->req_size < cmd_type_size(EOM))
+            return -1;
+    m->req_size -= cmd_type_size(EOM);
     cmd->cmd = EOM;
 
     m->num = num + 1;
+    return 1;
 }
 
 void ccmd_destroy(ccmd_t* q) {

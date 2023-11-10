@@ -35,7 +35,7 @@ typedef struct ccmd_queue_t {
 void ccmd_init(ccmd_t** q);
 ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec);
 void ccmd_attach_last_reply(ccmd_t* q, pd_spec_t *p_pd_spec);
-void ccmd_dump(ccmd_t* q, message_t* m);
+int ccmd_dump(ccmd_t* q, message_t* m);
 void ccmd_destroy(ccmd_t* q);
 void ccmd_log(ccmd_t* q);
 
