@@ -139,6 +139,7 @@ unsigned int ramp_num_steps = 0;   // number of ramp-up steps
 char *ramp_fname = NULL;
 
 #define MAX_HOST_STRING 31
+proto_t proto = TCP;
 char serverhost[MAX_HOST_STRING] = DEFAULT_ADDR ":" DEFAULT_PORT;
 char clienthost[MAX_HOST_STRING] = "0.0.0.0:0";
 
@@ -206,7 +207,7 @@ void *thread_sender(void *data) {
 #ifdef CW_DEBUG
         msg_log(m, "Sending msg: ");
 #endif
-        if (!conn_start_send(conn)) {
+        if (!conn_start_send(conn, conn->target)) {
             fprintf(stderr,
                     "Forcing premature termination of sender thread while "
                     "attempting to send pkt %d\n",
@@ -264,14 +265,15 @@ void *thread_receiver(void *data) {
             /*---- Create the socket. The three arguments are: ----*/
             /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
              * this case) */
-            clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
-            int conn_id = conn_alloc(clientSocket[thread_id]);
-            conn_get_by_id(conn_id)->status = READY;
-            printf("conn_id: %d\n", conn_id);
+            if (proto == TCP) {
+                clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
 
-            sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
+                sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
                                  TCP_NODELAY, (void *)&no_delay,
                                  sizeof(no_delay)));
+            } else {
+                clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM, 0);
+            }
 
             cw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
                    ntohs(myaddr.sin_port));
@@ -289,6 +291,9 @@ void *thread_receiver(void *data) {
                               (struct sockaddr *)&serveraddr, addr_size));
 
             /* spawn sender once connection is established */
+
+            int conn_id = conn_alloc(clientSocket[thread_id], serveraddr, proto);
+            conn_get_by_id(conn_id)->status = READY;
 
             // TODO (?) thr_data is allocated in the stack and reused for every thread, possible (but completly improbable) race condition
             thr_data.thread_id = thread_id;
@@ -440,7 +445,8 @@ int parse_args(int argc, char *argv[]) {
                 "\n"
                 "Options:\n"
                 "  -h|--help ....................... This help message\n"
-                "  -sv host[:port] ................. Set Server host\n"
+                "  -tcp host[:port] ................. Set TCP Server host\n"
+                "  -udp host[:port] ................. Set UDP Server host\n"
                 "  -cl host[:port] ................. Set Client host\n"
                 "  -n num_pkts ..................... Set number of packets "
                 "sent by each thread (across all sessions)\n"
@@ -500,9 +506,10 @@ int parse_args(int argc, char *argv[]) {
             check(script_parse(argv[1]) == 0, "Wrong syntax in script %s\n", argv[1]);
             argc--;
             argv++;
-        } else if (strcmp(argv[0], "-sv") == 0) {
+        } else if (strcmp(argv[0], "-tcp") == 0 || strcmp(argv[0], "-udp") == 0) {
             assert(argc >= 2);
             strncpy(serverhost, argv[1], MAX_HOST_STRING-1);
+            proto = !strcmp(argv[0], "-tcp") ? TCP : UDP;
             serverhost[MAX_HOST_STRING-1] = '\0';
             argc--;
             argv++;
@@ -642,6 +649,8 @@ int parse_args(int argc, char *argv[]) {
                 ccmd_last_action(ccmd)->fwd.timeout = 0;
                 ccmd_last_action(ccmd)->fwd.retries = 0;
                 ccmd_last_action(ccmd)->fwd.on_fail_skip = 0;
+                ccmd_last_action(ccmd)->fwd.proto = UDP;
+
 
                 i++;
             }

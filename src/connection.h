@@ -21,11 +21,11 @@ typedef enum {
 
 typedef struct {
 	int conn_id;
+    proto_t proto;                // transport protocol to use (TCP or UDP)
     int sock;                     // -1 for unused conn_info_t
-    conn_status status;
+    conn_status status;           // status of the connection
 
-    in_addr_t inaddr;             // target IP
-    uint16_t port;                // target port (for multiple nodes on same host)
+    struct sockaddr_in target;    // target of the connection
 
     unsigned char *recv_buf;      // receive buffer
     unsigned char *send_buf;      // send buffer
@@ -40,6 +40,7 @@ typedef struct {
 
     req_info_t *req_list;
     unsigned int serialize_request;
+    pthread_t parent_thread;
     pthread_mutex_t mtx;
 } conn_info_t;
 
@@ -49,7 +50,7 @@ const char *conn_status_str(int s);
 
 void conn_init();
 
-int conn_alloc(int sock);
+int conn_alloc(int sock, struct sockaddr_in target, proto_t proto);
 void conn_free(int conn_id);
 
 conn_info_t* conn_get_by_id(int conn_id);
@@ -62,13 +63,12 @@ message_t* conn_send_message(conn_info_t *conn);
 message_t* conn_recv_message(conn_info_t *conn);
 void conn_remove_message(conn_info_t *conn);
 
-int conn_find_addr(in_addr_t inaddr, int port);
+int conn_find_existing(struct sockaddr_in target, proto_t proto);
 int conn_find_sock(int sock);
-int conn_add(in_addr_t inaddr, int port, int sock);
 void conn_del_id(int id);
 int conn_del_sock(int sock);
 
-int conn_start_send(conn_info_t *conn);
+int conn_start_send(conn_info_t *conn, struct sockaddr_in target);
 int conn_send(conn_info_t *conn);
 int conn_recv(conn_info_t *conn);
 

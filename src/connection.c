@@ -39,6 +39,7 @@ req_info_t* conn_req_add(conn_info_t *conn) {
 	req_info_t *req = req_alloc();
 
 	req->conn_id = conn->conn_id;
+    req->target = conn->target;
 	req->next = conn->req_list;
 	if (req->next)
 		req->next->prev = req;
@@ -81,13 +82,19 @@ req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
 }
 
 // return index in conns[] of conn_info_t associated to inaddr:port, or -1 if not found
-int conn_find_addr(in_addr_t inaddr, int port) {
+int conn_find_existing(struct sockaddr_in target, proto_t proto) {
     int rv = -1;
     //if (nthread > 1)
     //    sys_check(pthread_mutex_lock(&socks_mtx));
 
+    pthread_t curr_thread = pthread_self();
     for (int i = 0; i < MAX_CONNS; i++) {
-        if (conns[i].sock != -1 && conns[i].inaddr == inaddr && conns[i].port == port) {
+        if (conns[i].sock == -1)
+            continue;
+        if (proto == UDP && conns[i].parent_thread == curr_thread) {
+            rv = i;
+            break;
+        } else if (proto == TCP && conns[i].target.sin_port == target.sin_port && conns[i].target.sin_addr.s_addr == target.sin_addr.s_addr && conns[i].proto == proto) {
             rv = i;
             break;
         }
@@ -116,30 +123,6 @@ int conn_find_sock(int sock) {
     //if (nthread > 1) sys_check(pthread_mutex_unlock(&socks_mtx));
 
     return rv;
-}
-
-// add the IP/port into the socks[] map to allow FORWARD finding an
-// already set-up socket, through sock_find()
-// FIXME: bad complexity with many sockets
-//
-// return index of sock_info in socks[] where info has been added (or where it was already found),
-//        or -1 if no unused entry were found in socks[]
-int conn_add(in_addr_t inaddr, int port, int sock) {
-    //if (nthread > 1) sys_check(pthread_mutex_lock(&socks_mtx));
-
-    int conn_id = conn_find_addr(inaddr, port);
-
-    if (conn_id == -1) {
-        conn_id = conn_alloc(sock);
-        if (conn_id != -1) {
-            conns[conn_id].inaddr = inaddr;
-            conns[conn_id].port = port;
-        }
-    }
-
-    //if (nthread > 1) sys_check(pthread_mutex_unlock(&socks_mtx));
-
-    return conn_id;
 }
 
 void conn_del_id(int id) {
@@ -182,7 +165,7 @@ void conn_free(int conn_id) {
     //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
 }
 
-int conn_alloc(int conn_sock) {
+int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     unsigned char *new_recv_buf = NULL;
     unsigned char *new_send_buf = NULL;
 
@@ -204,15 +187,17 @@ int conn_alloc(int conn_sock) {
         goto continue_free;
 
     conns[conn_id].conn_id = conn_id;
+    conns[conn_id].proto = proto;
+    conns[conn_id].target = target;
     conns[conn_id].sock = conn_sock;
-    conns[conn_id].status = NOT_INIT;
+    conns[conn_id].status = (proto == TCP ? NOT_INIT : READY);
     conns[conn_id].recv_buf = new_recv_buf;
     conns[conn_id].send_buf = new_send_buf;
-
+    conns[conn_id].parent_thread = pthread_self(); 
     //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
 
     // From here, safe to assume that conns[conn_id] is thread-safe
-    cw_log("Connection %d just allocated\n", conn_id);
+    cw_log("CONN allocated, conn_id: %d\n", conn_id);
     conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf;
     conns[conn_id].curr_proc_buf = conns[conn_id].recv_buf;
     conns[conn_id].curr_recv_size = BUF_SIZE;
@@ -269,8 +254,9 @@ message_t* conn_recv_message(conn_info_t *conn) {
 
 // start sending a message, assume the head of the curr_send_buffer is a message_t type
 // returns the number of bytes sent, -1 if an error occured
-int conn_start_send(conn_info_t *conn) {
+int conn_start_send(conn_info_t *conn, struct sockaddr_in target) {
 	message_t *m = (message_t*) conn->send_buf + conn->curr_send_size;
+    conn->target = target;
 	cw_log("SEND starting, conn_id: %d, status: %s, msg_size: %d\n", conn->conn_id, conn_status_str(conn->status), m->req_size);
     if (conn->curr_send_size == 0)
         conn->curr_send_buf = conn->send_buf;
@@ -286,7 +272,7 @@ int conn_start_send(conn_info_t *conn) {
 int conn_send(conn_info_t *conn) {
 	int sock = conn->sock;
     cw_log("SEND conn_id=%d, status=%d (%s), curr_send_size=%lu, sock=%d\n", conn->conn_id, conn->status, conn_status_str(conn->status), conn->curr_send_size, sock);
-    size_t sent = send(sock, conn->curr_send_buf, conn->curr_send_size, MSG_NOSIGNAL);
+    size_t sent = sendto(sock, conn->curr_send_buf, conn->curr_send_size, MSG_NOSIGNAL, (const struct sockaddr*)&conn->target, sizeof(conn->target));
     if (sent == 0) {
         // TODO: should not even be possible, ignoring
         cw_log("SEND returned 0\n");
@@ -295,7 +281,7 @@ int conn_send(conn_info_t *conn) {
         cw_log("SEND Got EAGAIN or EWOULDBLOCK, ignoring...\n");
         return 0;
     } else if (sent == -1) {
-        fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
+        fprintf(stderr, "SEND Unexpected error: %s\n", strerror(errno));
         return -1;
     }
     cw_log("SEND returned: %d\n", (int)sent);
@@ -304,7 +290,6 @@ int conn_send(conn_info_t *conn) {
     conn->curr_send_size -= sent;
     if (conn->curr_send_size == 0) {
         conn->curr_send_buf = conn->send_buf;
-        cw_log("send_messages(): conn_id=%d, status=%d (%s), curr_send_size=%lu\n", conn->conn_id, conn->status, conn_status_str(conn->status), conn->curr_send_size);
     }
 
     return sent;
@@ -312,17 +297,18 @@ int conn_send(conn_info_t *conn) {
 
 int conn_recv(conn_info_t *conn) {
     int sock = conn->sock;
+    socklen_t recvsize = sizeof(conn->target);
     size_t received =
-        recv(sock, conn->curr_recv_buf, conn->curr_recv_size, 0);
-    cw_log("recv() returned: %d\n", (int)received);
+        recvfrom(sock, conn->curr_recv_buf, conn->curr_recv_size, 0, (struct sockaddr*)&conn->target, (socklen_t*)&recvsize);
+    cw_log("RECV returned: %d\n", (int)received);
     if (received == 0) {
-        cw_log("Connection closed by remote end\n");
+        cw_log("RECV connection closed by remote end\n");
         return 0;
     } else if (received == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        cw_log("Got EAGAIN or EWOULDBLOCK, ignoring...\n");
+        cw_log("RECV Got EAGAIN or EWOULDBLOCK, ignoring...\n");
         return 1;
     } else if (received == -1) {
-        fprintf(stderr, "Unexpected error: %s\n", strerror(errno));
+        fprintf(stderr, "RECV Unexpected error: %s\n", strerror(errno));
         return 0;
     }
     conn->curr_recv_buf += received;
