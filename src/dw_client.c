@@ -14,9 +14,12 @@
 #include <time.h>
 #include <unistd.h>
 
+#define MAX_CONNS 32
+
 #include "cw_debug.h"
 #include "distrib.h"
 #include "message.h"
+#include "connection.h"
 #include "timespec.h"
 #include "ccmd.h"
 
@@ -35,7 +38,7 @@ unsigned int default_compute_us = 1000;
 pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 1024, .std = NAN, .min = NAN, .max = NAN };
 pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 10000, .std = NAN, .min = NAN, .max = NAN };
 
-unsigned long default_resp_size = 128;
+unsigned long default_resp_size = 512;
 int exp_resp_size = 0;
 
 int no_delay = 1;
@@ -48,38 +51,6 @@ pthread_t receiver[MAX_THREADS];
 #define DEFAULT_ADDR "127.0.0.1"
 #define DEFAULT_PORT "7891"
 
-// returns 1 if all bytes sent correctly, 0 if errors occurred
-int send_all(int sock, unsigned char *buf, size_t len) {
-    while (len > 0) {
-        int sent;
-        sent = send(sock, buf, len, 0);
-        if (sent < 0) {
-            fprintf(stderr, "send() failed: %s\n", strerror(errno));
-            return 0;
-        }
-        buf += sent;
-        len -= sent;
-    }
-    return 1;
-}
-
-// return len, or -1 if an error occurred on read()
-size_t recv_all(int sock, unsigned char *buf, size_t len) {
-    size_t read_tot = 0;
-    while (len > 0) {
-        int read;
-        read = recv(sock, buf, len, 0);
-        if (read < 0) {
-            perror("recv() failed: ");
-            return -1;
-        } else if (read == 0)
-            return read_tot;
-        buf += read;
-        len -= read;
-        read_tot += read;
-    }
-    return read_tot;
-}
 
 // Weighted probabilities of executing a COMPUTE/STORE/LOAD request
 //(Used for randomly patterned messages)
@@ -182,6 +153,7 @@ unsigned long pkts_per_session;
 
 typedef struct {
     int thread_id;
+    int conn_id;
     int first_pkt_id;
     int num_send_pkts;
 } thread_data_t;
@@ -197,8 +169,6 @@ void *thread_sender(void *data) {
     int thread_id = p->thread_id;
     int first_pkt_id = p->first_pkt_id;
     int num_send_pkts = p->num_send_pkts;
-    unsigned char *send_buf = malloc(BUF_SIZE);
-    check(send_buf != NULL);
     struct timespec ts_now;
 
     clock_gettime(clk_id, &ts_now);
@@ -206,14 +176,17 @@ void *thread_sender(void *data) {
 
     int rate_start = 1000000.0 / send_period_us_pd.val;
 
-    message_t *m = (message_t *)send_buf;
+    message_t *m;
+    conn_info_t *conn = conn_get_by_id(p->conn_id);
 
 #ifdef CW_DEBUG
     ccmd_log(ccmd);
 #endif
 
     for (int i = 0; i < num_send_pkts; i++) {
+        m = conn_send_message(conn);
         ccmd_dump(ccmd, m);
+
         /* remember time of send relative to ts_start */
         struct timespec ts_send;
         clock_gettime(clk_id, &ts_send);
@@ -233,7 +206,7 @@ void *thread_sender(void *data) {
 #ifdef CW_DEBUG
         msg_log(m, "Sending msg: ");
 #endif
-        if (!send_all(clientSocket[thread_id], send_buf, m->req_size)) {
+        if (!conn_start_send(conn)) {
             fprintf(stderr,
                     "Forcing premature termination of sender thread while "
                     "attempting to send pkt %d\n",
@@ -283,6 +256,7 @@ void *thread_receiver(void *data) {
     unsigned char *recv_buf = malloc(BUF_SIZE);
     check(recv_buf != NULL);
 
+
     for (int i = 0; i < num_pkts; i++) {
         thread_data_t thr_data;
 
@@ -291,6 +265,9 @@ void *thread_receiver(void *data) {
             /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
              * this case) */
             clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
+            int conn_id = conn_alloc(clientSocket[thread_id]);
+            conn_get_by_id(conn_id)->status = READY;
+            printf("conn_id: %d\n", conn_id);
 
             sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
                                  TCP_NODELAY, (void *)&no_delay,
@@ -315,6 +292,7 @@ void *thread_receiver(void *data) {
 
             // TODO (?) thr_data is allocated in the stack and reused for every thread, possible (but completly improbable) race condition
             thr_data.thread_id = thread_id;
+            thr_data.conn_id = conn_id;
             thr_data.first_pkt_id = i,
             thr_data.num_send_pkts = pkts_per_session;
             assert(pthread_create(&sender[thread_id], NULL, thread_sender,
@@ -323,40 +301,26 @@ void *thread_receiver(void *data) {
 
         /*---- Read the message from the server into the buffer ----*/
         // TODO: support receive of variable reply-size requests
-        cw_log("Receiving %lu bytes (header)\n", sizeof(message_t));
-        unsigned long read =
-            recv_all(clientSocket[thread_id], recv_buf, sizeof(message_t));
-        if (read != sizeof(message_t)) {
-            printf(
-                "Error: read %lu bytes while expecting %lu! Forcing premature "
-                "end of session!\n",
-                read, sizeof(message_t));
+        conn_info_t *conn = conn_get_by_id(thr_data.conn_id);
+        message_t *m = NULL;
+        int recv;
+
+        do {
+            recv = conn_recv(conn);
+            m = conn_recv_message(conn);
+        } while (recv > 0 && m == NULL);
+
+        if (m == NULL) {
+            printf("Error: cannot read received message");
             unsigned long skip_pkts =
                 pkts_per_session - ((i + 1) % pkts_per_session);
             printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
             i += skip_pkts;
             goto skip;
+
         }
-        message_t *m = (message_t *)recv_buf;
+
         unsigned pkt_id = m->req_id;
-        cw_log("Received %lu bytes, req_id=%u, pkt_size=%u, ops=%d\n", read,
-               pkt_id, m->req_size, m->num);
-        cw_log("Expecting further %lu bytes (total pkt_size %u bytes)\n",
-               m->req_size - read, m->req_size);
-        assert(m->req_size >= sizeof(message_t));
-        unsigned long read2 = recv_all(clientSocket[thread_id], recv_buf + read,
-                                       m->req_size - read);
-        if (read2 != m->req_size - read) {
-            printf(
-                "Error: read %lu bytes while expecting %lu! Forcing premature "
-                "end of session!\n",
-                read2, m->req_size - read);
-            unsigned long skip_pkts =
-                pkts_per_session - ((i + 1) % pkts_per_session);
-            printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
-            i += skip_pkts;
-            goto skip;
-        }
 
 #ifdef CW_DEBUG
         msg_log(m, "received message: ");
@@ -788,16 +752,18 @@ int main(int argc, char *argv[]) {
     check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
 
     ccmd_init(&ccmd);
+    conn_init();
+    req_init();
 
     argc--;
     argv++;
     check(parse_args(argc, argv) == 0);
 
-    if (n_compute + n_store + n_load > 0 && num_pkts <= 0){
+    if (n_compute + n_store + n_load > 0 && num_pkts <= 0) {
         num_pkts = 1;
     }
 
-    if (n_compute + n_load + n_store <= 0){
+    if (n_compute + n_load + n_store <= 0) {
         if (num_pkts <= 0) {
             num_pkts = 1;
         }
