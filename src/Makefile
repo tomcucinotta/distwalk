@@ -43,7 +43,7 @@ request.o: priority_queue.h request.h
 request_debug.o: priority_queue.h request.h
 connection.o: connection.h request.h
 connection_debug.o: connection.h request.h
-dw_client.o: cw_debug.h distrib.h message.h timespec.h ccmd.h thread_affinity.h
+dw_client.o: cw_debug.h distrib.h message.h timespec.h ccmd.h thread_affinity.h connection.h
 dw_client_tsan.o: cw_debug.h distrib.h message.h timespec.h ccmd.h thread_affinity.h
 dw_node.o: cw_debug.h message.h timespec.h thread_affinity.h
 dw_node_tsan.o: cw_debug.h message.h timespec.h thread_affinity.h

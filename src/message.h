@@ -12,6 +12,8 @@
 
 typedef enum { COMPUTE, STORE, LOAD, PSKIP, FORWARD, MULTI_FORWARD, REPLY } command_type_t;
 
+typedef enum { UDP, TCP } proto_t;
+
 typedef struct {
   uint32_t pkt_size;    // size of forwarded packet
   in_addr_t fwd_host;   // target IP of host to forward to (network encoding)
@@ -19,6 +21,7 @@ typedef struct {
   uint32_t timeout;     // timeout in microsecond (0 means no timeout)
   uint8_t retries;      // how many times to reply before failing
   uint8_t on_fail_skip; // how many instructions skip after failing
+  proto_t proto;        // which transport protocol to use
 } fwd_opts_t;
 
 //TODO: consider whether to use this structs

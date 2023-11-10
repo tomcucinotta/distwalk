@@ -51,8 +51,20 @@ typedef enum {
     TIMER,
     CONNECT,
     SOCKET,
-} event_type;
+    EVENT_NUMBER
+} event_t;
 
+const char* get_event_str(event_t event) {
+    static char event_str[EVENT_NUMBER][20] = {
+        "LISTEN",
+        "TERMINATION",
+        "STORAGE",
+        "TIMER",
+        "CONNECT",
+        "SOCKET"
+    };
+    return event_str[event];
+}
 
 // used with --per-client-thread
 #define MAX_THREADS 32
@@ -311,45 +323,56 @@ void setnonblocking(int fd);
 // returns number of forwarded commands as found in m, 0 if a problem occurred,
 // or -1 if command cannot be completed now (asynchronous FORWARD)
 int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread_info_t *infos) {
-    int fwd_conn_id = conn_find_addr(m->cmds[cmd_id].u.fwd.fwd_host,
-                                     m->cmds[cmd_id].u.fwd.fwd_port);
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_addr = {.s_addr = m->cmds[cmd_id].u.fwd.fwd_host},
+        .sin_port = m->cmds[cmd_id].u.fwd.fwd_port,
+    };
+    int fwd_conn_id = conn_find_existing(addr,
+                                     m->cmds[cmd_id].u.fwd.proto);
     if (fwd_conn_id == -1) {
         int no_delay = 1;
-        int clientSocket = socket(PF_INET, SOCK_STREAM, 0);
-        sys_check(setsockopt(clientSocket, IPPROTO_TCP,
-                             TCP_NODELAY, (void *)&no_delay,
-                             sizeof(no_delay)));
-        setnonblocking(clientSocket);
+        int clientSocket = 0;
 
-        fwd_conn_id = conn_add(m->cmds[cmd_id].u.fwd.fwd_host, m->cmds[cmd_id].u.fwd.fwd_port, clientSocket);
+        if (m->cmds[cmd_id].u.fwd.proto == TCP) {
+            clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+            sys_check(setsockopt(clientSocket, IPPROTO_TCP,
+                                 TCP_NODELAY, (void *)&no_delay,
+                                 sizeof(no_delay)));
+        } else {
+            clientSocket = socket(AF_INET, SOCK_DGRAM, 0);
+        }
+
+        setnonblocking(clientSocket);
+        fwd_conn_id = conn_alloc(clientSocket, addr, m->cmds[cmd_id].u.fwd.proto);
+
         if (fwd_conn_id == -1) {
             fprintf(stderr, "conn_add() failed, closing\n");
             close(clientSocket);
             return 0;
         }
 
-        struct epoll_event ev;
-        ev.events = EPOLLOUT | EPOLLONESHOT;
-        ev.data.u64 = i2l(CONNECT, fwd_conn_id);
-        cw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
-        sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
+        if (m->cmds[cmd_id].u.fwd.proto == TCP) {
+            struct epoll_event ev;
+            ev.events = EPOLLOUT | EPOLLONESHOT;
+            ev.data.u64 = i2l(CONNECT, fwd_conn_id);
+            cw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
+            sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
 
-        cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {m->cmds[cmd_id].u.fwd.fwd_host}),
-               ntohs(m->cmds[cmd_id].u.fwd.fwd_port));
-        struct sockaddr_in addr;
-        memset((char *) &addr, '\0', sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = m->cmds[cmd_id].u.fwd.fwd_host;
-        addr.sin_port = m->cmds[cmd_id].u.fwd.fwd_port;
-        int rv = connect(clientSocket, &addr, sizeof(addr));
-        cw_log("connect() returned: %d (errno: %s)\n", rv, strerror(errno));
-        if (rv == -1) {
-            if (errno != EAGAIN && errno != EINPROGRESS) {
-                cw_log("unexpected error from connect(): %s\n", strerror(errno));
-                return 0;
+            cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {m->cmds[cmd_id].u.fwd.fwd_host}),
+                   ntohs(m->cmds[cmd_id].u.fwd.fwd_port));
+            memset((char *) &addr, '\0', sizeof(addr));
+
+            int rv = connect(clientSocket, &addr, sizeof(addr));
+            cw_log("connect() returned: %d (errno: %s)\n", rv, strerror(errno));
+            if (rv == -1) {
+                if (errno != EAGAIN && errno != EINPROGRESS) {
+                    cw_log("unexpected error from connect(): %s\n", strerror(errno));
+                    return 0;
+                }
+                // normal case of asynchronous connect
+                conns[fwd_conn_id].status = CONNECTING;
             }
-            // normal case of asynchronous connect
-            conns[fwd_conn_id].status = CONNECTING;
         }
     }
 
@@ -376,7 +399,7 @@ int start_forward(req_info_t *req, message_t *m, int cmd_id, int epollfd, thread
     cw_log("  f: cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
 
-    if (conn_start_send(&conns[fwd_conn_id]) < 0)
+    if (conn_start_send(&conns[fwd_conn_id], addr) < 0)
         return 0;
         
     if (m->cmds[cmd_id].u.fwd.timeout) {
@@ -440,7 +463,7 @@ int reply(req_info_t *req, message_t *m, int cmd_id) {
 
     conn_info_t *conn = conn_get_by_id(req->conn_id);
     conn_req_remove(conn, req);
-    return conn_start_send(&conns[req->conn_id]);
+    return conn_start_send(&conns[req->conn_id], req->target);
 }
 
 void compute_for(unsigned long usecs) {
@@ -576,8 +599,8 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
 
         // FORWARD finished
         if (m->num == 0) {
-            cw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].inaddr}), 
-                                                                           ntohs(conns[conn_id].port), m->req_id);
+            cw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), 
+                                                                           ntohs(conns[conn_id].target.sin_port), m->req_id);
             if (!handle_forward_reply(m->req_id, epollfd, infos)) {
                     cw_log("handle_forward_reply() failed\n");
                     return 0;
@@ -659,10 +682,10 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
 
 void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* infos) {
     int id;
-    event_type type;
+    event_t type;
     l2i(p_ev->data.u64, (uint32_t*)&type, (uint32_t*) &id);
     
-    cw_log("event_type=%d, id=%d\n", type, id);
+    cw_log("event_type=%s, id=%d\n", get_event_str(type), id);
 
     if (type == TIMER) {
         handle_timeout(epollfd, infos);
@@ -864,8 +887,14 @@ void* conn_worker(void* args) {
     sys_check(epollfd = epoll_create1(0));
 
     // Add listen socket
+    int conn_id = conn_find_sock(infos->listen_sock);
+    
     ev.events = EPOLLIN;
-    ev.data.u64 = i2l(LISTEN, infos->listen_sock);
+
+    if(conn_id == -1)
+        ev.data.u64 = i2l(LISTEN, infos->listen_sock);
+    else
+        ev.data.u64 = i2l(SOCKET, conn_id);
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->listen_sock, &ev) == -1);
 
     // Add termination fd
@@ -902,7 +931,7 @@ void* conn_worker(void* args) {
         }
 
         int fd;
-        event_type type;
+        event_t type;
         for (int i = 0; i < nfds; i++) {
             l2i(events[i].data.u64, &type, (uint32_t*) &fd);
 
@@ -919,7 +948,7 @@ void* conn_worker(void* args) {
                 sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY,
                                      (void *)&val, sizeof(val)));
 
-                int conn_id = conn_alloc(conn_sock);
+                int conn_id = conn_alloc(conn_sock, addr, TCP);
                 if (conn_id < 0) {
                     fprintf(stderr, "Could not allocate new conn_info_t, closing...\n");
                     close_and_forget(epollfd, conn_sock);
@@ -971,6 +1000,8 @@ int main(int argc, char *argv[]) {
     int fds[MAX_THREADS][2];
     int fds2[MAX_THREADS][2];
 
+    proto_t proto = TCP;
+
     // Storage info defaults
     storage_info.storage_fd = -1;
     storage_info.tfd = -1;
@@ -984,7 +1015,7 @@ int main(int argc, char *argv[]) {
     while (argc > 0) {
         if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
             printf(
-                "Usage: dw_node [-h|--help] [-b bindname] [-bp bindport] "
+                "Usage: dw_node [-h|--help] [-b bindname] [-tcp bindport] [-udp bindport]"
                 "[-s|--storage path/to/storage/file] [--nt|--num-threads n] [--thread-affinity] "
                 "[-m|--max-storage-size bytes] "
                 "[--sync msec ]"
@@ -995,8 +1026,9 @@ int main(int argc, char *argv[]) {
             bind_name = argv[1];
             argc--;
             argv++;
-        } else if (strcmp(argv[0], "-bp") == 0) {
+        } else if (strcmp(argv[0], "-tcp") == 0 || strcmp(argv[0], "-udp") == 0) {
             assert(argc >= 2);
+            proto = !strcmp(argv[0], "-tcp") ? TCP : UDP;
             bind_port = atol(argv[1]);
             argc--;
             argv++;
@@ -1135,7 +1167,14 @@ int main(int argc, char *argv[]) {
         /*---- Create the socket(s). The three arguments are: ----*/
         /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
         * case) */
-        thread_infos[i].listen_sock = socket(PF_INET, SOCK_STREAM, 0);
+
+        if (proto == TCP) {
+            thread_infos[i].listen_sock = socket(PF_INET, SOCK_STREAM, 0);
+        } else {
+            thread_infos[i].listen_sock = socket(PF_INET, SOCK_DGRAM, 0);
+            int conn_id = conn_alloc(thread_infos[i].listen_sock, serverAddr, UDP);
+            conn_get_by_id(conn_id)->status = READY;
+        }
 
         int val = 1;
         sys_check(setsockopt(thread_infos[i].listen_sock, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
@@ -1148,7 +1187,8 @@ int main(int argc, char *argv[]) {
         cw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), bind_port);
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
-        sys_check(listen(thread_infos[i].listen_sock, 5));
+        if (proto == TCP)
+            sys_check(listen(thread_infos[i].listen_sock, 5));
         cw_log("Accepting new connections...\n");
 
         thread_infos[i].terminationfd = eventfd(0, 0);
