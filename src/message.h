@@ -16,6 +16,9 @@ typedef struct {
   uint32_t pkt_size;    // size of forwarded packet
   in_addr_t fwd_host;   // target IP of host to forward to (network encoding)
   uint16_t fwd_port;    // target port (network encoding, for multiple nodes on same host)
+  uint32_t timeout;     // timeout in microsecond (0 means no timeout)
+  uint8_t retries;      // how many times to reply before failing
+  uint8_t on_fail_skip; // how many instructions skip after failing
 } fwd_opts_t;
 
 //TODO: consider whether to use this structs
