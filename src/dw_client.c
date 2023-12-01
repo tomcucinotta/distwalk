@@ -48,16 +48,6 @@ pthread_t receiver[MAX_THREADS];
 #define DEFAULT_ADDR "127.0.0.1"
 #define DEFAULT_PORT "7891"
 
-void safe_send(int sock, unsigned char *buf, size_t len) {
-    while (len > 0) {
-        int sent;
-        sys_check(sent = send(sock, buf, len, 0));
-        cw_log("Sent %d bytes.\n", sent);
-        buf += sent;
-        len -= sent;
-    }
-}
-
 // returns 1 if all bytes sent correctly, 0 if errors occurred
 int send_all(int sock, unsigned char *buf, size_t len) {
     while (len > 0) {
@@ -71,20 +61,6 @@ int send_all(int sock, unsigned char *buf, size_t len) {
         len -= sent;
     }
     return 1;
-}
-
-size_t safe_recv(int sock, unsigned char *buf, size_t len) {
-    size_t read_tot = 0;
-    while (len > 0) {
-        int read;
-        sys_check(read = recv(sock, buf, len, 0));
-        cw_log("Read %d bytes\n", read);
-        if (read == 0) break;
-        buf += read;
-        len -= read;
-        read_tot += read;
-    }
-    return read_tot;
 }
 
 // return len, or -1 if an error occurred on read()
