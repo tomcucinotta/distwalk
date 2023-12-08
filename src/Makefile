@@ -37,22 +37,20 @@ dep:
 # DO NOT DELETE
 
 ccmd.o: ccmd.h message.h distrib.h cw_debug.h
+connection.o: connection.h message.h request.h priority_queue.h cw_debug.h
 distrib.o: distrib.h cw_debug.h
-thread_affinity.o: thread_affinity.h
-request.o: priority_queue.h request.h
-request_debug.o: priority_queue.h request.h
-connection.o: connection.h request.h
-connection_debug.o: connection.h request.h
+dw_client.o: cw_debug.h distrib.h message.h connection.h request.h
+dw_client.o: priority_queue.h timespec.h ccmd.h
+dw_node.o: cw_debug.h message.h timespec.h thread_affinity.h priority_queue.h
+dw_node.o: request.h connection.h
+dw_node_bak.o: cw_debug.h message.h timespec.h thread_affinity.h
+dw_node_epoll_new_squashed.o: cw_debug.h message.h timespec.h
+dw_node_master.o: cw_debug.h message.h timespec.h
 message.o: message.h
-message_debug.o: message.h
-dw_client.o: cw_debug.h distrib.h message.h timespec.h ccmd.h thread_affinity.h connection.h
-dw_client_tsan.o: cw_debug.h distrib.h message.h timespec.h ccmd.h thread_affinity.h
-dw_node.o: cw_debug.h message.h timespec.h thread_affinity.h
-dw_node_tsan.o: cw_debug.h message.h timespec.h thread_affinity.h
-thread_affinity_tsan.o: thread_affinity.h
-
+node-fwd.o: message.h timespec.h cw_debug.h
 priority_queue.o: priority_queue.h
-
+request.o: request.h message.h priority_queue.h cw_debug.h
 test_ccmd.o: ccmd.h message.h distrib.h
 test_distrib.o: distrib.h
-test_struct_tsan.o: priority_queue.h
+test_struct.o: priority_queue.h
+thread_affinity.o: thread_affinity.h
