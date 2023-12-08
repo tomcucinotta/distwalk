@@ -88,7 +88,7 @@ typedef struct {
 typedef struct {
     int storage_fd;
 
-    int tfd; // periodic timerfd
+    int timerfd; // periodic timerfd
     int periodic_sync_msec;
 
     size_t max_storage_size;
@@ -109,7 +109,7 @@ typedef struct {
     command_t *cmd;
     int worker_id;
     int req_id;
-} wrapper_t;
+} req_wrapper_t;
 
 pthread_t workers[MAX_THREADS];
 thread_info_t thread_infos[MAX_THREADS];
@@ -508,7 +508,7 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
         case LOAD:
             check(storage_path, "Error: Cannot execute LOAD/STORE cmd because no storage path has been defined");
 
-            wrapper_t w;
+            req_wrapper_t w;
             w.cmd = cmd;
             w.worker_id = infos->worker_id;
             w.req_id = req->req_id;
@@ -722,7 +722,7 @@ void* storage_worker(void* args) {
 
     // Add periodic sync timerfd
     if (infos->periodic_sync_msec > 0) {
-        if ((infos->tfd = timerfd_create(CLOCK_MONOTONIC, 0)) < 0) {
+        if ((infos->timerfd = timerfd_create(CLOCK_MONOTONIC, 0)) < 0) {
             perror("timerfd_create");
             exit(EXIT_FAILURE);
         }
@@ -738,14 +738,14 @@ void* storage_worker(void* args) {
         ts.it_value = ts_template;
         ts.it_interval = ts_template;
 
-        if (timerfd_settime(infos->tfd, 0, &ts, NULL) < 0) {
+        if (timerfd_settime(infos->timerfd, 0, &ts, NULL) < 0) {
             perror("timerfd_settime");
             exit(EXIT_FAILURE);
         }
 
         ev.events = EPOLLIN | EPOLLET;
-        ev.data.u64 = i2l(infos->tfd, -1);
-        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->tfd, &ev) < 0)
+        ev.data.u64 = i2l(infos->timerfd, -1);
+        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev) < 0)
             perror("epoll_ctl: terminationfd failed");
     }
 
@@ -771,10 +771,10 @@ void* storage_worker(void* args) {
                 running = 0;
                 break;
             }
-            else if (fd == infos->tfd) {
+            else if (fd == infos->timerfd) {
                 // NOTE: timerfd requires a read to be re-armed
                 uint64_t val;
-                if (read(infos->tfd, &val, sizeof(uint64_t)) < 0) {
+                if (read(infos->timerfd, &val, sizeof(uint64_t)) < 0) {
                     perror("periodic sync read()");
                     running = 0;
                     break;
@@ -786,7 +786,7 @@ void* storage_worker(void* args) {
                 cw_log("storage sync...\n");
             }
             else {
-                wrapper_t w;
+                req_wrapper_t w;
                 command_t *storage_cmd;
                 int worker_id;
                 int req_id;
@@ -954,7 +954,7 @@ int main(int argc, char *argv[]) {
 
     // Storage info defaults
     storage_info.storage_fd = -1;
-    storage_info.tfd = -1;
+    storage_info.timerfd = -1;
     storage_info.periodic_sync_msec = -1;
     storage_info.max_storage_size = MAX_STORAGE_SIZE;
     storage_info.storage_offset = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
