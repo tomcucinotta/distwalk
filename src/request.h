@@ -9,17 +9,13 @@
 
 typedef struct req_info_t req_info_t;
 
-struct req_info_t{
+struct req_info_t {
     int req_id;
     int conn_id;
     struct sockaddr_in target;
-
     int fwd_replies_left;
-
     unsigned char *message_ptr;
-    
     command_t *curr_cmd;
-
     pqueue_node_t *timeout_node;
     req_info_t *prev, *next;
 };

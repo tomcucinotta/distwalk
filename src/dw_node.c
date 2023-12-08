@@ -312,7 +312,7 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
             cw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
             sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
 
-            cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) {fwd.fwd_host}),
+            cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { fwd.fwd_host }),
                    ntohs(fwd.fwd_port));
             memset((char *) &addr, '\0', sizeof(addr));
 
@@ -344,7 +344,7 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
     m_dst->req_size = fwd.pkt_size;
 
     cw_log("Forwarding req %u to %s:%d\n", m_dst->req_id,
-           inet_ntoa((struct in_addr){fwd.fwd_host}),
+           inet_ntoa((struct in_addr) { fwd.fwd_host }),
            ntohs(fwd.fwd_port));
 #ifdef CW_DEBUG
     msg_log(m_dst, "  f: ");
@@ -544,7 +544,7 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
         return 1;
 
     message_t *m = conn_recv_message(conn);
-    while(m != NULL) {
+    while (m != NULL) {
 
         // FORWARD finished
         if (m->num == 0) {
@@ -770,8 +770,7 @@ void* storage_worker(void* args) {
             if (fd == infos->terminationfd) {
                 running = 0;
                 break;
-            }
-            else if (fd == infos->timerfd) {
+            } else if (fd == infos->timerfd) {
                 // NOTE: timerfd requires a read to be re-armed
                 uint64_t val;
                 if (read(infos->timerfd, &val, sizeof(uint64_t)) < 0) {
@@ -784,8 +783,7 @@ void* storage_worker(void* args) {
 
                 // Too expensive??
                 cw_log("storage sync...\n");
-            }
-            else {
+            } else {
                 req_wrapper_t w;
                 command_t *storage_cmd;
                 int worker_id;
@@ -805,12 +803,10 @@ void* storage_worker(void* args) {
 
                 if (storage_cmd->cmd == STORE) {
                     store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd)->store_nbytes);
-                }
-                else if (storage_cmd->cmd == LOAD) {
+                } else if (storage_cmd->cmd == LOAD) {
                     size_t leftovers;
                     load(infos, infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd)->load_nbytes, &leftovers);
-                }
-                else { // error
+                } else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");
                     continue;
                 }
@@ -911,8 +907,7 @@ void* conn_worker(void* args) {
 
                 if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
-            }
-            else if (type == STORAGE && storage_path && fd == infos->store_replyfd) {
+            } else if (type == STORAGE && storage_path && fd == infos->store_replyfd) {
                 // storage operation completed
                 // TODO: code
 
@@ -925,12 +920,10 @@ void* conn_worker(void* args) {
                 cw_log("STORAGE ACK for req_id %d\n", req_id_ACK);
                 process_messages(req_get_by_id(req_id_ACK), epollfd, infos);
                 //exec_request(epollfd, &events[i], infos);
-            } 
-            else if (type == TERMINATION) {
+            } else if (type == TERMINATION) {
                 running = 0;
                 break;
-            }
-            else {
+            } else {
                 exec_request(epollfd, &events[i], infos);
             }
         }
@@ -1040,8 +1033,7 @@ int main(int argc, char *argv[]) {
     if (thread_affinity) {
         if (thread_affinity_list) {
             aff_list_parse(thread_affinity_list, &mask, nproc);
-        }
-        else {
+        } else {
             CPU_ZERO(&mask);
             sys_check(sched_getaffinity(0, sizeof(cpu_set_t), &mask));
         }
@@ -1177,9 +1169,7 @@ int main(int argc, char *argv[]) {
     // Run
     if (nthread == 1) {
         conn_worker((void*) &thread_infos[0]);
-    }
-    else {
-        
+    } else {
         // Init worker threads
         for (int i = 0; i < nthread; i++) {
             sys_check(pthread_create(&workers[i], NULL, conn_worker, (void *)&thread_infos[i]));

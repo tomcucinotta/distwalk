@@ -62,7 +62,7 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     int i = 0;
     command_t *itr = cmd;
 
-    while(itr->cmd != EOM) {
+    while (itr->cmd != EOM) {
         if (itr->cmd == REPLY) {
             if (nested_fwd == 0)
                 break;
@@ -85,6 +85,7 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     end_command->cmd = EOM;
     m_dst->num = i + 1;
     m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
+
     return itr;
 }
 
@@ -112,9 +113,9 @@ command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip) {
 inline const void msg_log(message_t* m, char* padding) {
   printf("%s", padding);
   printf("message (req_id: %u, req_size: %u, num: %u): ", m->req_id, m->req_size, m->num);
-  
+
   command_t *c = message_first_cmd(m), *pre_c;
-  while(c->cmd != EOM) {
+  while (c->cmd != EOM) {
     char opts[64] = "";
 
     switch (c->cmd) {

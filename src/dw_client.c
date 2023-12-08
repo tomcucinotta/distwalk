@@ -217,7 +217,7 @@ void *thread_sender(void *data) {
         unsigned long period_ns = pd_sample(&send_period_us_pd) * 1000.0;
         cw_log("period_ns=%lu\n", period_ns);
         struct timespec ts_delta =
-            (struct timespec){period_ns / 1000000000, period_ns % 1000000000};
+            (struct timespec) { period_ns / 1000000000, period_ns % 1000000000 };
 
         ts_now = ts_add(ts_now, ts_delta);
 
@@ -711,8 +711,7 @@ int parse_args(int argc, char *argv[]) {
 
             if (ccmd_last_reply(ccmd)) {
                 ccmd_last_reply(ccmd)->pd_val = val;
-            }
-            else {
+            } else {
                 resp_size_buf = val;
             }
 
