@@ -6,6 +6,9 @@ dw_client_tsan
 dw_node_debug
 dw_node_tsan
 
+test_distrib
+test_ccmd
+
 *.o
 *.data
 
