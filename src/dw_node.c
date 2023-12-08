@@ -48,6 +48,14 @@ typedef enum {
     FORWARDING = 16      // waiting for a FORWARD to complete
 } req_status;
 
+typedef enum {
+    LISTEN,
+    TERMINATION,
+    STORAGE,
+    TIMER,
+    SOCKET,
+} event_type;
+
 typedef struct {
     int sock;                     // -1 for unused conn_info_t
     req_status status;
@@ -418,7 +426,7 @@ int start_forward(int conn_id, message_t *m, int cmd_id, int epollfd) {
 
         struct epoll_event ev;
         ev.events = EPOLLOUT | EPOLLONESHOT;
-        ev.data.u64 = i2l(clientSocket, fwd_conn_id);
+        ev.data.u64 = i2l(SOCKET, fwd_conn_id);
         cw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
 
@@ -872,7 +880,7 @@ int finalize_conn(int epollfd, int conn_id) {
 
     struct epoll_event ev;
     ev.events = EPOLLIN;
-    ev.data.u64 = i2l(conns[conn_id].sock, conn_id);
+    ev.data.u64 = i2l(SOCKET, conn_id);
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[conn_id].sock, &ev));
 
     return 1;
@@ -886,62 +894,60 @@ void setnonblocking(int fd) {
 }
 
 void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* infos) {
-    int conn_id;
-    int fd;
-    l2i(p_ev->data.u64, (uint32_t*) &fd, (uint32_t*) &conn_id);
+    int id;
+    event_type type;
+    l2i(p_ev->data.u64, (uint32_t*)&type, (uint32_t*) &id);
     
-    cw_log("conns[%d].status=%d (%s), events=%d\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status), p_ev->events);
-    if (conns[conn_id].sock == -1 || conns[conn_id].recv_buf == NULL)
-        return;
+    cw_log("event_type=%d, id=%d\n", type, id);
 
     if (p_ev->events & EPOLLIN) {
         cw_log("calling recv_mesg()\n");
-        if (!recv_messages(conn_id))
+        if (!recv_messages(id))
             goto err;
     }
-    if ((p_ev->events & EPOLLOUT) && (conns[conn_id].status & CONNECTING)) {
+    if ((p_ev->events & EPOLLOUT) && (conns[id].status & CONNECTING)) {
         cw_log("calling final_conn()\n");
-        if (!finalize_conn(epollfd, conn_id))
+        if (!finalize_conn(epollfd, id))
             goto err;
         // we need the send_messages() below to still be tried afterwards
     }
-    if ((p_ev->events & EPOLLOUT) && (conns[conn_id].curr_send_size > 0) && !(conns[conn_id].status & CONNECTING)) {
+    if ((p_ev->events & EPOLLOUT) && (conns[id].curr_send_size > 0) && !(conns[id].status & CONNECTING)) {
         cw_log("calling send_mesg()\n");
-        if (!send_messages(conn_id))
+        if (!send_messages(id))
             goto err;
     }
-    cw_log("conns[%d].status=%d (%s)\n", conn_id, conns[conn_id].status, conn_status_str(conns[conn_id].status));
+    cw_log("conns[%d].status=%d (%s)\n", id, conns[id].status, conn_status_str(conns[id].status));
     // check whether we have new or leftover messages to process
-    if (!(conns[conn_id].status & (FORWARDING | STORING))) {
+    if (!(conns[id].status & (FORWARDING | STORING))) {
         cw_log("calling proc_mesg()\n");
-        if (!process_messages(conn_id, epollfd, infos))
+        if (!process_messages(id, epollfd, infos))
             goto err;
     }
 
-    if (conns[conn_id].curr_send_size > 0 && !(conns[conn_id].status & SENDING)) {
+    if (conns[id].curr_send_size > 0 && !(conns[id].status & SENDING)) {
         struct epoll_event ev2;
-        ev2.data.u64 = i2l(fd, conn_id);
+        ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN | EPOLLOUT;
         cw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
-               conns[conn_id].sock, conn_id, conns[conn_id].curr_send_size);
-        sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[conn_id].sock, &ev2));
-        conns[conn_id].status |= SENDING;
+               conns[id].sock, id, conns[id].curr_send_size);
+        sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
+        conns[id].status |= SENDING;
     }
-    if (conns[conn_id].curr_send_size == 0 && (conns[conn_id].status & SENDING)) {
+    if (conns[id].curr_send_size == 0 && (conns[id].status & SENDING)) {
         struct epoll_event ev2;
-        ev2.data.u64 = i2l(fd, conn_id);
+        ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN;
         cw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
-               conns[conn_id].sock, conn_id, conns[conn_id].curr_send_size);
-        sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[conn_id].sock, &ev2));
-        conns[conn_id].status &= ~SENDING;
+               conns[id].sock, id, conns[id].curr_send_size);
+        sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
+        conns[id].status &= ~SENDING;
     }
 
     return;
 
  err:
-    close_and_forget(epollfd, conns[conn_id].sock);
-    conn_free(conn_id);
+    close_and_forget(epollfd, conns[id].sock);
+    conn_free(id);
 }
 
 void* storage_worker(void* args) {
@@ -1089,18 +1095,18 @@ void* conn_worker(void* args) {
 
     // Add listen socket
     ev.events = EPOLLIN;
-    ev.data.u64 = i2l(infos->listen_sock, -1);
+    ev.data.u64 = i2l(LISTEN, infos->listen_sock);
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->listen_sock, &ev) == -1);
 
     // Add termination fd
     ev.events = EPOLLIN;
-    ev.data.u64 = i2l(infos->terminationfd, -1);
+    ev.data.u64 = i2l(TERMINATION, infos->terminationfd);
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev));
 
     // Add storage reply fd
     if (storage_path) {
         ev.events = EPOLLIN;
-        ev.data.u64 = i2l(infos->store_replyfd, -1);
+        ev.data.u64 = i2l(STORAGE, infos->store_replyfd);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->store_replyfd, &ev) < 0)
             perror("epoll_ctl: storefd failed");
     }
@@ -1121,10 +1127,11 @@ void* conn_worker(void* args) {
         }
 
         int fd;
+        event_type type;
         for (int i = 0; i < nfds; i++) {
-            l2i(events[i].data.u64, (uint32_t*) &fd, NULL);
+            l2i(events[i].data.u64, &type, (uint32_t*) &fd);
 
-            if (fd == infos->listen_sock) { // New connection
+            if (type == LISTEN) { // New connection
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);
                 int conn_sock;
@@ -1145,12 +1152,12 @@ void* conn_worker(void* args) {
                 }
 
                 ev.events = EPOLLIN;
-                ev.data.u64 = i2l(conn_sock, conn_id);
+                ev.data.u64 = i2l(SOCKET, conn_id);
 
                 if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
             }
-            else if (storage_path && fd == infos->store_replyfd) {
+            else if (type == STORAGE && storage_path && fd == infos->store_replyfd) {
                 // storage operation completed
                 // TODO: code
 
@@ -1165,7 +1172,7 @@ void* conn_worker(void* args) {
                 process_messages(conn_id_ACK, epollfd, infos);
                 //exec_request(epollfd, &events[i], infos);
             } 
-            else if (fd == infos->terminationfd) {
+            else if (type == TERMINATION) {
                 running = 0;
                 break;
             }
