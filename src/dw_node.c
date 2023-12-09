@@ -906,9 +906,9 @@ void* conn_worker(void* args) {
 
                 if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
-            } else if (type == STORAGE && storage_path && fd == infos->store_replyfd) {
+            } else if (type == STORAGE) {
                 // storage operation completed
-                // TODO: code
+                check(storage_path && fd == infos->store_replyfd);
 
                 int req_id_ACK;
                 if (safe_read(infos->store_replyfd, (unsigned char*) &req_id_ACK, sizeof(req_id_ACK)) < 0) {
