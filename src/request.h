@@ -1,5 +1,5 @@
-#ifndef REQUEST_H
-#define REQUEST_H
+#ifndef __REQUEST_H__
+#define __REQUEST_H__
 
 #include "message.h"
 #include "priority_queue.h"
@@ -40,4 +40,4 @@ static inline req_info_t *req_get_by_id(int req_id) {
     return &reqs[req_id % MAX_REQS];
 }
 
-#endif
+#endif /* __REQUEST_H__ */

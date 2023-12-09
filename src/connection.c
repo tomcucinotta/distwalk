@@ -24,7 +24,7 @@ const char *conn_status_str(int s) {
 }
 
 void conn_init() {
-	for (int i = 0; i < MAX_CONNS; i++) {
+    for (int i = 0; i < MAX_CONNS; i++) {
         conns[i].sock = -1;
         conns[i].recv_buf = NULL;
         conns[i].send_buf = NULL;
@@ -32,31 +32,29 @@ void conn_init() {
 }
 
 conn_info_t* conn_get_by_id(int conn_id) {
-	return &conns[conn_id];
+    return &conns[conn_id];
 }
 
 req_info_t* conn_req_add(conn_info_t *conn) {
-	req_info_t *req = req_alloc();
+    req_info_t *req = req_alloc();
 
-	req->conn_id = conn->conn_id;
+    req->conn_id = conn->conn_id;
     req->target = conn->target;
-	req->next = conn->req_list;
-	if (req->next)
-		req->next->prev = req;
-	conn->req_list = req;
+    req->next = conn->req_list;
+    if (req->next)
+        req->next->prev = req;
+    conn->req_list = req;
 
-	cw_log("REQUEST create req_id:%d, conn_id: %d", req->req_id, conn->conn_id);
-	return req;
+    cw_log("REQUEST create req_id:%d, conn_id: %d", req->req_id, conn->conn_id);
+    return req;
 }
 
 static void conn_reset(conn_info_t *conn) {
-	for (req_info_t *temp = conn->req_list; temp != NULL; temp = req_free(temp)){};
+    for (req_info_t *temp = conn->req_list; temp != NULL; temp = req_free(temp)){};
 }
 
 req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
-
-
-	unsigned long req_size = req_get_message(req)->req_size;
+    unsigned long req_size = req_get_message(req)->req_size;
     unsigned long leftover = conn->curr_recv_buf - (req->message_ptr + req_size);
     memmove(req->message_ptr, req->message_ptr + req_size, leftover);
 
@@ -68,17 +66,17 @@ req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
     conn->curr_recv_size += req_size;
     for (req_info_t *temp = req->prev; temp != NULL; temp = temp->prev) {
         cw_log("DEFRAGMENT update ptr, req_id:%d message [%p, %p[ -> [%p, %p[\n", 
-            temp->req_id,
-            temp->message_ptr,
-            temp->message_ptr + req_get_message(temp)->req_size,
-            temp->message_ptr - req_size,
-            temp->message_ptr - req_size + req_get_message(temp)->req_size);
+               temp->req_id,
+               temp->message_ptr,
+               temp->message_ptr + req_get_message(temp)->req_size,
+               temp->message_ptr - req_size,
+               temp->message_ptr - req_size + req_get_message(temp)->req_size);
         temp->message_ptr -= req_size;
     }
 
     if (conn->req_list == req)
-		conn->req_list = conn->req_list->next;
-	return req_free(req);
+        conn->req_list = conn->req_list->next;
+    return req_free(req);
 }
 
 // return index in conns[] of conn_info_t associated to inaddr:port, or -1 if not found
@@ -143,9 +141,8 @@ int conn_del_sock(int sock) {
 
     int id = conn_find_sock(sock);
 
-    if (id != -1){
+    if (id != -1)
         conn_del_id(id);
-    }
 
     //if (nthread > 1) sys_check(pthread_mutex_unlock(&socks_mtx));
 
@@ -178,9 +175,9 @@ int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     int conn_id;
     for (conn_id = 0; conn_id < MAX_CONNS; conn_id++) {
         //if (nthread > 1) sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
-        if (conns[conn_id].sock == -1) {
+        if (conns[conn_id].sock == -1)
             break;  // unlock mutex above after mallocs
-        }
+
         //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
     }
     if (conn_id == MAX_CONNS)
@@ -211,8 +208,10 @@ int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
 
  continue_free:
 
-    if (new_recv_buf) free(new_recv_buf);
-    if (new_send_buf) free(new_send_buf);
+    if (new_recv_buf)
+        free(new_recv_buf);
+    if (new_send_buf)
+        free(new_send_buf);
 
     return -1;
 }
@@ -223,29 +222,29 @@ unsigned char *get_send_buf(conn_info_t *pc, size_t size) {
 }
 
 message_t* conn_send_message(conn_info_t *conn) {
-	message_t* m = (message_t*) conn->send_buf + conn->curr_send_size;
-	m->req_size = BUF_SIZE - (conn->curr_send_buf - conn->send_buf + conn->curr_send_size);
-	return m;
+    message_t* m = (message_t*) conn->send_buf + conn->curr_send_size;
+    m->req_size = BUF_SIZE - (conn->curr_send_buf - conn->send_buf + conn->curr_send_size);
+    return m;
 }
 
 message_t* conn_recv_message(conn_info_t *conn) {
-	unsigned long msg_size = conn->curr_recv_buf - conn->curr_proc_buf;
-	message_t *m = (message_t *)conn->curr_proc_buf;;
+    unsigned long msg_size = conn->curr_recv_buf - conn->curr_proc_buf;
+    message_t *m = (message_t *)conn->curr_proc_buf;;
 
-	if (msg_size < sizeof(message_t)) {
-            cw_log("Got incomplete header [recv size:%lu, header size:%lu], need to recv() more...\n", msg_size, sizeof(message_t));
-            return NULL;
-        }
-        
-        if (msg_size < m->req_size) {
-            cw_log("Got header but incomplete message [recv size:%lu, expected size:%d], need to recv() more...\n", msg_size, m->req_size);
-            return NULL;
-        }
-        assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
+    if (msg_size < sizeof(message_t)) {
+        cw_log("Got incomplete header [recv size:%lu, header size:%lu], need to recv() more...\n", msg_size, sizeof(message_t));
+        return NULL;
+    }
 
-        cw_log("Got complete ");
+    if (msg_size < m->req_size) {
+        cw_log("Got header but incomplete message [recv size:%lu, expected size:%d], need to recv() more...\n", msg_size, m->req_size);
+        return NULL;
+    }
+    assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
+
+    cw_log("Got complete ");
 #ifdef CW_DEBUG
-        msg_log(m, "");
+    msg_log(m, "");
 #endif
 
     conn->curr_proc_buf += m->req_size;
@@ -255,9 +254,9 @@ message_t* conn_recv_message(conn_info_t *conn) {
 // start sending a message, assume the head of the curr_send_buffer is a message_t type
 // returns the number of bytes sent, -1 if an error occured
 int conn_start_send(conn_info_t *conn, struct sockaddr_in target) {
-	message_t *m = (message_t*) conn->send_buf + conn->curr_send_size;
+    message_t *m = (message_t*) conn->send_buf + conn->curr_send_size;
     conn->target = target;
-	cw_log("SEND starting, conn_id: %d, status: %s, msg_size: %d\n", conn->conn_id, conn_status_str(conn->status), m->req_size);
+    cw_log("SEND starting, conn_id: %d, status: %s, msg_size: %d\n", conn->conn_id, conn_status_str(conn->status), m->req_size);
     if (conn->curr_send_size == 0)
         conn->curr_send_buf = conn->send_buf;
     // move end of send operation forward by size bytes
@@ -270,7 +269,7 @@ int conn_start_send(conn_info_t *conn, struct sockaddr_in target) {
 }
 
 int conn_send(conn_info_t *conn) {
-	int sock = conn->sock;
+    int sock = conn->sock;
     cw_log("SEND conn_id=%d, status=%d (%s), curr_send_size=%lu, sock=%d\n", conn->conn_id, conn->status, conn_status_str(conn->status), conn->curr_send_size, sock);
     size_t sent = sendto(sock, conn->curr_send_buf, conn->curr_send_size, MSG_NOSIGNAL, (const struct sockaddr*)&conn->target, sizeof(conn->target));
     if (sent == 0) {
@@ -288,9 +287,8 @@ int conn_send(conn_info_t *conn) {
 
     conn->curr_send_buf += sent;
     conn->curr_send_size -= sent;
-    if (conn->curr_send_size == 0) {
+    if (conn->curr_send_size == 0)
         conn->curr_send_buf = conn->send_buf;
-    }
 
     return sent;
 }
@@ -298,8 +296,8 @@ int conn_send(conn_info_t *conn) {
 int conn_recv(conn_info_t *conn) {
     int sock = conn->sock;
     socklen_t recvsize = sizeof(conn->target);
-    size_t received =
-        recvfrom(sock, conn->curr_recv_buf, conn->curr_recv_size, 0, (struct sockaddr*)&conn->target, (socklen_t*)&recvsize);
+    size_t received = recvfrom(sock, conn->curr_recv_buf, conn->curr_recv_size, 0,
+                               (struct sockaddr*)&conn->target, (socklen_t*)&recvsize);
     cw_log("RECV returned: %d\n", (int)received);
     if (received == 0) {
         cw_log("RECV connection closed by remote end\n");

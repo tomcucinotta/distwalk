@@ -1,14 +1,14 @@
-#ifndef PRIORTITY_QUEUE_H
-#define PRIORTITY_QUEUE_H
+#ifndef __PRIORTITY_QUEUE_H__
+#define __PRIORTITY_QUEUE_H__
 
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
 
 typedef union {
-	int fd;
-	uint64_t value;
-	void *ptr;
+    int fd;
+    uint64_t value;
+    void *ptr;
 } data_t;
 
 struct pqueue_node_t;
@@ -30,4 +30,4 @@ pqueue_node_t* pqueue_top(pqueue_t *queue);
 data_t pqueue_node_data(pqueue_node_t *node);
 int pqueue_node_key(pqueue_node_t *node);
 
-#endif
+#endif /* __PRIORITY_QUEUE_H__ */

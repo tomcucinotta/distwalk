@@ -3,11 +3,11 @@
 #include <stdlib.h>
 
 #ifndef min
-#define min(a, b) ((a)>(b)?(b):(a))
+#   define min(a, b) ((a)>(b)?(b):(a))
 #endif
 
 inline const char* get_command_name(command_type_t cmd) {
-  switch (cmd) {
+    switch (cmd) {
     case COMPUTE: return "COMPUTE";
     case STORE: return "STORE";
     case LOAD: return "LOAD";
@@ -17,40 +17,40 @@ inline const char* get_command_name(command_type_t cmd) {
     case REPLY: return "REPLY";
     case EOM: return "EOM";
     default: 
-      printf("Unknown command type\n");
-      exit(EXIT_FAILURE);
-  }
+        printf("Unknown command type\n");
+        exit(EXIT_FAILURE);
+    }
 }
 
 inline int cmd_type_size(command_type_t type) {
-  int base = sizeof(command_t);
-  switch (type) {
-  case REPLY:
-    return base + sizeof(reply_opts_t);
-  case MULTI_FORWARD:
-  case FORWARD:
-    return base + sizeof(fwd_opts_t);
-  case COMPUTE:
-    return base + sizeof(comp_opts_t);
-  case LOAD:
-    return base + sizeof(load_opts_t);
-  case STORE:
-    return base + sizeof(store_opts_t);
-  case PSKIP:
-  case EOM:
+    int base = sizeof(command_t);
+    switch (type) {
+    case REPLY:
+        return base + sizeof(reply_opts_t);
+    case MULTI_FORWARD:
+    case FORWARD:
+        return base + sizeof(fwd_opts_t);
+    case COMPUTE:
+        return base + sizeof(comp_opts_t);
+    case LOAD:
+        return base + sizeof(load_opts_t);
+    case STORE:
+        return base + sizeof(store_opts_t);
+    case PSKIP:
+    case EOM:
+        return base;
+    }
     return base;
-  }
-  return base;
 }
 
 inline command_t* cmd_next(command_t *c) {
-  unsigned char *ptr = (unsigned char*)c;
-  ptr += cmd_type_size(c->cmd);
-  return (command_t*) ptr;
+    unsigned char *ptr = (unsigned char*)c;
+    ptr += cmd_type_size(c->cmd);
+    return (command_t*) ptr;
 }
 
 inline command_t* message_first_cmd(message_t *m) {
-  return &m->cmds[0];
+    return &m->cmds[0];
 }
 
 // copy a message, and its commands starting from cmd until the final REPLY is found
@@ -111,14 +111,14 @@ command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip) {
 }
 
 inline const void msg_log(message_t* m, char* padding) {
-  printf("%s", padding);
-  printf("message (req_id: %u, req_size: %u, num: %u): ", m->req_id, m->req_size, m->num);
+    printf("%s", padding);
+    printf("message (req_id: %u, req_size: %u, num: %u): ", m->req_id, m->req_size, m->num);
 
-  command_t *c = message_first_cmd(m), *pre_c;
-  while (c->cmd != EOM) {
-    char opts[64] = "";
+    command_t *c = message_first_cmd(m), *pre_c;
+    while (c->cmd != EOM) {
+        char opts[64] = "";
 
-    switch (c->cmd) {
+        switch (c->cmd) {
         case STORE:
             sprintf(opts, "%db", cmd_get_opts(store_opts_t, c)->store_nbytes);
             break;
@@ -138,11 +138,11 @@ inline const void msg_log(message_t* m, char* padding) {
         default: 
             printf("Unknown command type\n");
             exit(EXIT_FAILURE);
+        }
+        pre_c = c;
+        c = cmd_next(c);
+        printf("%s(%s)%s", get_command_name(pre_c->cmd), opts, c->cmd != EOM ? "->" : "");
     }
-    pre_c = c;
-    c = cmd_next(c);
-    printf("%s(%s)%s", get_command_name(pre_c->cmd), opts, c->cmd != EOM ? "->" : "");
-  }
 
-  printf(" [%ld bytes]\n", (unsigned char*)c - (unsigned char*)message_first_cmd(m));
+    printf(" [%ld bytes]\n", (unsigned char*)c - (unsigned char*)message_first_cmd(m));
 }

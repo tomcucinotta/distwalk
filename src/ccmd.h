@@ -41,4 +41,5 @@ void ccmd_log(ccmd_t* q);
 
 static inline ccmd_node_t *ccmd_last_action(ccmd_t *q) { return q->tail_actions; }
 static inline ccmd_node_t *ccmd_last_reply(ccmd_t *q) { return q->tail_replies; }
+
 #endif /* __CMD_H__ */

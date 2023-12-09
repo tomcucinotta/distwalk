@@ -1,5 +1,5 @@
-#ifndef CONNECTION_H
-#define CONNECTION_H
+#ifndef __CONNECTION_H__
+#define __CONNECTION_H__
 
 #include <stdint.h>
 #include <sys/socket.h>
@@ -9,7 +9,7 @@
 #include "request.h"
 
 #ifndef MAX_CONNS
-	#define MAX_CONNS 16
+#   define MAX_CONNS 16
 #endif
 
 typedef enum {
@@ -20,7 +20,7 @@ typedef enum {
 } conn_status;
 
 typedef struct {
-	int conn_id;
+    int conn_id;
     proto_t proto;                // transport protocol to use (TCP or UDP)
     int sock;                     // -1 for unused conn_info_t
     conn_status status;           // status of the connection
@@ -72,4 +72,4 @@ int conn_start_send(conn_info_t *conn, struct sockaddr_in target);
 int conn_send(conn_info_t *conn);
 int conn_recv(conn_info_t *conn);
 
-#endif
+#endif /* __CONNECTION_H__ */
