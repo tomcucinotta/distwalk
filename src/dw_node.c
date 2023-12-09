@@ -175,7 +175,7 @@ size_t safe_read(int fd, unsigned char *buf, size_t len) {
         }
 
         if (received == 0) {
-            printf("read() EoF\n");
+            fprintf(stderr, "read() EoF\n");
             break;
         }
 
@@ -643,7 +643,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     }
 
     if ((type == SOCKET || type == CONNECT) && (conns[id].sock == -1 || conns[id].recv_buf == NULL))
-            return;
+        return;
 
     if (p_ev->events & EPOLLIN) {
         cw_log("calling recv_mesg()\n");
@@ -662,7 +662,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
             goto err;
     }
     cw_log("conns[%d].status=%d (%s)\n", id, conns[id].status, conn_status_str(conns[id].status));
-    
+
     // check whether we have new or leftover messages to process
     if (!obtain_messages(id, epollfd, infos))
         goto err;

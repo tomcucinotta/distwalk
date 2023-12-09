@@ -50,7 +50,8 @@ req_info_t* conn_req_add(conn_info_t *conn) {
 }
 
 static void conn_reset(conn_info_t *conn) {
-    for (req_info_t *temp = conn->req_list; temp != NULL; temp = req_free(temp)){};
+    for (req_info_t *temp = conn->req_list; temp != NULL; temp = req_free(temp))
+        ;
 }
 
 req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
@@ -124,7 +125,7 @@ int conn_find_sock(int sock) {
 }
 
 void conn_del_id(int id) {
-    assert(id < MAX_CONNS);
+    assert(id >= 0 && id < MAX_CONNS);
 
     //if (nthread > 1) sys_check(pthread_mutex_lock(&socks_mtx));
 

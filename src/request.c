@@ -12,21 +12,19 @@ void req_init() {
         reqs[i].req_id = -1;
         reqs[i].conn_id = -1;
     }
-
 }
 
 req_info_t* req_free(req_info_t* r) {
     cw_log("REQUEST remove req_id:%d\n", r->req_id);
 
-    req_info_t *next;
-    r->req_id = -1;
-    next = r->next;
+    req_info_t *next = r->next;
     if (r->next != NULL)
         r->next->prev = r->prev;
     if (r->prev != NULL)
         r->prev->next = r->next;
     r->next = NULL;
     r->prev = NULL;
+    r->req_id = -1;
 
     return next;
 }
