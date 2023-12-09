@@ -55,7 +55,7 @@ typedef enum {
 } event_t;
 
 const char* get_event_str(event_t event) {
-    static char event_str[EVENT_NUMBER][20] = {
+    static char *event_str[EVENT_NUMBER] = {
         "LISTEN",
         "TERMINATION",
         "STORAGE",
