@@ -744,7 +744,7 @@ void* storage_worker(void* args) {
         }
 
         ev.events = EPOLLIN | EPOLLET;
-        ev.data.u64 = i2l(infos->timerfd, -1);
+        ev.data.fd = infos->timerfd;
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev) < 0)
             perror("epoll_ctl: terminationfd failed");
     }
@@ -763,9 +763,8 @@ void* storage_worker(void* args) {
             }
         }
 
-        int fd;
         for (int i = 0; i < nfds; i++) {
-            l2i(events[i].data.u64, (uint32_t*) &fd, NULL);
+            int fd = events[i].data.fd;
 
             if (fd == infos->terminationfd) {
                 running = 0;
