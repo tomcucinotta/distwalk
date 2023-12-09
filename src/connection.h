@@ -16,14 +16,15 @@ typedef enum {
     NOT_INIT,
     READY,
     SENDING,
-    CONNECTING,           
-} conn_status;
+    CONNECTING,   // used with TCP only
+    STATUS_NUMBER // keep this as last
+} conn_status_t;
 
 typedef struct {
     int conn_id;
     proto_t proto;                // transport protocol to use (TCP or UDP)
     int sock;                     // -1 for unused conn_info_t
-    conn_status status;           // status of the connection
+    conn_status_t status;         // status of the connection
 
     struct sockaddr_in target;    // target of the connection
 
@@ -46,7 +47,7 @@ typedef struct {
 
 extern conn_info_t conns[MAX_CONNS];
 
-const char *conn_status_str(int s);
+const char *conn_status_str(conn_status_t s);
 
 void conn_init();
 

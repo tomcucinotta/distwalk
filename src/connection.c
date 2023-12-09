@@ -9,18 +9,14 @@
 conn_info_t conns[MAX_CONNS];
 
 
-const char *conn_status_str(int s) {
-    static const char *ready = "READY", *connecting = "CONNECTING", *sending = "SENDING", *not_init = "NOT INIT";
-    const char *ret;
-    if (s == READY)
-        ret = ready;
-    if (s == CONNECTING)
-        ret = connecting;
-    if (s == SENDING)
-        ret = sending;
-    if (s == NOT_INIT)
-        ret = not_init;
-    return ret;
+const char *conn_status_str(conn_status_t s) {
+    static const char *status_str[STATUS_NUMBER] = {
+        "NOT INIT",
+        "READY",
+        "SENDING",
+        "CONNECTING"
+    };
+    return status_str[s];
 }
 
 void conn_init() {
