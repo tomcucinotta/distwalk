@@ -27,11 +27,17 @@ extern atomic_int last_reqs;
 
 void req_init();
 
-message_t* req_get_message(req_info_t *r);
-
 req_info_t* req_alloc();
 req_info_t* req_free(req_info_t *r);
 
-req_info_t *req_get_by_id(int req_id);
+static inline message_t* req_get_message(req_info_t *r) {
+    return (message_t*)r->message_ptr;
+}
+
+static inline req_info_t *req_get_by_id(int req_id) {
+    if (reqs[req_id % MAX_REQS].req_id != req_id)
+        return NULL;
+    return &reqs[req_id % MAX_REQS];
+}
 
 #endif
