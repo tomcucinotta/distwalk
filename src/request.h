@@ -4,6 +4,8 @@
 #include "message.h"
 #include "priority_queue.h"
 
+#include <stdatomic.h>
+
 #define MAX_REQS (1u << 16)
 
 
@@ -21,7 +23,7 @@ struct req_info_t {
 };
 
 extern req_info_t reqs[MAX_REQS];
-extern int last_reqs;
+extern atomic_int last_reqs;
 
 void req_init();
 

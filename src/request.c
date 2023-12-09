@@ -3,7 +3,7 @@
 #include <string.h>
 
 req_info_t reqs[MAX_REQS];
-int last_reqs = 0;
+atomic_int last_reqs = 0;
 
 void req_init() {
     // Tag all req as unused
@@ -36,7 +36,7 @@ req_info_t* req_free(req_info_t* r) {
 }
 
 req_info_t* req_alloc() {
-    int req_id = __atomic_fetch_add(&last_reqs, 1, __ATOMIC_SEQ_CST);
+    int req_id = atomic_fetch_add(&last_reqs, 1);
     req_info_t *r = &reqs[req_id % MAX_REQS];
 
     if (r->req_id != -1)

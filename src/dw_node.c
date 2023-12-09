@@ -127,7 +127,7 @@ int no_delay = 1;
 
 int use_odirect = 0;
 int nthread = 1;
-_Atomic volatile int running = 1;
+volatile int running = 1;
 
 int thread_affinity = 0;
 char* thread_affinity_list;
