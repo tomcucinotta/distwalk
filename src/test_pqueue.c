@@ -81,9 +81,9 @@ err:
 		bool res = fun;              \
 		printf("TEST " #fun ": ");  \
 		if (res)                      \
-			printf("SUCCESS");       \
+			printf("SUCCESS\n");       \
 		else                         \
-			printf("FAILED");        \
+			printf("FAILED\n");        \
 	}     
 
 int main() {
