@@ -198,6 +198,7 @@ void ccmd_destroy(ccmd_t* q) {
 
 void ccmd_log(ccmd_t* q) {
     check(q, "ccmd_log() error - Initialize queue first");
+    printf("ccmd ");
 
     ccmd_node_t* curr = q->head_actions;
 

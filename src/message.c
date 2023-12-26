@@ -114,6 +114,10 @@ inline const void msg_log(message_t* m, char* padding) {
     printf("%s", padding);
     printf("message (req_id: %u, req_size: %u, num: %u): ", m->req_id, m->req_size, m->num);
 
+    if (m->num == 0) {
+        return;
+    }
+
     command_t *c = message_first_cmd(m), *pre_c;
     while (c->cmd != EOM) {
         char opts[64] = "";
@@ -141,8 +145,8 @@ inline const void msg_log(message_t* m, char* padding) {
         }
         pre_c = c;
         c = cmd_next(c);
-        printf("%s(%s)%s", get_command_name(pre_c->cmd), opts, c->cmd != EOM ? "->" : "");
+        printf("%s(%s)%s", get_command_name(pre_c->cmd), opts, "->");
     }
-
+    printf("EOM");
     printf(" [%ld bytes]\n", (unsigned char*)c - (unsigned char*)message_first_cmd(m));
 }

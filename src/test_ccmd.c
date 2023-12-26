@@ -9,12 +9,14 @@ int main() {
 
     unsigned char *send_buf = malloc(BUF_SIZE);
     message_t *m = (message_t *)send_buf;
+    m->req_size = BUF_SIZE;
 
-    pd_spec_t val = { .prob = FIXED, .val = 100, .min = 0, .max = 0 };
+    pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, COMPUTE, &val);
 
-    pd_spec_t val2 = { .prob = FIXED, .val = 100, .min = 0, .max = 0 };
+    pd_spec_t val2 = pd_build_fixed(100);
     ccmd_add(ccmd, REPLY, &val2);
+    //ccmd_last_reply(ccmd)->resp.n_ack = 1;
 
     ccmd_log(ccmd);
     ccmd_dump(ccmd, m);
