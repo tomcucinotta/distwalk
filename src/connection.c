@@ -273,10 +273,20 @@ int conn_send(conn_info_t *conn) {
         // TODO: should not even be possible, ignoring
         cw_log("SEND returned 0\n");
         return 0;
-    } else if (sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        cw_log("SEND Got EAGAIN or EWOULDBLOCK, ignoring...\n");
-        return 0;
-    } else if (sent == -1) {
+    }
+
+    if (sent == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            cw_log("SEND Got EAGAIN or EWOULDBLOCK, ignoring...\n");
+            return 0;
+        } 
+
+        if (errno = EPIPE || errno == ECONNRESET) {
+            cw_log("SEND Connection closed by remote end conn_id=%d\n", conn->conn_id);
+            conns[conn->conn_id].status = CLOSE;
+            return 0;
+        }
+
         fprintf(stderr, "SEND Unexpected error: %s\n", strerror(errno));
         return -1;
     }

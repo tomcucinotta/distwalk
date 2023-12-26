@@ -498,8 +498,8 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
             return 0;
         case REPLY:
             cw_log("Handling REPLY: req_id=%d\n", m->req_id);
-            if (!reply(req, m, cmd)) {
-                fprintf(stderr, "reply() failed\n");
+            if (conns[req->conn_id].status != CLOSE && !reply(req, m, cmd)) {
+                fprintf(stderr, "reply() failed, conn_id: %d\n", req->conn_id);
                 return -1;
             }
             // any further cmds[] for replied-to hop, not me
@@ -623,7 +623,7 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
         
         req->curr_cmd = message_skip_cmds(m, req->curr_cmd, fwd->on_fail_skip);
         process_messages(req, epollfd, infos);
-         conn_req_remove(conn, req);
+        conn_req_remove(conn, req);
     } else {
         cw_log("TIMEOUT expired, failed\n");
         conn_req_remove(conn, req);

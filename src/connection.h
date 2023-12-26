@@ -17,6 +17,7 @@ typedef enum {
     READY,
     SENDING,
     CONNECTING,   // used with TCP only
+    CLOSE,
     STATUS_NUMBER // keep this as last
 } conn_status_t;
 
