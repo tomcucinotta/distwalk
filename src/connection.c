@@ -41,7 +41,7 @@ req_info_t* conn_req_add(conn_info_t *conn) {
         req->next->prev = req;
     conn->req_list = req;
 
-    cw_log("REQUEST create req_id:%d, conn_id: %d", req->req_id, conn->conn_id);
+    cw_log("REQUEST create req_id:%d, conn_id: %d\n", req->req_id, conn->conn_id);
     return req;
 }
 
