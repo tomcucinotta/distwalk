@@ -224,7 +224,7 @@ message_t* conn_send_message(conn_info_t *conn) {
     return m;
 }
 
-message_t* conn_recv_message(conn_info_t *conn) {
+message_t* conn_next_message(conn_info_t *conn) {
     unsigned long msg_size = conn->curr_recv_buf - conn->curr_proc_buf;
     message_t *m = (message_t *)conn->curr_proc_buf;
 

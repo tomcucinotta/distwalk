@@ -311,7 +311,7 @@ void *thread_receiver(void *data) {
 
         do {
             recv = conn_recv(conn);
-            m = conn_recv_message(conn);
+            m = conn_next_message(conn);
         } while (recv > 0 && m == NULL);
 
         if (m == NULL) {

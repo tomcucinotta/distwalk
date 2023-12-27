@@ -543,9 +543,7 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
     if (conn->serialize_request && conn->req_list != NULL)
         return 1;
 
-    message_t *m = conn_recv_message(conn);
-    while (m != NULL) {
-
+    for (message_t *m = conn_next_message(conn); m != NULL; m = conn_next_message(conn)) {
         // FORWARD finished
         if (m->num == 0) {
             cw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), 
@@ -564,9 +562,7 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
                 return 1;
             }
         }
-
-        m = conn_recv_message(conn);
-    };
+    }
 
     return 1;
 }
