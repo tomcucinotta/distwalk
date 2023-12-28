@@ -554,6 +554,10 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
             }
         } else {
             req_info_t *req = conn_req_add(conn);
+            if (req == NULL) {
+                fprintf(stderr, "conn_req_add() failed\n");
+                return 0;
+            }
             req->message_ptr = (unsigned char*) m;
             req->curr_cmd = message_first_cmd(m);
             int executed = process_single_message(req, epollfd, infos);

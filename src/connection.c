@@ -33,6 +33,8 @@ conn_info_t* conn_get_by_id(int conn_id) {
 
 req_info_t* conn_req_add(conn_info_t *conn) {
     req_info_t *req = req_alloc();
+    if (req == NULL)
+        return NULL;
 
     req->conn_id = conn->conn_id;
     req->target = conn->target;
