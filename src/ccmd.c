@@ -97,7 +97,7 @@ extern __thread struct drand48_data rnd_buf;
 
 ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
     int prev_was_mfwd = 0;
-    while (n-- > 0) {
+    while (n-- > 0 && curr) {
         if (curr->cmd == FORWARD || (curr->cmd == MULTI_FORWARD && !prev_was_mfwd)) {
             int nested_fwd = 0;
             do {
@@ -111,11 +111,15 @@ ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
                         nested_fwd--;
                 } else if (curr->cmd == FORWARD || (curr->cmd == MULTI_FORWARD && !prev_was_mfwd))
                     nested_fwd++;
-            } while (1);
+            } while (curr->cmd != REPLY && nested_fwd != 0);
         }
-        prev_was_mfwd = (curr->cmd == MULTI_FORWARD);
-        curr = curr->next;
+
+        if (curr) {
+            prev_was_mfwd = (curr->cmd == MULTI_FORWARD);
+            curr = curr->next;
+        }
     }
+
     return curr;
 }
 
@@ -182,10 +186,10 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
     return 1;
 }
 
-void ccmd_destroy(ccmd_t* q) {
+void ccmd_destroy(ccmd_t** q) {
     check(q, "ccmd_destroy() error - Initialize queue first");
 
-    ccmd_node_t* curr = q->head_actions;
+    ccmd_node_t* curr = (*q)->head_actions;
     ccmd_node_t* tmp = NULL;
     while (curr) {
         tmp = curr->next;
@@ -193,7 +197,8 @@ void ccmd_destroy(ccmd_t* q) {
         curr = tmp;
     }
 
-    free(q);
+    free(*q);
+    *q = NULL;
 }
 
 void ccmd_log(ccmd_t* q) {
