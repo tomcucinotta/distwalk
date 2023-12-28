@@ -302,7 +302,7 @@ void *thread_receiver(void *data) {
             /* spawn sender once connection is established */
 
             int conn_id = conn_alloc(clientSocket[thread_id], serveraddr, proto);
-            conn_get_by_id(conn_id)->status = READY;
+            conn_set_status_by_id(conn_id, READY);
 
             // TODO (?) thr_data is allocated in the stack and reused for every thread, possible (but completly improbable) race condition
             thr_data.thread_id = thread_id;

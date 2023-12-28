@@ -27,6 +27,25 @@ void conn_init() {
     }
 }
 
+
+
+conn_status_t conn_set_status(conn_info_t* conn, conn_status_t status) {
+    conn_status_t prev = conn->status;
+    conn->status = status;
+
+    return prev;
+}
+conn_status_t conn_set_status_by_id(int conn_id, conn_status_t status) {
+    return conn_set_status(conn_get_by_id(conn_id), status);
+}
+
+conn_status_t conn_get_status(conn_info_t* conn) {
+    return conn->status;
+}
+conn_status_t conn_get_status_by_id(int conn_id) {
+    return conn_get_status(conn_get_by_id(conn_id));
+}
+
 conn_info_t* conn_get_by_id(int conn_id) {
     return &conns[conn_id];
 }

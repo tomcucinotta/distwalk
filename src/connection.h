@@ -55,6 +55,11 @@ void conn_init();
 int conn_alloc(int sock, struct sockaddr_in target, proto_t proto);
 void conn_free(int conn_id);
 
+conn_status_t conn_get_status(conn_info_t* conn);
+conn_status_t conn_get_status_by_id(int conn_id);
+conn_status_t conn_set_status(conn_info_t* conn, conn_status_t status);
+conn_status_t conn_set_status_by_id(int conn_id, conn_status_t status);
+
 conn_info_t* conn_get_by_id(int conn_id);
 req_info_t* conn_req_add(conn_info_t *conn);
 req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req);

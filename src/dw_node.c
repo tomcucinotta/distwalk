@@ -327,7 +327,7 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
                     return 0;
                 }
                 // normal case of asynchronous connect
-                conns[fwd_conn_id].status = CONNECTING;
+                conn_set_status_by_id(fwd_conn_id, CONNECTING);
             }
         }
     }
@@ -501,7 +501,7 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
             return 0;
         case REPLY:
             cw_log("Handling REPLY: req_id=%d\n", m->req_id);
-            if (conns[req->conn_id].status != CLOSE && !reply(req, m, cmd)) {
+            if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd)) {
                 fprintf(stderr, "reply() failed, conn_id: %d\n", req->conn_id);
                 return -1;
             }
@@ -584,7 +584,7 @@ int finalize_conn(int epollfd, int conn_id) {
         return 0;
     }
     // this may trigger send_messages() on return, if messages have already been enqueued
-    conns[conn_id].status = READY;
+    conn_set_status_by_id(conn_id, READY);
 
     struct epoll_event ev;
     ev.events = EPOLLIN;
@@ -659,34 +659,34 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
             goto err;
         // we need the send_messages() below to still be tried afterwards
     }
-    if ((p_ev->events & EPOLLOUT) && (conns[id].curr_send_size > 0) && conns[id].status != CONNECTING && conns[id].status != NOT_INIT) {
+    if ((p_ev->events & EPOLLOUT) && (conns[id].curr_send_size > 0) && conn_get_status_by_id(id) != CONNECTING && conn_get_status_by_id(id) != NOT_INIT) {
         cw_log("calling send_mesg()\n");
         if (!conn_send(&conns[id]))
             goto err;
     }
-    cw_log("conns[%d].status=%d (%s)\n", id, conns[id].status, conn_status_str(conns[id].status));
+    cw_log("conns[%d].status=%d (%s)\n", id, conn_get_status_by_id(id), conn_status_str(conn_get_status_by_id(id)));
 
     // check whether we have new or leftover messages to process
     if (!obtain_messages(id, epollfd, infos))
         goto err;
 
-    if (conns[id].curr_send_size > 0 && conns[id].status == READY) {
+    if (conns[id].curr_send_size > 0 && conn_get_status_by_id(id) == READY) {
         struct epoll_event ev2;
         ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN | EPOLLOUT;
         cw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[id].sock, id, conns[id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
-        conns[id].status = SENDING;
+        conn_set_status_by_id(id, SENDING);
     }
-    if (conns[id].curr_send_size == 0 && conns[id].status == SENDING) {
+    if (conns[id].curr_send_size == 0 && conn_get_status_by_id(id) == SENDING) {
         struct epoll_event ev2;
         ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN;
         cw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[id].sock, id, conns[id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
-        conns[id].status = READY;
+        conn_set_status_by_id(id, READY);
     }
 
     return;
@@ -910,7 +910,7 @@ void* conn_worker(void* args) {
                     continue;
                 }
 
-                conns[conn_id].status = READY;
+                conn_set_status_by_id(conn_id, READY);
                 ev.events = EPOLLIN;
                 ev.data.u64 = i2l(SOCKET, conn_id);
 
@@ -1126,7 +1126,7 @@ int main(int argc, char *argv[]) {
         } else {
             thread_infos[i].listen_sock = socket(PF_INET, SOCK_DGRAM, 0);
             int conn_id = conn_alloc(thread_infos[i].listen_sock, serverAddr, UDP);
-            conn_get_by_id(conn_id)->status = READY;
+            conn_set_status_by_id(conn_id, READY);
         }
 
         int val = 1;
