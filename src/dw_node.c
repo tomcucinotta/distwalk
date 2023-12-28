@@ -140,7 +140,7 @@ char *storage_path = NULL;
 
 void sigint_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
-
+    int temp_errno = errno; // to avoid errno spoil in multi-thread
     running = 0;
 
     // terminate workers by sending a notification
@@ -152,6 +152,7 @@ void sigint_cleanup(int _) {
     }
 
     eventfd_write(storage_info.terminationfd, 1);
+    errno = temp_errno;
 }
 
 void safe_write(int fd, unsigned char *buf, size_t len) {
