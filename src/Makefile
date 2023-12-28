@@ -3,7 +3,7 @@ CFLAGS_DEBUG=-g -DCW_DEBUG
 CFLAGS_TSAN=-g -O2 -fsanitize=thread
 LDLIBS=-pthread -lm 
 
-PROGRAMS=dw_client dw_node dw_client_debug dw_client_tsan dw_node_debug dw_node_tsan test_distrib test_ccmd test_pqueue test_pqueue_tsan
+PROGRAMS=dw_client dw_node dw_client_debug dw_client_tsan dw_node_debug dw_node_tsan test_distrib test_ccmd test_ccmd_debug test_pqueue test_pqueue_tsan
 
 all: $(PROGRAMS)
 
@@ -20,6 +20,7 @@ dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request_deb
 test_distrib: test_distrib.o distrib.o
 test_distrib_debug: test_distrib_debug.o distrib_debug.o
 test_ccmd: ccmd.o test_ccmd.o distrib.o message.o
+test_ccmd_debug: ccmd.o test_ccmd_debug.o distrib.o message.o
 test_pqueue: test_pqueue.o priority_queue.o
 test_pqueue_tsan: test_pqueue_tsan.o priority_queue.o
 

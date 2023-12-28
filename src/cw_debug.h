@@ -54,4 +54,14 @@
     }						 \
   } while (0)
 
+// Execute a test function
+#define perform_test(fun)            \
+	{                                \
+		bool res = fun;              \
+		printf("TEST " #fun ": ");  \
+		if (res)                      \
+			printf("SUCCESS\n");       \
+		else                         \
+			printf("FAILED\n");        \
+	} 
 #endif

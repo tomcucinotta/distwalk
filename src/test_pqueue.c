@@ -1,10 +1,12 @@
 #include <stdio.h>
 #include <stdbool.h>
+
 #include "priority_queue.h"
+#include "cw_debug.h"
 
 #define N 100
 
-bool check(pqueue_t *queue, int arr[N], pqueue_node_t *nodes[N]) {
+bool check2(pqueue_t *queue, int arr[N], pqueue_node_t *nodes[N]) {
 	int temp_arr[N], n = pqueue_size(queue);
 
 	for (int i = 0; i < n; i++) {
@@ -58,14 +60,14 @@ bool check_pqueue() {
 			n--;
 			remove++;
 		} else {
-			bool ret = check(queue, arr, nodes);
+			bool ret = check2(queue, arr, nodes);
 			checks++;
 			if (!ret)
 				goto err;
 		}
 	}
 
-	bool ret = check(queue, arr, nodes);
+	bool ret = check2(queue, arr, nodes);
 	if (!ret)
 		goto err;
 
@@ -74,17 +76,7 @@ bool check_pqueue() {
 err:
 	pqueue_free(queue);
 	return false;
-}
-
-#define perform_test(fun)            \
-	{                                \
-		bool res = fun;              \
-		printf("TEST " #fun ": ");  \
-		if (res)                      \
-			printf("SUCCESS\n");       \
-		else                         \
-			printf("FAILED\n");        \
-	}     
+}  
 
 int main() {
 
