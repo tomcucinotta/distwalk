@@ -23,6 +23,8 @@
 #include "timespec.h"
 #include "ccmd.h"
 
+__thread char thread_name[16];
+
 int exp_arrivals = 0;
 int wait_spinning = 0;
 
@@ -167,6 +169,10 @@ int idx(int pkt_id) {
 
 void *thread_sender(void *data) {
     thread_data_t *p = (thread_data_t *)data;
+
+    sprintf(thread_name, "sndw-%d", p->thread_id);
+    sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
+
     int thread_id = p->thread_id;
     int first_pkt_id = p->first_pkt_id;
     int num_send_pkts = p->num_send_pkts;
@@ -253,6 +259,10 @@ void *thread_sender(void *data) {
 
 void *thread_receiver(void *data) {
     int thread_id = (int)(unsigned long)data;
+
+    sprintf(thread_name, "rcvw-%d", thread_id);
+    sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
+
     unsigned char *recv_buf = malloc(BUF_SIZE);
     check(recv_buf != NULL);
 
@@ -757,6 +767,8 @@ int parse_args(int argc, char *argv[]) {
 
 int main(int argc, char *argv[]) {
     check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
+
+    sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
 
     ccmd_init(&ccmd);
     conn_init();

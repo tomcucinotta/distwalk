@@ -5,13 +5,15 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/prctl.h>
 
 #ifdef CW_DEBUG
 
+extern __thread char thread_name[16];
 #define cw_log(msg, ...) do { \
     struct timespec __ts; \
     clock_gettime(CLOCK_MONOTONIC, &__ts);\
-    printf("[%ld.%09ld] " msg, __ts.tv_sec, __ts.tv_nsec, ## __VA_ARGS__);  \
+    printf("[%ld.%09ld][%s] " msg, __ts.tv_sec, __ts.tv_nsec, thread_name, ## __VA_ARGS__);  \
     fflush(stdout);  \
   } while (0);
 

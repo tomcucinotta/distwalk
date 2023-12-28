@@ -20,6 +20,7 @@
 #include <sys/types.h> /* See NOTES */
 #include <unistd.h>
 #include <stdbool.h>
+#include <sys/prctl.h>
 
 #include "cw_debug.h"
 #include "message.h"
@@ -113,6 +114,7 @@ typedef struct {
 
 pthread_t workers[MAX_THREADS];
 thread_info_t thread_infos[MAX_THREADS];
+__thread char thread_name[16];
 
 pthread_t storer;
 storage_info_t storage_info;
@@ -696,6 +698,9 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
 void* storage_worker(void* args) {
     storage_info_t *infos = (storage_info_t *)args;
 
+    sprintf(thread_name, "storagew");
+    sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
+
     int epollfd;
     struct epoll_event ev, events[MAX_EVENTS];
 
@@ -750,6 +755,7 @@ void* storage_worker(void* args) {
     }
 
     while (running) {
+        cw_log("epoll_wait()ing...\n");
         int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
         if (nfds == -1) {
             perror("epoll_wait");
@@ -820,6 +826,9 @@ void* storage_worker(void* args) {
 
 void* conn_worker(void* args) {
     thread_info_t *infos = (thread_info_t *)args;
+
+    sprintf(thread_name, "connw-%d", infos->worker_id);
+    sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
     if (thread_affinity) {
         sys_check(aff_pin_to(infos->core_id));
@@ -935,6 +944,8 @@ int main(int argc, char *argv[]) {
     // Setup SIGINT signal handler
     signal(SIGINT, sigint_cleanup);
 
+    sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL)); \
+    
     cpu_set_t mask;
     struct sockaddr_in serverAddr;
 
