@@ -1,37 +1,42 @@
 CFLAGS=-Wall -O3 
-CFLAGS_DEBUG=-g -DCW_DEBUG
+CFLAGS_DEBUG=-g -DCW_DEBUG -fprofile-arcs -ftest-coverage
 CFLAGS_TSAN=-g -O2 -fsanitize=thread
-LDLIBS=-pthread -lm 
-
+LDLIBS=-pthread -lm
+LDLIBS_DEBUG=-pthread -lm -lgcov
 PROGRAMS=dw_client dw_node dw_client_debug dw_client_tsan dw_node_debug dw_node_tsan test_distrib test_ccmd test_ccmd_debug test_pqueue test_pqueue_tsan
 
 all: $(PROGRAMS)
 
 clean:
-	rm -f *.o *~ $(PROGRAMS)
+	rm -f *.o *.gcno *.gcda *.gcov *~ $(PROGRAMS)
 
-dw_client: ccmd.o dw_client.o distrib.o thread_affinity.o connection.o request.o message.o
-dw_client_debug: ccmd_debug.o dw_client_debug.o distrib_debug.o thread_affinity_debug.o connection_debug.o request_debug.o message_debug.o
+dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o connection.o request.o message.o
+dw_client_debug: dw_client_debug.o ccmd_debug.o distrib_debug.o thread_affinity_debug.o connection_debug.o request_debug.o message_debug.o
 dw_client_tsan: dw_client_tsan.o ccmd_tsan.o dw_client_tsan.o distrib_tsan.o thread_affinity_tsan.o connection.o request.o message.o
 dw_node: dw_node.o thread_affinity.o priority_queue.o request.o connection.o message.o
-dw_node_debug: dw_node_debug.o thread_affinity_debug.o priority_queue.o request_debug.o connection_debug.o message_debug.o
-dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request_debug.o connection_debug.o message_debug.o
+dw_node_debug: dw_node_debug.o thread_affinity_debug.o priority_queue_debug.o request_debug.o connection_debug.o message_debug.o
+dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request.o connection.o message.o
 
 test_distrib: test_distrib.o distrib.o
 test_distrib_debug: test_distrib_debug.o distrib_debug.o
 test_ccmd: ccmd.o test_ccmd.o distrib.o message.o
-test_ccmd_debug: ccmd.o test_ccmd_debug.o distrib.o message.o
+test_ccmd_debug: ccmd_debug.o test_ccmd_debug.o distrib.o message_debug.o
 test_pqueue: test_pqueue.o priority_queue.o
 test_pqueue_tsan: test_pqueue_tsan.o priority_queue.o
 
 %_tsan: %_tsan.o
 	$(CC) -fsanitize=thread -o $@ $^ $(LDLIBS)
+%_debug: %_debug.o
+	$(CC) -o $@ $^ $(LDLIBS_DEBUG)
 
 %_debug.o: %.c
-	$(CC) -c $(CFLAGS_DEBUG) $(CPPFLAGS_DEBUG) -o $@ $<
+	$(CC) -c $(CFLAGS_DEBUG) -o $@ $<
 %_tsan.o: %.c
-	$(CC) -c $(CFLAGS_TSAN) $(CPPFLAGS_TSAN) -o $@ $<
+	$(CC) -c $(CFLAGS_TSAN)  -o $@ $<
 
+cov: all
+	./test_ccmd_debug
+	gcovr
 dep:
 	makedepend -- -Y *.c
 
@@ -55,3 +60,7 @@ test_ccmd.o: ccmd.h message.h distrib.h
 test_distrib.o: distrib.h
 test_pqueue.o: priority_queue.h
 thread_affinity.o: thread_affinity.h
+
+EXECUTABLES = gcovr
+EXECUTABLES_CHECKER := $(foreach exec,$(EXECUTABLES),\
+        			   $(if $(shell command -v $(exec)),,$(error "No $(exec) in PATH. Please install it")))

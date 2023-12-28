@@ -15,3 +15,7 @@ test_struct_tsan
 
 .vscode
 .dir-locals.el
+
+*.gcno 
+*.gcda 
+*.gcov
