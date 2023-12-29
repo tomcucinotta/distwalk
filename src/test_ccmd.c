@@ -3,7 +3,7 @@
 
 #include "ccmd.h"
 #include "message.h"
-#include "cw_debug.h"
+#include "dw_debug.h"
 bool test_ccmd_init_destroy() {
     ccmd_t* ccmd;
     ccmd_init(&ccmd);

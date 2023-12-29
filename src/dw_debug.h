@@ -1,5 +1,5 @@
-#ifndef __CW_DEBUG_H__
-#define __CW_DEBUG_H__
+#ifndef __DW_DEBUG_H__
+#define __DW_DEBUG_H__
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,11 +9,11 @@
 
 // a weak global variable is ignored when a strong one is detected.
 // This is needed for the edge-cases where thread_name is not defined,
-// (e.g. cw_debug is used for unit testing, and not via dw_{client,node})
+// (e.g. dw_debug is used for unit testing, and not via dw_{client,node})
 __attribute__((weak)) __thread char thread_name[16];
 
-#ifdef CW_DEBUG 
-#define cw_log(msg, ...) do { \
+#ifdef DW_DEBUG 
+#define dw_log(msg, ...) do { \
     struct timespec __ts; \
     clock_gettime(CLOCK_MONOTONIC, &__ts);\
     if (thread_name) \
@@ -25,7 +25,7 @@ __attribute__((weak)) __thread char thread_name[16];
 
 #else
 
-#define cw_log(msg, ...)
+#define dw_log(msg, ...)
 
 #endif
 

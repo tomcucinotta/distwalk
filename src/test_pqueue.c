@@ -2,7 +2,7 @@
 #include <stdbool.h>
 
 #include "priority_queue.h"
-#include "cw_debug.h"
+#include "dw_debug.h"
 
 #define N 100
 

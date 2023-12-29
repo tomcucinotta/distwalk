@@ -16,7 +16,7 @@
 
 #define MAX_CONNS 32
 
-#include "cw_debug.h"
+#include "dw_debug.h"
 #include "distrib.h"
 #include "message.h"
 #include "connection.h"
@@ -72,7 +72,7 @@ void hostport_parse_and_config(char* host_str, struct sockaddr_in* addr) {
     port_str = strchr(host_str, ':');
     // Now host containts hostname (or ip) only
     if (port_str) {
-        cw_log("port_str: %s\n", port_str);
+        dw_log("port_str: %s\n", port_str);
         *port_str = '\0';
         port_str++;
 
@@ -84,13 +84,13 @@ void hostport_parse_and_config(char* host_str, struct sockaddr_in* addr) {
 
     if (strlen(host_str) > 0)
         hostname = host_str;
-    cw_log("host_str: %s\n", hostname);
+    dw_log("host_str: %s\n", hostname);
 
     // Resolve hostname
-    cw_log("Resolving %s...\n", hostname);
+    dw_log("Resolving %s...\n", hostname);
     struct hostent *e = gethostbyname(hostname);
     check(e != NULL);
-    cw_log("Host %s resolved to %d bytes: %s\n", hostname, e->h_length,
+    dw_log("Host %s resolved to %d bytes: %s\n", hostname, e->h_length,
            inet_ntoa(*(struct in_addr *)e->h_addr));
 
     // Build Internet address
@@ -186,7 +186,7 @@ void *thread_sender(void *data) {
     message_t *m;
     conn_info_t *conn = conn_get_by_id(p->conn_id);
 
-#ifdef CW_DEBUG
+#ifdef DW_DEBUG
     ccmd_log(ccmd);
 #endif
 
@@ -206,10 +206,10 @@ void *thread_sender(void *data) {
         m->req_id = pkt_id;
         m->req_size = pd_sample(&send_pkt_size_pd);
 
-        cw_log("sending %u bytes...\n", m->req_size);
+        dw_log("sending %u bytes...\n", m->req_size);
         assert(m->req_size <= BUF_SIZE && m->req_size >= m->num * sizeof(command_t));
 
-#ifdef CW_DEBUG
+#ifdef DW_DEBUG
         msg_log(m, "Sending msg: ");
 #endif
         if (!conn_start_send(conn, conn->target)) {
@@ -221,7 +221,7 @@ void *thread_sender(void *data) {
         }
 
         unsigned long period_ns = pd_sample(&send_period_us_pd) * 1000.0;
-        cw_log("period_ns=%lu\n", period_ns);
+        dw_log("period_ns=%lu\n", period_ns);
         struct timespec ts_delta =
             (struct timespec) { period_ns / 1000000000, period_ns % 1000000000 };
 
@@ -248,11 +248,11 @@ void *thread_sender(void *data) {
                 rate = rate_start + step * ramp_delta_rate;
             send_period_us_pd.val = 1000000.0 / rate;
             if (old_rate != rate)
-                cw_log("old_rate: %d, rate: %d\n", old_rate, rate);
+                dw_log("old_rate: %d, rate: %d\n", old_rate, rate);
         }
     }
 
-    cw_log("Sender thread terminating\n");
+    dw_log("Sender thread terminating\n");
 
     return 0;
 }
@@ -284,7 +284,7 @@ void *thread_receiver(void *data) {
                 clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM, 0);
             }
 
-            cw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
+            dw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
                    ntohs(myaddr.sin_port));
 
             /*---- Bind the address struct to the socket ----*/
@@ -295,7 +295,7 @@ void *thread_receiver(void *data) {
              * ----*/
             addr_size = sizeof(serveraddr);
 
-            cw_log("Connecting to %s:%d (i=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i);
+            dw_log("Connecting to %s:%d (i=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i);
             sys_check(connect(clientSocket[thread_id],
                               (struct sockaddr *)&serveraddr, addr_size));
 
@@ -336,7 +336,7 @@ void *thread_receiver(void *data) {
 
         unsigned pkt_id = m->req_id;
 
-#ifdef CW_DEBUG
+#ifdef DW_DEBUG
         msg_log(m, "received message: ");
 #endif
 
@@ -346,12 +346,12 @@ void *thread_receiver(void *data) {
                               (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
         usecs_elapsed[thread_id][idx(pkt_id)] =
             usecs - usecs_send[thread_id][idx(pkt_id)];
-        cw_log("req_id %u elapsed %ld us\n", pkt_id,
+        dw_log("req_id %u elapsed %ld us\n", pkt_id,
                usecs_elapsed[thread_id][idx(pkt_id)]);
 
     skip:
         if ((i + 1) % pkts_per_session == 0) {
-            cw_log(
+            dw_log(
                 "Session is over (after receive of pkt %d), closing socket\n",
                 i);
             close(clientSocket[thread_id]);
@@ -375,7 +375,7 @@ void *thread_receiver(void *data) {
                 memset(&usecs_send[thread_id][0], 0, sizeof(usecs_send[thread_id]));
                 memset(&usecs_elapsed[thread_id][0], 0, sizeof(usecs_elapsed[thread_id]));
             }
-            cw_log("Joining sender thread\n");
+            dw_log("Joining sender thread\n");
             pthread_join(sender[thread_id], NULL);
         }
     }
@@ -391,7 +391,7 @@ void *thread_receiver(void *data) {
         }
     }
 
-    cw_log("Receiver thread terminating\n");
+    dw_log("Receiver thread terminating\n");
     return 0;
 }
 
@@ -882,7 +882,7 @@ int main(int argc, char *argv[]) {
 
     for (int i = 0; i < num_threads; i++) pthread_join(receiver[i], NULL);
 
-    cw_log("Joined sender and receiver threads, exiting\n");
+    dw_log("Joined sender and receiver threads, exiting\n");
 
     return 0;
 }

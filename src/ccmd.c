@@ -6,7 +6,7 @@
 
 #include "ccmd.h"
 #include "message.h"
-#include "cw_debug.h"
+#include "dw_debug.h"
 
 void ccmd_init(ccmd_t** q) {
     *q = malloc(sizeof(ccmd_t));
@@ -157,7 +157,7 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
                 break;
             case PSKIP:
                 drand48_r(&rnd_buf, &x);
-                cw_log("skip: x=%g, prob=%g\n", x, curr->pd_val.val);
+                dw_log("skip: x=%g, prob=%g\n", x, curr->pd_val.val);
                 if (x <= curr->pd_val.val) {
                     num -= curr->n_skip;
                     curr = ccmd_skip(curr, curr->n_skip);

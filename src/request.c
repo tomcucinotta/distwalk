@@ -1,5 +1,5 @@
 #include "request.h"
-#include "cw_debug.h"
+#include "dw_debug.h"
 #include <string.h>
 
 req_info_t reqs[MAX_REQS];
@@ -15,7 +15,7 @@ void req_init() {
 }
 
 req_info_t* req_free(req_info_t* r) {
-    cw_log("REQUEST remove req_id:%d\n", r->req_id);
+    dw_log("REQUEST remove req_id:%d\n", r->req_id);
 
     req_info_t *next = r->next;
     if (r->next != NULL)

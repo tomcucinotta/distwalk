@@ -22,7 +22,7 @@
 #include <stdbool.h>
 #include <sys/prctl.h>
 
-#include "cw_debug.h"
+#include "dw_debug.h"
 #include "message.h"
 #include "timespec.h"
 #include "thread_affinity.h"
@@ -224,7 +224,7 @@ void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros) {
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
     }
 
-    cw_log("TIMEOUT inserted, req_id: %d, timeout: %dus\n", req_id, micros);
+    dw_log("TIMEOUT inserted, req_id: %d, timeout: %dus\n", req_id, micros);
 
 }
 
@@ -247,7 +247,7 @@ int remove_timeout(thread_info_t* infos, int req_id, int epollfd) {
     req->timeout_node = NULL;
 
     if (!is_top) {
-        cw_log("TIMEOUT removed, req_id: %d, unqueued\n", req_id);
+        dw_log("TIMEOUT removed, req_id: %d, unqueued\n", req_id);
         return req_timeout - time_elapsed;
     }
 
@@ -257,12 +257,12 @@ int remove_timeout(thread_info_t* infos, int req_id, int epollfd) {
         infos->time_elapsed = time_elapsed;
         timerspec = micros_to_timerspec(next_timeout - time_elapsed);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
-        cw_log("TIMEOUT removed, req_id: %d, next interrupt: %dus\n", req_id, next_timeout - time_elapsed);
+        dw_log("TIMEOUT removed, req_id: %d, next interrupt: %dus\n", req_id, next_timeout - time_elapsed);
     } else {
         infos->time_elapsed = 0;
         timerspec = micros_to_timerspec(0);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
-        cw_log("TIMEOUT removed, req_id: %d, timer disarmed.\n", req_id);
+        dw_log("TIMEOUT removed, req_id: %d, timer disarmed.\n", req_id);
 
     }
 
@@ -312,18 +312,18 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
             struct epoll_event ev;
             ev.events = EPOLLOUT | EPOLLONESHOT;
             ev.data.u64 = i2l(CONNECT, fwd_conn_id);
-            cw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
+            dw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
             sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
 
-            cw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { fwd.fwd_host }),
+            dw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { fwd.fwd_host }),
                    ntohs(fwd.fwd_port));
             memset((char *) &addr, '\0', sizeof(addr));
 
             int rv = connect(clientSocket, &addr, sizeof(addr));
-            cw_log("connect() returned: %d (errno: %s)\n", rv, strerror(errno));
+            dw_log("connect() returned: %d (errno: %s)\n", rv, strerror(errno));
             if (rv == -1) {
                 if (errno != EAGAIN && errno != EINPROGRESS) {
-                    cw_log("unexpected error from connect(): %s\n", strerror(errno));
+                    dw_log("unexpected error from connect(): %s\n", strerror(errno));
                     return 0;
                 }
                 // normal case of asynchronous connect
@@ -346,13 +346,13 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
     m_dst->req_id = req->req_id;
     m_dst->req_size = fwd.pkt_size;
 
-    cw_log("Forwarding req %u to %s:%d\n", m_dst->req_id,
+    dw_log("Forwarding req %u to %s:%d\n", m_dst->req_id,
            inet_ntoa((struct in_addr) { fwd.fwd_host }),
            ntohs(fwd.fwd_port));
-#ifdef CW_DEBUG
+#ifdef DW_DEBUG
     msg_log(m_dst, "  f: ");
 #endif
-    cw_log("  f: cmds[] has %d items, pkt_size is %u\n", m_dst->num,
+    dw_log("  f: cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
 
     if (conn_start_send(&conns[fwd_conn_id], addr) < 0)
@@ -375,11 +375,11 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
     req_info_t *req = req_get_by_id(req_id);
 
     if (!req) {
-        cw_log("Could not match a response to FORWARD, req_id=%d - Dropped\n", req_id);
+        dw_log("Could not match a response to FORWARD, req_id=%d - Dropped\n", req_id);
         return 1;
     }
 
-    cw_log("Found match with conn_id %d\n", req->conn_id);
+    dw_log("Found match with conn_id %d\n", req->conn_id);
         
     if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
@@ -400,17 +400,17 @@ int reply(req_info_t *req, message_t *m, command_t *cmd) {
     reply_opts_t *opts = cmd_get_opts(reply_opts_t, cmd);
     assert(m_dst->req_size >= opts->resp_size);
 
-    cw_log("%d, m_dst: %p, send_buf: %p\n", req->conn_id, m_dst, conns[req->conn_id].send_buf);
+    dw_log("%d, m_dst: %p, send_buf: %p\n", req->conn_id, m_dst, conns[req->conn_id].send_buf);
 
     m_dst->req_id = m->req_id;
     m_dst->req_size = opts->resp_size;
     m_dst->num = 0;
     m_dst->cmds[0].cmd = EOM;
 
-    cw_log("Replying to req %u (conn_id=%d)\n", m->req_id, req->conn_id);
-    cw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
+    dw_log("Replying to req %u (conn_id=%d)\n", m->req_id, req->conn_id);
+    dw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
            m_dst->req_size);
-#ifdef CW_DEBUG
+#ifdef DW_DEBUG
     msg_log(m_dst, "  ");
 #endif
 
@@ -421,7 +421,7 @@ int reply(req_info_t *req, message_t *m, command_t *cmd) {
 
 void compute_for(unsigned long usecs) {
     struct timespec ts_beg, ts_end;
-    cw_log("COMPUTE: computing for %lu usecs\n", usecs);
+    dw_log("COMPUTE: computing for %lu usecs\n", usecs);
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_beg);
     do {
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
@@ -433,7 +433,7 @@ unsigned long blk_size = 0;
 void store(storage_info_t* storage_info, unsigned char* buf, size_t bytes) {
     // generate the data to be stored
     if (use_odirect) bytes = (bytes + blk_size - 1) / blk_size * blk_size;
-    cw_log("STORE: storing %lu bytes\n", bytes);
+    dw_log("STORE: storing %lu bytes\n", bytes);
 
     //write, otherwise over-write
     if (storage_info->storage_offset + bytes > storage_info->max_storage_size) {
@@ -458,7 +458,7 @@ void store(storage_info_t* storage_info, unsigned char* buf, size_t bytes) {
 }
 
 void load(storage_info_t* storage_info, unsigned char* buf, size_t bytes, size_t* leftovers) {
-    cw_log("LOAD: loading %lu bytes\n", bytes);
+    dw_log("LOAD: loading %lu bytes\n", bytes);
 
     if (storage_info->storage_offset + bytes > storage_info->storage_eof) {
         lseek(storage_info->storage_fd, 0, SEEK_SET);
@@ -471,10 +471,10 @@ void load(storage_info_t* storage_info, unsigned char* buf, size_t bytes, size_t
 
 // this invalidates the conn_info_t in conns[] referring sock, if any
 void close_and_forget(int epollfd, int sock) {
-    cw_log("removing sock=%d from epollfd\n", sock);
+    dw_log("removing sock=%d from epollfd\n", sock);
     if (epoll_ctl(epollfd, EPOLL_CTL_DEL, sock, NULL) == -1)
         perror("epoll_ctl() failed while deleting socket");
-    cw_log("removing sock=%d from conns[]\n", sock);
+    dw_log("removing sock=%d from conns[]\n", sock);
     conn_del_sock(sock);
     close(sock);
 }
@@ -484,7 +484,7 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
     message_t *m = req_get_message(req);
 
     for (command_t *cmd = req->curr_cmd; cmd->cmd != EOM; cmd = cmd_next(cmd)) {
-        cw_log("PROCESS req_id: %d,  command: %s\n", req->req_id, get_command_name(cmd->cmd));
+        dw_log("PROCESS req_id: %d,  command: %s\n", req->req_id, get_command_name(cmd->cmd));
 
         switch(cmd->cmd) {
         case COMPUTE:
@@ -500,7 +500,7 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
             req->curr_cmd = cmd;
             return 0;
         case REPLY:
-            cw_log("Handling REPLY: req_id=%d\n", m->req_id);
+            dw_log("Handling REPLY: req_id=%d\n", m->req_id);
             if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd)) {
                 fprintf(stderr, "reply() failed, conn_id: %d\n", req->conn_id);
                 return -1;
@@ -549,10 +549,10 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
     for (message_t *m = conn_next_message(conn); m != NULL; m = conn_next_message(conn)) {
         // FORWARD finished
         if (m->num == 0) {
-            cw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), 
+            dw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), 
                                                                            ntohs(conns[conn_id].target.sin_port), m->req_id);
             if (!handle_forward_reply(m->req_id, epollfd, infos)) {
-                    cw_log("handle_forward_reply() failed\n");
+                    dw_log("handle_forward_reply() failed\n");
                     return 0;
             }
         } else {
@@ -575,12 +575,12 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
 }
 
 int finalize_conn(int epollfd, int conn_id) {
-    cw_log("finalize_conn() for conn %d\n", conn_id);
+    dw_log("finalize_conn() for conn %d\n", conn_id);
     int val;
     socklen_t len = sizeof(val);
     sys_check(getsockopt(conns[conn_id].sock, SOL_SOCKET, SO_ERROR, (void*)&val, &len));
     if (val != 0) {
-        cw_log("getsockopt() reported connect() failure: %s\n", strerror(val));
+        dw_log("getsockopt() reported connect() failure: %s\n", strerror(val));
         return 0;
     }
     // this may trigger send_messages() on return, if messages have already been enqueued
@@ -617,18 +617,18 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
 
     fwd_opts_t *fwd = cmd_get_opts(fwd_opts_t, req->curr_cmd);
     if (fwd->retries > 0) {
-        cw_log("TIMEOUT expired, retry: %d\n", fwd->retries);
+        dw_log("TIMEOUT expired, retry: %d\n", fwd->retries);
         
         fwd->retries--;
         process_messages(req, epollfd, infos);
     } else if (fwd->on_fail_skip > 0) {
-        cw_log("TIMEOUT expired, failed, skipping: %d\n", fwd->on_fail_skip);
+        dw_log("TIMEOUT expired, failed, skipping: %d\n", fwd->on_fail_skip);
         
         req->curr_cmd = message_skip_cmds(m, req->curr_cmd, fwd->on_fail_skip);
         process_messages(req, epollfd, infos);
         conn_req_remove(conn, req);
     } else {
-        cw_log("TIMEOUT expired, failed\n");
+        dw_log("TIMEOUT expired, failed\n");
         conn_req_remove(conn, req);
     }
 }
@@ -638,7 +638,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     event_t type;
     l2i(p_ev->data.u64, (uint32_t*)&type, (uint32_t*) &id);
     
-    cw_log("event_type=%s, id=%d\n", get_event_str(type), id);
+    dw_log("event_type=%s, id=%d\n", get_event_str(type), id);
 
     if (type == TIMER) {
         handle_timeout(epollfd, infos);
@@ -649,22 +649,22 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         return;
 
     if (p_ev->events & EPOLLIN) {
-        cw_log("calling recv_mesg()\n");
+        dw_log("calling recv_mesg()\n");
         if (!conn_recv(&conns[id]))
             goto err;
     }
     if ((p_ev->events & EPOLLOUT) && (type == CONNECT)) {
-        cw_log("calling final_conn()\n");
+        dw_log("calling final_conn()\n");
         if (!finalize_conn(epollfd, id))
             goto err;
         // we need the send_messages() below to still be tried afterwards
     }
     if ((p_ev->events & EPOLLOUT) && (conns[id].curr_send_size > 0) && conn_get_status_by_id(id) != CONNECTING && conn_get_status_by_id(id) != NOT_INIT) {
-        cw_log("calling send_mesg()\n");
+        dw_log("calling send_mesg()\n");
         if (!conn_send(&conns[id]))
             goto err;
     }
-    cw_log("conns[%d].status=%d (%s)\n", id, conn_get_status_by_id(id), conn_status_str(conn_get_status_by_id(id)));
+    dw_log("conns[%d].status=%d (%s)\n", id, conn_get_status_by_id(id), conn_status_str(conn_get_status_by_id(id)));
 
     // check whether we have new or leftover messages to process
     if (!obtain_messages(id, epollfd, infos))
@@ -674,7 +674,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         struct epoll_event ev2;
         ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN | EPOLLOUT;
-        cw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
+        dw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[id].sock, id, conns[id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
         conn_set_status_by_id(id, SENDING);
@@ -683,7 +683,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         struct epoll_event ev2;
         ev2.data.u64 = i2l(SOCKET, id);
         ev2.events = EPOLLIN;
-        cw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
+        dw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns[id].sock, id, conns[id].curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conns[id].sock, &ev2));
         conn_set_status_by_id(id, READY);
@@ -756,7 +756,7 @@ void* storage_worker(void* args) {
     }
 
     while (running) {
-        cw_log("epoll_wait()ing...\n");
+        dw_log("epoll_wait()ing...\n");
         int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
         if (nfds == -1) {
             perror("epoll_wait");
@@ -788,7 +788,7 @@ void* storage_worker(void* args) {
                 fsync(infos->storage_fd);
 
                 // Too expensive??
-                cw_log("storage sync...\n");
+                dw_log("storage sync...\n");
             } else {
                 req_wrapper_t w;
                 command_t *storage_cmd;
@@ -805,7 +805,7 @@ void* storage_worker(void* args) {
                 worker_id = w.worker_id;
                 req_id = w.req_id;
 
-                cw_log("STORAGE cmd from conn_id %d\n", req_id);
+                dw_log("STORAGE cmd from conn_id %d\n", req_id);
 
                 if (storage_cmd->cmd == STORE) {
                     store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd)->store_nbytes);
@@ -833,7 +833,7 @@ void* conn_worker(void* args) {
 
     if (thread_affinity) {
         sys_check(aff_pin_to(infos->core_id));
-        cw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
+        dw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
     }
 
     int epollfd;
@@ -871,7 +871,7 @@ void* conn_worker(void* args) {
     }
 
     while (running) {
-        cw_log("epoll_wait()ing...\n");
+        dw_log("epoll_wait()ing...\n");
         int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
         if (nfds == -1) {
             perror("epoll_wait");
@@ -896,7 +896,7 @@ void* conn_worker(void* args) {
                 int conn_sock;
                 sys_check(conn_sock = accept(infos->listen_sock, (struct sockaddr *)&addr, &addr_size));
 
-                cw_log("Accepted connection from: %s:%d\n",
+                dw_log("Accepted connection from: %s:%d\n",
                        inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
                 setnonblocking(conn_sock);
                 int val = 1;
@@ -926,7 +926,7 @@ void* conn_worker(void* args) {
                     continue;
                 }
 
-                cw_log("STORAGE ACK for req_id %d\n", req_id_ACK);
+                dw_log("STORAGE ACK for req_id %d\n", req_id_ACK);
                 process_messages(req_get_by_id(req_id_ACK), epollfd, infos);
                 //exec_request(epollfd, &events[i], infos);
             } else if (type == TERMINATION) {
@@ -1039,7 +1039,7 @@ int main(int argc, char *argv[]) {
     int core_it = 0;
     long nproc = sysconf(_SC_NPROCESSORS_ONLN);
 
-    cw_log("nproc=%ld (system capacity)\n", nproc);
+    dw_log("nproc=%ld (system capacity)\n", nproc);
 
     if (thread_affinity) {
         if (thread_affinity_list) {
@@ -1064,7 +1064,7 @@ int main(int argc, char *argv[]) {
         struct stat s;
         sys_check(fstat(storage_info.storage_fd, &s));
         blk_size = s.st_blksize;
-        cw_log("blk_size = %lu\n", blk_size);
+        dw_log("blk_size = %lu\n", blk_size);
 
         storage_info.terminationfd = eventfd(0, 0);
         storage_info.store_buf = malloc(BUF_SIZE);
@@ -1104,10 +1104,10 @@ int main(int argc, char *argv[]) {
     serverAddr.sin_port = htons(bind_port);
 
     // Resolve hostname
-    cw_log("Resolving %s...\n", bind_name);
+    dw_log("Resolving %s...\n", bind_name);
     struct hostent *e = gethostbyname(bind_name);
     check(e != NULL);
-    cw_log("Host %s resolved to %d bytes: %s\n", bind_name, e->h_length,
+    dw_log("Host %s resolved to %d bytes: %s\n", bind_name, e->h_length,
            inet_ntoa(*(struct in_addr *)e->h_addr));
 
     /* Set IP address */
@@ -1137,12 +1137,12 @@ int main(int argc, char *argv[]) {
         sys_check(bind(thread_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
                         sizeof(serverAddr)));
 
-        cw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), bind_port);
+        dw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), bind_port);
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
         if (proto == TCP)
             sys_check(listen(thread_infos[i].listen_sock, 5));
-        cw_log("Accepting new connections...\n");
+        dw_log("Accepting new connections...\n");
 
         thread_infos[i].terminationfd = eventfd(0, 0);
         thread_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);

@@ -4,7 +4,7 @@
 #include <errno.h>
 
 #include "connection.h"
-#include "cw_debug.h"
+#include "dw_debug.h"
 
 conn_info_t conns[MAX_CONNS];
 
@@ -62,7 +62,7 @@ req_info_t* conn_req_add(conn_info_t *conn) {
         req->next->prev = req;
     conn->req_list = req;
 
-    cw_log("REQUEST create req_id:%d, conn_id: %d\n", req->req_id, conn->conn_id);
+    dw_log("REQUEST create req_id:%d, conn_id: %d\n", req->req_id, conn->conn_id);
     return req;
 }
 
@@ -76,14 +76,14 @@ req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
     unsigned long leftover = conn->curr_recv_buf - (req->message_ptr + req_size);
     memmove(req->message_ptr, req->message_ptr + req_size, leftover);
 
-    cw_log("DEFRAGMENT remove, conn_id:%d empty memory [%p, %p[\n", req->conn_id, req->message_ptr, req->message_ptr + req_size);
+    dw_log("DEFRAGMENT remove, conn_id:%d empty memory [%p, %p[\n", req->conn_id, req->message_ptr, req->message_ptr + req_size);
 
     req->message_ptr = NULL;
     conn->curr_recv_buf -= req_size;
     conn->curr_proc_buf -= req_size;
     conn->curr_recv_size += req_size;
     for (req_info_t *temp = req->prev; temp != NULL; temp = temp->prev) {
-        cw_log("DEFRAGMENT update ptr, req_id:%d message [%p, %p[ -> [%p, %p[\n", 
+        dw_log("DEFRAGMENT update ptr, req_id:%d message [%p, %p[ -> [%p, %p[\n", 
                temp->req_id,
                temp->message_ptr,
                temp->message_ptr + req_get_message(temp)->req_size,
@@ -146,7 +146,7 @@ void conn_del_id(int id) {
 
     //if (nthread > 1) sys_check(pthread_mutex_lock(&socks_mtx));
 
-    cw_log("marking conns[%d] invalid\n", id);
+    dw_log("marking conns[%d] invalid\n", id);
     conns[id].sock = -1;
     conn_reset(&conns[id]);
 
@@ -168,7 +168,7 @@ int conn_del_sock(int sock) {
 }
 
 void conn_free(int conn_id) {
-    cw_log("Freeing conn %d\n", conn_id);
+    dw_log("Freeing conn %d\n", conn_id);
 
     //if (nthread > 1) sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
 
@@ -212,7 +212,7 @@ int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
 
     // From here, safe to assume that conns[conn_id] is thread-safe
-    cw_log("CONN allocated, conn_id: %d\n", conn_id);
+    dw_log("CONN allocated, conn_id: %d\n", conn_id);
     conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf;
     conns[conn_id].curr_proc_buf = conns[conn_id].recv_buf;
     conns[conn_id].curr_recv_size = BUF_SIZE;
@@ -250,18 +250,18 @@ message_t* conn_next_message(conn_info_t *conn) {
     message_t *m = (message_t *)conn->curr_proc_buf;
 
     if (msg_size < sizeof(message_t)) {
-        cw_log("Got incomplete header [recv size:%lu, header size:%lu], need to recv() more...\n", msg_size, sizeof(message_t));
+        dw_log("Got incomplete header [recv size:%lu, header size:%lu], need to recv() more...\n", msg_size, sizeof(message_t));
         return NULL;
     }
 
     if (msg_size < m->req_size) {
-        cw_log("Got header but incomplete message [recv size:%lu, expected size:%d], need to recv() more...\n", msg_size, m->req_size);
+        dw_log("Got header but incomplete message [recv size:%lu, expected size:%d], need to recv() more...\n", msg_size, m->req_size);
         return NULL;
     }
     assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
 
-    cw_log("Got complete ");
-#ifdef CW_DEBUG
+    dw_log("Got complete ");
+#ifdef DW_DEBUG
     msg_log(m, "");
 #endif
 
@@ -274,7 +274,7 @@ message_t* conn_next_message(conn_info_t *conn) {
 int conn_start_send(conn_info_t *conn, struct sockaddr_in target) {
     message_t *m = (message_t*) conn->send_buf + conn->curr_send_size;
     conn->target = target;
-    cw_log("SEND starting, conn_id: %d, status: %s, msg_size: %d\n", conn->conn_id, conn_status_str(conn->status), m->req_size);
+    dw_log("SEND starting, conn_id: %d, status: %s, msg_size: %d\n", conn->conn_id, conn_status_str(conn->status), m->req_size);
     if (conn->curr_send_size == 0)
         conn->curr_send_buf = conn->send_buf;
     // move end of send operation forward by size bytes
@@ -288,22 +288,22 @@ int conn_start_send(conn_info_t *conn, struct sockaddr_in target) {
 
 int conn_send(conn_info_t *conn) {
     int sock = conn->sock;
-    cw_log("SEND conn_id=%d, status=%d (%s), curr_send_size=%lu, sock=%d\n", conn->conn_id, conn->status, conn_status_str(conn->status), conn->curr_send_size, sock);
+    dw_log("SEND conn_id=%d, status=%d (%s), curr_send_size=%lu, sock=%d\n", conn->conn_id, conn->status, conn_status_str(conn->status), conn->curr_send_size, sock);
     size_t sent = sendto(sock, conn->curr_send_buf, conn->curr_send_size, MSG_NOSIGNAL, (const struct sockaddr*)&conn->target, sizeof(conn->target));
     if (sent == 0) {
         // TODO: should not even be possible, ignoring
-        cw_log("SEND returned 0\n");
+        dw_log("SEND returned 0\n");
         return 0;
     }
 
     if (sent == -1) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            cw_log("SEND Got EAGAIN or EWOULDBLOCK, ignoring...\n");
+            dw_log("SEND Got EAGAIN or EWOULDBLOCK, ignoring...\n");
             return 0;
         } 
 
         if (errno = EPIPE || errno == ECONNRESET) {
-            cw_log("SEND Connection closed by remote end conn_id=%d\n", conn->conn_id);
+            dw_log("SEND Connection closed by remote end conn_id=%d\n", conn->conn_id);
             conns[conn->conn_id].status = CLOSE;
             return 0;
         }
@@ -311,7 +311,7 @@ int conn_send(conn_info_t *conn) {
         fprintf(stderr, "SEND Unexpected error: %s\n", strerror(errno));
         return -1;
     }
-    cw_log("SEND returned: %d\n", (int)sent);
+    dw_log("SEND returned: %d\n", (int)sent);
 
     conn->curr_send_buf += sent;
     conn->curr_send_size -= sent;
@@ -326,12 +326,12 @@ int conn_recv(conn_info_t *conn) {
     socklen_t recvsize = sizeof(conn->target);
     size_t received = recvfrom(sock, conn->curr_recv_buf, conn->curr_recv_size, 0,
                                (struct sockaddr*)&conn->target, (socklen_t*)&recvsize);
-    cw_log("RECV returned: %d\n", (int)received);
+    dw_log("RECV returned: %d\n", (int)received);
     if (received == 0) {
-        cw_log("RECV connection closed by remote end\n");
+        dw_log("RECV connection closed by remote end\n");
         return 0;
     } else if (received == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        cw_log("RECV Got EAGAIN or EWOULDBLOCK, ignoring...\n");
+        dw_log("RECV Got EAGAIN or EWOULDBLOCK, ignoring...\n");
         return 1;
     } else if (received == -1) {
         fprintf(stderr, "RECV Unexpected error: %s\n", strerror(errno));
