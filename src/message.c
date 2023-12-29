@@ -115,6 +115,7 @@ inline const void msg_log(message_t* m, char* padding) {
     printf("message (req_id: %u, req_size: %u, num: %u): ", m->req_id, m->req_size, m->num);
 
     if (m->num == 0) {
+        printf(" () \n");
         return;
     }
 
