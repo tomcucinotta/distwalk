@@ -52,14 +52,11 @@ dw_client.o: dw_debug.h distrib.h message.h connection.h request.h
 dw_client.o: priority_queue.h timespec.h ccmd.h
 dw_node.o: dw_debug.h message.h timespec.h thread_affinity.h priority_queue.h
 dw_node.o: request.h connection.h
-dw_node_bak.o: dw_debug.h message.h timespec.h thread_affinity.h
-dw_node_epoll_new_squashed.o: dw_debug.h message.h timespec.h
-dw_node_master.o: dw_debug.h message.h timespec.h
 message.o: message.h
-node-fwd.o: message.h timespec.h dw_debug.h
+node-fwd.o: message.h timespec.h
 priority_queue.o: priority_queue.h
 request.o: request.h message.h priority_queue.h dw_debug.h
-test_ccmd.o: ccmd.h message.h distrib.h
+test_ccmd.o: ccmd.h message.h distrib.h dw_debug.h
 test_distrib.o: distrib.h
-test_pqueue.o: priority_queue.h
+test_pqueue.o: priority_queue.h dw_debug.h
 thread_affinity.o: thread_affinity.h
