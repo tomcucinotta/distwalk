@@ -325,7 +325,7 @@ void *thread_receiver(void *data) {
         } while (recv > 0 && m == NULL);
 
         if (m == NULL) {
-            printf("Error: cannot read received message");
+            printf("Error: cannot read received message\n");
             unsigned long skip_pkts =
                 pkts_per_session - ((i + 1) % pkts_per_session);
             printf("Fast-forwarding i by %lu pkts\n", skip_pkts);

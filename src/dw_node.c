@@ -509,7 +509,10 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
             return 1;
         case STORE:
         case LOAD:
-            check(storage_path, "Error: Cannot execute LOAD/STORE cmd because no storage path has been defined");
+            if (!storage_path) {
+                fprintf(stderr, "STORE/LOAD error: cannot execute command because no storage path has been defined\n");
+                return -1;
+            }
 
             req_wrapper_t w;
             w.cmd = cmd;
@@ -564,6 +567,10 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
             req->message_ptr = (unsigned char*) m;
             req->curr_cmd = message_first_cmd(m);
             int executed = process_single_message(req, epollfd, infos);
+
+            if (executed < 0)
+                return 0;
+
             if (!executed && conns[conn_id].serialize_request) {
                 conns[conn_id].curr_proc_buf += m->req_size;
                 return 1;
