@@ -715,14 +715,14 @@ void* storage_worker(void* args) {
     // Add conn_worker(s) -> storage_worker communication pipe
     for (int i = 0; i < infos->nthread; i++) {
         ev.events = EPOLLIN;
-        ev.data.u64 = i2l(infos->storefd[i], -1);
+        ev.data.u64 = i2l(STORAGE, infos->storefd[i]);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->storefd[i], &ev) < 0)
             perror("epoll_ctl: storefd failed");
     }
 
     // Add termination handler
     ev.events = EPOLLIN | EPOLLET;
-    ev.data.u64 = i2l(infos->terminationfd, -1);
+    ev.data.u64 = i2l(TERMINATION, infos->terminationfd);
     if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
         perror("epoll_ctl: terminationfd failed");
 
@@ -749,9 +749,9 @@ void* storage_worker(void* args) {
             perror("timerfd_settime");
             exit(EXIT_FAILURE);
         }
-
+        
         ev.events = EPOLLIN | EPOLLET;
-        ev.data.fd = infos->timerfd;
+        ev.data.u64 = i2l(TIMER, infos->timerfd);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev) < 0)
             perror("epoll_ctl: terminationfd failed");
     }
@@ -771,13 +771,15 @@ void* storage_worker(void* args) {
             }
         }
 
+        int fd;
+        event_t type;
         for (int i = 0; i < nfds; i++) {
-            int fd = events[i].data.fd;
+            l2i(events[i].data.u64, (uint32_t*)&type, (uint32_t*) &fd);
 
-            if (fd == infos->terminationfd) {
+            if (type == TERMINATION) {
                 running = 0;
                 break;
-            } else if (fd == infos->timerfd) {
+            } else if (type == TIMER) {
                 // NOTE: timerfd requires a read to be re-armed
                 uint64_t val;
                 if (read(infos->timerfd, &val, sizeof(uint64_t)) < 0) {
@@ -790,7 +792,7 @@ void* storage_worker(void* args) {
 
                 // Too expensive??
                 dw_log("storage sync...\n");
-            } else {
+            } else if (type == STORAGE) {
                 req_wrapper_t w;
                 command_t *storage_cmd;
                 int worker_id;
@@ -819,6 +821,8 @@ void* storage_worker(void* args) {
                 }
 
                 safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
+            } else {
+                fprintf(stderr, "Unknown event in storage server - skipping");
             }
         }
     }
