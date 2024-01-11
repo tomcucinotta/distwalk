@@ -38,10 +38,15 @@ test_pqueue_tsan: test_pqueue_tsan.o priority_queue_tsan.o
 %_tsan.o: %.c
 	$(CC) -c $(CFLAGS_TSAN)  -o $@ $<
 
+TEST_SCRIPTS=$(wildcard test_*.sh)
+
 cov: all
+	@rm -f *.gcda *.gcov
 	./test_ccmd_debug
 	./test_pqueue_debug
+	@rm -f log_tests.txt; for test in $(TEST_SCRIPTS); do echo -n "TEST $$test: "; if ./$$test >> log_tests.txt 2>&1; then echo "SUCCESS"; else echo "ERROR"; fi; done
 	gcovr
+
 dep:
 	makedepend -- -Y *.c
 
