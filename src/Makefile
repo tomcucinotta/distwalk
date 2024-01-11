@@ -3,7 +3,7 @@ CFLAGS_DEBUG=-g -DDW_DEBUG -fprofile-arcs -ftest-coverage
 CFLAGS_TSAN=-g -O2 -fsanitize=thread
 LDLIBS=-pthread -lm
 LDLIBS_DEBUG=-pthread -lm -lgcov
-PROGRAMS=dw_client dw_node dw_client_debug dw_client_tsan dw_node_debug dw_node_tsan test_distrib test_ccmd test_ccmd_debug test_pqueue test_pqueue_tsan
+PROGRAMS=dw_client dw_node dw_client_debug dw_client_tsan dw_node_debug dw_node_tsan test_distrib test_ccmd test_ccmd_debug test_pqueue test_pqueue_debug test_pqueue_tsan
 
 TOOLS = gcovr
 TOOLS_CHECKER := $(foreach exec,$(TOOLS),$(if $(shell command -v $(exec)),,$(error "No $(exec) in PATH. Please install it")))
@@ -25,7 +25,8 @@ test_distrib_debug: test_distrib_debug.o distrib_debug.o
 test_ccmd: ccmd.o test_ccmd.o distrib.o message.o
 test_ccmd_debug: ccmd_debug.o test_ccmd_debug.o distrib.o message_debug.o
 test_pqueue: test_pqueue.o priority_queue.o
-test_pqueue_tsan: test_pqueue_tsan.o priority_queue.o
+test_pqueue_debug: test_pqueue_debug.o priority_queue_debug.o
+test_pqueue_tsan: test_pqueue_tsan.o priority_queue_tsan.o
 
 %_tsan: %_tsan.o
 	$(CC) -fsanitize=thread -o $@ $^ $(LDLIBS)
@@ -39,6 +40,7 @@ test_pqueue_tsan: test_pqueue_tsan.o priority_queue.o
 
 cov: all
 	./test_ccmd_debug
+	./test_pqueue_debug
 	gcovr
 dep:
 	makedepend -- -Y *.c
