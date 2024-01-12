@@ -10,8 +10,12 @@ TOOLS_CHECKER := $(foreach exec,$(TOOLS),$(if $(shell command -v $(exec)),,$(err
 
 all: $(PROGRAMS)
 
+doc:
+	doxygen
+
 clean:
 	rm -f *.o *.gcno *.gcda *.gcov *~ $(PROGRAMS)
+	rm -rf html latex
 
 dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o connection.o request.o message.o
 dw_client_debug: dw_client_debug.o ccmd_debug.o distrib_debug.o thread_affinity_debug.o connection_debug.o request_debug.o message_debug.o

@@ -1,3 +1,5 @@
+/** @file */
+
 #ifndef __CCMD_H__
 #define __CMD__H__
 
@@ -32,6 +34,11 @@ typedef struct ccmd_queue_t {
     ccmd_node_t* tail_replies;
 } ccmd_t;
 
+/**
+ * @brief Initialize ccmd queue
+ * 
+ * @param q pointer to ccmd_t* queue to be initialized
+ */
 void ccmd_init(ccmd_t** q);
 ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec);
 void ccmd_attach_last_reply(ccmd_t* q, pd_spec_t *p_pd_spec);
