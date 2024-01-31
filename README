@@ -38,8 +38,8 @@ root folder:
   make
 
 two executables are created:
-- src/dw_client: the client program, try typing ./client -h
-- src/dw_node: the server program, try typing ./server -h
+- src/dw_client: the client program, try typing ./dw_client -h
+- src/dw_node: the server program, try typing ./dw_node -h
 
 
 EXAMPLES OF USE
