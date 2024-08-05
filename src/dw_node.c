@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <sys/prctl.h>
+#include <argp.h>
 
 #include "dw_debug.h"
 #include "message.h"
@@ -32,6 +33,8 @@
 #include "connection.h"
 
 #define MAX_EVENTS 10
+#define DEFAULT_ADDR "0.0.0.0"
+#define DEFAULT_PORT 7891
 
 static inline uint64_t i2l(uint32_t ln, uint32_t rn) {
     return ((uint64_t) ln) << 32 | rn;
@@ -69,6 +72,7 @@ const char* get_event_str(event_t event) {
 
 // used with --per-client-thread
 #define MAX_THREADS 32
+#define MAX_STORAGE_PATH_STR 100
 
 typedef struct {
     int listen_sock;
@@ -78,19 +82,25 @@ typedef struct {
     pqueue_t *timeout_queue;
     int time_elapsed;
 
+    char storage_path[MAX_STORAGE_PATH_STR];
+
     // communication with storage
     int storefd; // write
     int store_replyfd; // read
 
     int worker_id;
+    int use_thread_affinity;
     int core_id; // core pinning
 } thread_info_t;
 
 typedef struct {
     int storage_fd;
+    char storage_path[MAX_STORAGE_PATH_STR];
 
     int timerfd; // periodic timerfd
     int periodic_sync_msec;
+
+    int use_odirect;
 
     size_t max_storage_size;
     size_t storage_offset; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
@@ -121,27 +131,11 @@ storage_info_t storage_info;
 
 pthread_mutex_t socks_mtx;
 
-
-char *bind_name = "0.0.0.0";
-int bind_port = 7891;
-
-int no_delay = 1;
-
-int use_odirect = 0;
 int nthread = 1;
-volatile int running = 1;
-
-int thread_affinity = 0;
-char* thread_affinity_list;
-
-#define MAX_STORAGE_SIZE 1000000
-char *storage_path = NULL;
-
 
 void sigint_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
     int temp_errno = errno; // to avoid errno spoil in multi-thread
-    running = 0;
 
     // terminate workers by sending a notification
     // on their terminationfd
@@ -432,7 +426,7 @@ unsigned long blk_size = 0;
 
 void store(storage_info_t* storage_info, unsigned char* buf, size_t bytes) {
     // generate the data to be stored
-    if (use_odirect) bytes = (bytes + blk_size - 1) / blk_size * blk_size;
+    if (storage_info->use_odirect) bytes = (bytes + blk_size - 1) / blk_size * blk_size;
     dw_log("STORE: storing %lu bytes\n", bytes);
 
     //write, otherwise over-write
@@ -509,7 +503,7 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
             return 1;
         case STORE:
         case LOAD:
-            if (!storage_path) {
+            if (infos->storage_path[0] == '\0') {
                 fprintf(stderr, "STORE/LOAD error: cannot execute command because no storage path has been defined\n");
                 return -1;
             }
@@ -706,6 +700,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
 
 void* storage_worker(void* args) {
     storage_info_t *infos = (storage_info_t *)args;
+    volatile int running = 1;
 
     sprintf(thread_name, "storagew");
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
@@ -839,11 +834,12 @@ void* storage_worker(void* args) {
 
 void* conn_worker(void* args) {
     thread_info_t *infos = (thread_info_t *)args;
+    volatile int running = 1;
 
     sprintf(thread_name, "connw-%d", infos->worker_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
-    if (thread_affinity) {
+    if (infos->use_thread_affinity) {
         sys_check(aff_pin_to(infos->core_id));
         dw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
     }
@@ -875,7 +871,7 @@ void* conn_worker(void* args) {
     sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev));
 
     // Add storage reply fd
-    if (storage_path) {
+    if (infos->storage_path[0] != '\0') {
         ev.events = EPOLLIN;
         ev.data.u64 = i2l(STORAGE, infos->store_replyfd);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->store_replyfd, &ev) < 0)
@@ -929,7 +925,7 @@ void* conn_worker(void* args) {
                 if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
             } else if (type == STORAGE) {
-                check(storage_path && fd == infos->store_replyfd);
+                check(infos->storage_path[0] != '\0' && fd == infos->store_replyfd);
 
                 int req_id_ACK;
                 if (safe_read(infos->store_replyfd, (unsigned char*) &req_id_ACK, sizeof(req_id_ACK)) < 0) {
@@ -952,11 +948,125 @@ void* conn_worker(void* args) {
     return (void *)1;
 }
 
+enum argp_node_option_keys {
+    BINDNAME = 'b',
+    STORAGE_OPT_ARG = 's',
+    MAX_STORAGE_SIZE = 'm',
+
+    TCP_OPT_ARG = 0x100,
+    UDP_OPT_ARG,
+    NUM_THREADS,
+    SYNC,
+    ODIRECT,
+    THREAD_AFFINITY,
+    NO_DELAY,
+};
+
+struct argp_node_arguments {
+    char* bind_name;
+    proto_t protocol;
+    int bind_port;
+    char storage_path[MAX_STORAGE_PATH_STR];
+    int periodic_sync_msec;
+    size_t max_storage_size;
+    int use_odirect;
+    int use_thread_affinity;
+    char* thread_affinity_list;
+    int num_threads;
+    int no_delay;
+};
+
+static struct argp_option argp_node_options[] = {
+    // long name, short name, value name, flag, description
+    {"bindname",          BINDNAME,         "NAME",                 0,  "DistWalk node name" },
+    {"tcp",               TCP_OPT_ARG,      "PORT",                 0,  "Use TCP communication protocol on the specified port" },
+    {"udp",               UDP_OPT_ARG,      "PORT",                 0,  "Use UDP communication protocol on the specified port"},
+    {"storage",           STORAGE_OPT_ARG,  "PATH/TO/STORAGE/FILE", 0,  "Path to the file used for storage"},
+    {"max-storage-size",  MAX_STORAGE_SIZE, "N",                    0,  "Max size for the storage size (in bytes)"},
+    {"nt",                NUM_THREADS,      "N",                    0,  "Number of threads dedicated to communication" },
+    {"num-threads",       NUM_THREADS,      "N",      OPTION_ALIAS },
+    {"sync",              SYNC,             "N",                    0,  "Periodically sync the written data on disk (in msec)" },
+    {"odirect",           ODIRECT,           0,                     0,  "Enable direct disk access"},
+    {"thread-affinity",   THREAD_AFFINITY,  "CORE LIST", OPTION_ARG_OPTIONAL, "Thread-to-core pinning (optionally specify a list of available cores)"},
+    {"no-delay",          NO_DELAY,         "N",                    0, "Set value of TCP_NODELAY socket option [currently not implemented]"},
+    {"nd",                NO_DELAY,         "N",       OPTION_ALIAS },
+    { 0 }
+};
+
+static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state) {
+    /* Get the input argument from argp_parse, which we
+        know is a pointer to our arguments structure. */
+    struct argp_node_arguments *arguments = state->input;
+
+    switch(key) {
+    case BINDNAME:
+        arguments->bind_name = arg;
+        break;
+    case TCP_OPT_ARG:
+        arguments->protocol = TCP;
+        arguments->bind_port = atol(arg);
+        break;
+    case UDP_OPT_ARG:
+        arguments->protocol = UDP;
+        arguments->bind_port = atol(arg);
+        break;
+    case NO_DELAY: // currently not implemented
+        arguments->no_delay = atoi(arg);
+        break;
+    case STORAGE_OPT_ARG:
+        if (strlen(arg) >= MAX_STORAGE_PATH_STR) {
+            printf("storage_path too long: %s\n", arg);
+            exit(EXIT_FAILURE);
+        }
+        strcpy(arguments->storage_path, arg);
+        break;
+    case SYNC:
+        arguments->periodic_sync_msec = atoi(arg);
+        break;
+    case MAX_STORAGE_SIZE:
+        arguments->max_storage_size = atoi(arg);
+        break;
+    case NUM_THREADS:
+        arguments->num_threads = atoi(arg);
+        break;
+    case ODIRECT:
+        arguments->use_odirect = 1;
+        break;
+    case THREAD_AFFINITY:
+        arguments->use_thread_affinity = 1;
+        if (arg && arg[0] != '-') {
+            arguments->thread_affinity_list = arg;
+        }
+        break;
+    default:
+        return ARGP_ERR_UNKNOWN;
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
+    static struct argp argp = { argp_node_options, argp_node_parse_opt, 0, "Distwalk Node -- the server program" };
+    struct argp_node_arguments input_args;
+    
+    // Default argp values
+    input_args.bind_name = DEFAULT_ADDR;
+    input_args.protocol = TCP;
+    input_args.bind_port = DEFAULT_PORT;
+    input_args.storage_path[0] = '\0';
+    input_args.periodic_sync_msec = -1;
+    input_args.max_storage_size = 1000000;
+    input_args.use_odirect = 0;
+    input_args.use_thread_affinity = 0;
+    input_args.thread_affinity_list = NULL;    
+    input_args.num_threads = 1;
+    input_args.no_delay = 1;
+
+    argp_parse(&argp, argc, argv, 0, 0, &input_args);
+
     // Setup SIGINT signal handler
     signal(SIGINT, sigint_cleanup);
 
-    sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL)); \
+    sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
     
     cpu_set_t mask;
     struct sockaddr_in serverAddr;
@@ -965,86 +1075,20 @@ int main(int argc, char *argv[]) {
     int fds[MAX_THREADS][2];
     int fds2[MAX_THREADS][2];
 
-    proto_t proto = TCP;
-
     // Storage info defaults
     storage_info.storage_fd = -1;
+    storage_info.storage_path[0] = '\0';
     storage_info.timerfd = -1;
-    storage_info.periodic_sync_msec = -1;
-    storage_info.max_storage_size = MAX_STORAGE_SIZE;
+    storage_info.periodic_sync_msec = input_args.periodic_sync_msec;
+    storage_info.max_storage_size = input_args.max_storage_size;
+    storage_info.use_odirect = input_args.use_odirect;
     storage_info.storage_offset = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
     storage_info.storage_eof = 0; //TODO: same here
 
-    argc--;
-    argv++;
-    while (argc > 0) {
-        if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-            printf(
-                "Usage: dw_node [-h|--help] [-b bindname] [-tcp bindport] [-udp bindport]"
-                "[-s|--storage path/to/storage/file] [-nt|--num-threads n] [--thread-affinity] "
-                "[-m|--max-storage-size bytes] "
-                "[--sync msec ]"
-                "[--odirect]\n");
-            exit(EXIT_SUCCESS);
-        } else if (strcmp(argv[0], "-b") == 0) {
-            assert(argc >= 2);
-            bind_name = argv[1];
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "-tcp") == 0 || strcmp(argv[0], "-udp") == 0) {
-            assert(argc >= 2);
-            proto = !strcmp(argv[0], "-tcp") ? TCP : UDP;
-            bind_port = atol(argv[1]);
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "-nd") == 0 ||
-                   strcmp(argv[0], "--no-delay") == 0) {  // not implemented
-            assert(argc >= 2);
-            no_delay = atoi(argv[1]);
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "-s") == 0 ||
-                   strcmp(argv[0], "--storage") == 0) {
-            assert(argc >= 2);
-            storage_path = argv[1];
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "--sync") == 0) {
-            assert(argc >= 2);
-            storage_info.periodic_sync_msec = atoi(argv[1]);
-            argc--;
-            argv++; 
-        } else if (strcmp(argv[0], "-m") == 0 ||
-                   strcmp(argv[0], "--max-storage-size") == 0) {
-            assert(argc >= 2);
-            storage_info.max_storage_size = atoi(argv[1]);
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "-nt") == 0 || 
-                   strcmp(argv[0], "--num-threads") == 0) {
-            assert(argc >= 2);
-            nthread = atoi(argv[1]);
-            argc--;
-            argv++;
-        } else if (strcmp(argv[0], "--odirect") == 0) {
-            use_odirect = 1;
-        } else if (strcmp(argv[0], "--thread-affinity") == 0) {
-            thread_affinity = 1;
+    // Configure global variables
+    nthread = input_args.num_threads;
 
-            if (argc >= 2 && argv[1][0] != '-') {
-                thread_affinity_list = argv[1];
-                argc--;
-                argv++;
-            }
-        } else {
-            fprintf(stderr, "Error: Unrecognized option: %s\n", argv[0]);
-            exit(EXIT_FAILURE);
-        }
-        argc--;
-        argv++;
-    }
-
-    check(nthread > 0 && nthread <= MAX_THREADS, "--threads needs an argument between 1 and %d\n", MAX_THREADS);
+    check(input_args.num_threads > 0 && input_args.num_threads <= MAX_THREADS, "--threads needs an argument between 1 and %d\n", MAX_THREADS);
 
     // Retrieve cpu set for thread-core pinning
     int core_it = 0;
@@ -1052,9 +1096,9 @@ int main(int argc, char *argv[]) {
 
     dw_log("nproc=%ld (system capacity)\n", nproc);
 
-    if (thread_affinity) {
-        if (thread_affinity_list) {
-            aff_list_parse(thread_affinity_list, &mask, nproc);
+    if (input_args.use_thread_affinity) {
+        if (input_args.thread_affinity_list) {
+            aff_list_parse(input_args.thread_affinity_list, &mask, nproc);
         } else {
             CPU_ZERO(&mask);
             sys_check(sched_getaffinity(0, sizeof(cpu_set_t), &mask));
@@ -1068,10 +1112,12 @@ int main(int argc, char *argv[]) {
     req_init();
 
     // Open storage file, if any
-    if (storage_path) {
+    if (input_args.storage_path[0] != '\0') {
+        strcpy(storage_info.storage_path, input_args.storage_path);
+
         int flags = O_RDWR | O_CREAT | O_TRUNC;
-        if (use_odirect) flags |= O_DIRECT;
-        sys_check(storage_info.storage_fd = open(storage_path, flags, S_IRUSR | S_IWUSR));
+        if (storage_info.use_odirect) flags |= O_DIRECT;
+        sys_check(storage_info.storage_fd = open(storage_info.storage_path, flags, S_IRUSR | S_IWUSR));
         struct stat s;
         sys_check(fstat(storage_info.storage_fd, &s));
         blk_size = s.st_blksize;
@@ -1080,7 +1126,9 @@ int main(int argc, char *argv[]) {
         storage_info.terminationfd = eventfd(0, 0);
         storage_info.store_buf = malloc(BUF_SIZE);
 
-        for (int i = 0; i < nthread; i++) {
+        for (int i = 0; i < input_args.num_threads; i++) {
+            strcpy(thread_infos[i].storage_path, storage_info.storage_path);
+
             // conn_worker -> storage_worker
             if (pipe(fds[i]) == -1) {
                perror("pipe");
@@ -1100,9 +1148,10 @@ int main(int argc, char *argv[]) {
             thread_infos[i].store_replyfd = fds2[i][0]; // read
         }
 
-        storage_info.nthread = nthread;
+        storage_info.nthread = input_args.num_threads;
     } else {
-        for (int i = 0; i < nthread; i++) {
+        for (int i = 0; i < input_args.num_threads; i++) {
+            thread_infos[i].storage_path[0] = '\0';
             thread_infos[i].storefd = -1;
             thread_infos[i].store_replyfd = -1;
         }
@@ -1112,13 +1161,13 @@ int main(int argc, char *argv[]) {
     /* Address family = Internet */
     serverAddr.sin_family = AF_INET;
     /* Set port number, using htons function to use proper byte order */
-    serverAddr.sin_port = htons(bind_port);
+    serverAddr.sin_port = htons(input_args.bind_port);
 
     // Resolve hostname
-    dw_log("Resolving %s...\n", bind_name);
-    struct hostent *e = gethostbyname(bind_name);
+    dw_log("Resolving %s...\n", input_args.bind_name);
+    struct hostent *e = gethostbyname(input_args.bind_name);
     check(e != NULL);
-    dw_log("Host %s resolved to %d bytes: %s\n", bind_name, e->h_length,
+    dw_log("Host %s resolved to %d bytes: %s\n", input_args.bind_name, e->h_length,
            inet_ntoa(*(struct in_addr *)e->h_addr));
 
     /* Set IP address */
@@ -1127,12 +1176,12 @@ int main(int argc, char *argv[]) {
     /* Set all bits of the padding field to 0 */
     memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
 
-    for (int i = 0; i < nthread; i++) {
+    for (int i = 0; i < input_args.num_threads; i++) {
         /*---- Create the socket(s). The three arguments are: ----*/
         /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
         * case) */
 
-        if (proto == TCP) {
+        if (input_args.protocol == TCP) {
             thread_infos[i].listen_sock = socket(PF_INET, SOCK_STREAM, 0);
         } else {
             thread_infos[i].listen_sock = socket(PF_INET, SOCK_DGRAM, 0);
@@ -1148,19 +1197,20 @@ int main(int argc, char *argv[]) {
         sys_check(bind(thread_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
                         sizeof(serverAddr)));
 
-        dw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), bind_port);
+        dw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), input_args.bind_port);
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
-        if (proto == TCP)
+        if (input_args.protocol == TCP)
             sys_check(listen(thread_infos[i].listen_sock, 5));
         dw_log("Accepting new connections...\n");
 
         thread_infos[i].terminationfd = eventfd(0, 0);
         thread_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
         thread_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
-
+        thread_infos[i].use_thread_affinity = input_args.use_thread_affinity;
+        
         // Round-robin thread-core pinning
-        if (thread_affinity) {
+        if (input_args.use_thread_affinity) {
             thread_infos[i].core_id = core_it;
 
             aff_it_next(&core_it, &mask, nproc);
@@ -1184,24 +1234,24 @@ int main(int argc, char *argv[]) {
     sys_check(pthread_mutex_init(&socks_mtx, &attr));
 
     // Init storage thread
-    if (storage_path) {
+    if (input_args.storage_path[0] != '\0') {
         sys_check(pthread_create(&storer, NULL, storage_worker, (void *)&storage_info));
     }
 
     // Run
-    if (nthread == 1) {
+    if (input_args.num_threads == 1) {
         conn_worker((void*) &thread_infos[0]);
     } else {
         // Init worker threads
-        for (int i = 0; i < nthread; i++) {
+        for (int i = 0; i < input_args.num_threads; i++) {
             sys_check(pthread_create(&workers[i], NULL, conn_worker, (void *)&thread_infos[i]));
         }
     }
 
     // Clean-ups
-    if (nthread > 1) {
+    if (input_args.num_threads > 1) {
         // Join worker threads
-        for (int i = 0; i < nthread; i++) {
+        for (int i = 0; i < input_args.num_threads; i++) {
             sys_check(pthread_join(workers[i], NULL));
             close(thread_infos[i].terminationfd);
         }
@@ -1214,7 +1264,7 @@ int main(int argc, char *argv[]) {
         sys_check(pthread_mutex_destroy(&socks_mtx));
     }
 
-    if (storage_path) {
+    if (input_args.storage_path[0] != '\0') {
         sys_check(pthread_join(storer, NULL));
         free(storage_info.store_buf);
     }
@@ -1223,7 +1273,7 @@ int main(int argc, char *argv[]) {
     if (storage_info.storage_fd >= 0) {
         close(storage_info.storage_fd);
 
-        for (int i = 0; i < nthread; i++) {
+        for (int i = 0; i < input_args.num_threads; i++) {
             close(thread_infos[i].storefd);
             close(storage_info.storefd[i]);
 
