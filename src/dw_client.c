@@ -377,6 +377,8 @@ void *thread_receiver(void *data) {
 int script_parse(char *fname, struct argp_state *state);
 
 enum argp_client_option_keys {
+    HELP = 'h',
+    USAGE = 0x100,
     NUM_PKTS = 'n',
     PERIOD = 'p',
     RATE = 'r',
@@ -458,6 +460,8 @@ static struct argp_option argp_client_options[] = {
     { "per-session-output", PER_SESSION_OUTPUT,       0,                   0, "Output response times at end of each session (implies some delay between sessions but saves memory)" },
     { "pso",                PER_SESSION_OUTPUT,       0, OPTION_ALIAS },
     { "script-filename",    SCRIPT_FILENAME,        "path/to/file",        0, "Continue reading commands from script file (can be intermixed with regular options)"},
+    { "help",               HELP,                    0,                    0, "Show this help message", 1 },
+    { "usage",              USAGE,                   0,                    0, "Show a short usage message", 1 },
     { 0 }
 };
 
@@ -467,6 +471,12 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     struct argp_client_arguments *arguments = state->input;
 
     switch(key) {
+    case HELP:
+        argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
+        break;
+    case USAGE:
+        argp_state_help(state, state->out_stream, ARGP_HELP_USAGE | ARGP_HELP_EXIT_OK);
+        break;
     case BIND_CLIENT:
         strncpy(clienthost, arg, MAX_HOST_STRING-1);
         clienthost[MAX_HOST_STRING-1] = '\0';
@@ -705,7 +715,7 @@ int main(int argc, char *argv[]) {
     conn_init();
     req_init();
 
-    argp_parse(&argp, argc, argv, 0, 0, &input_args);
+    argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
     
     // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
     // TODO: should be optional
