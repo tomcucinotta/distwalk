@@ -488,7 +488,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         assert(pd_parse(&send_period_us_pd, arg));
         break;
     case RATE:
-        send_period_us_pd = pd_build_fixed(atof(arg));
+        send_period_us_pd = pd_build_fixed(1000000.0 / atof(arg));
         break;
     case EXPON_ARRIVAL:
         use_exp_arrivals = 1;
