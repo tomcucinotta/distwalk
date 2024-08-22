@@ -421,7 +421,7 @@ static struct argp_option argp_client_options[] = {
     { "udp",                UDP_OPT_ARG,            "host[:port]",         0, "Use UDP communication protocol with the (initial) distwalk node"},
     { "num-pkts",           NUM_PKTS,               "n",                   0, "Number of packets sent by each thread (across all sessions"},
     { "period",             PERIOD,                 "n",                   0, "Inter-send period for each thread (average, if -ea is specified) (in usec)"},
-    { "rate",               RATE,                   "n",                   0, "Packet sending rate (average, -ea is specified) (in usec)"},
+    { "rate",               RATE,                   "n",                   0, "Packet sending rate (average, -ea is specified) (in pkts per sec)"},
     { "exp-arrivals",       EXPON_ARRIVAL,           0,                    0, "Set exponentially distributed inter-send times for each thread [currently not implemented]"},
     { "ea",                 EXPON_ARRIVAL,           0,  OPTION_ALIAS },
     { "wait-spin",          WAIT_SPIN,               0,                    0, "Spin-wait instead of sleeping till next sending time"},
