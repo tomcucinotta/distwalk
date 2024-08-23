@@ -586,7 +586,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             ccmd_last_action(ccmd)->fwd.timeout = 0;
             ccmd_last_action(ccmd)->fwd.retries = 0;
             ccmd_last_action(ccmd)->fwd.on_fail_skip = 0;
-            ccmd_last_action(ccmd)->fwd.proto = UDP;
+            ccmd_last_action(ccmd)->fwd.proto = TCP;
 
 
             i++;
