@@ -311,7 +311,6 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
 
             dw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { fwd.fwd_host }),
                    ntohs(fwd.fwd_port));
-            memset((char *) &addr, '\0', sizeof(addr));
 
             int rv = connect(clientSocket, &addr, sizeof(addr));
             dw_log("connect() returned: %d (errno: %s)\n", rv, strerror(errno));
