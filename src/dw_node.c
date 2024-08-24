@@ -322,6 +322,8 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
                 }
                 // normal case of asynchronous connect
                 conn_set_status_by_id(fwd_conn_id, CONNECTING);
+            } else {
+                conn_set_status_by_id(fwd_conn_id, READY);
             }
         }
     }
