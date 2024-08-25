@@ -26,7 +26,6 @@
 
 __thread char thread_name[16];
 
-int use_exp_arrivals = 0;
 int use_wait_spinning = 0;
 int use_period = -1;
 
@@ -43,7 +42,6 @@ pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 1024, .std = NAN, .min = NA
 pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 10000, .std = NAN, .min = NAN, .max = NAN };
 
 unsigned long default_resp_size = 512;
-int use_exp_resp_size = 0;
 
 int no_delay = 1;
 int use_per_session_output = 0;
@@ -393,27 +391,22 @@ enum argp_client_option_keys {
     SCRIPT_FILENAME = 'f',
 
     BIND_CLIENT = 0x200,
-    EXPON_ARRIVAL,
     WAIT_SPIN,
     RAMP_STEP_SECS,
     RAMP_DELTA_RATE,
     RAMP_NUM_STEPS,
     RATE_FILENAME,
     SEND_REQUEST_SIZE,
-    EXPON_SEND_REQUEST_SIZE,
     RESPONSE_SIZE,
-    EXPON_RESPONSE_SIZE,
     NO_DELAY,
     NUM_THREADS,
     NUM_SESSIONS,
     PER_SESSION_OUTPUT,
     TCP_OPT_ARG,
     UDP_OPT_ARG,
-    EXPON_COMP_TIME,
 };
 
 struct argp_client_arguments {
-    int use_exp_arrivals;
     int num_sessions;
     int num_threads;
     pd_spec_t last_resp_size;
@@ -421,50 +414,42 @@ struct argp_client_arguments {
 
 static struct argp_option argp_client_options[] = {
     // long name, short name, value name, flag, description
-    { "cl",                 BIND_CLIENT,            "host[:port]|:port",   0, "Set client bindname and bindport"},
-    { "tcp",                TCP_OPT_ARG,            "host[:port]",         0, "Use TCP communication protocol with the (initial) distwalk node"},
-    { "udp",                UDP_OPT_ARG,            "host[:port]",         0, "Use UDP communication protocol with the (initial) distwalk node"},
-    { "num-pkts",           NUM_PKTS,               "n",                   0, "Number of packets sent by each thread (across all sessions"},
-    { "period",             PERIOD,                 "n",                   0, "Inter-send period for each thread (average, if -ea is specified) (in usec)"},
-    { "rate",               RATE,                   "n",                   0, "Packet sending rate (average, -ea is specified) (in pkts per sec)"},
-    { "exp-arrivals",       EXPON_ARRIVAL,           0,                    0, "Set exponentially distributed inter-send times for each thread [currently not implemented]"},
-    { "ea",                 EXPON_ARRIVAL,           0,  OPTION_ALIAS },
-    { "wait-spin",          WAIT_SPIN,               0,                    0, "Spin-wait instead of sleeping till next sending time"},
+    { "cl",                 BIND_CLIENT,            "host[:port]|:port",                          0, "Set client bindname and bindport"},
+    { "tcp",                TCP_OPT_ARG,            "host[:port]",                                0, "Use TCP communication protocol with the (initial) distwalk node"},
+    { "udp",                UDP_OPT_ARG,            "host[:port]",                                0, "Use UDP communication protocol with the (initial) distwalk node"},
+    { "num-pkts",           NUM_PKTS,               "n",                                          0, "Number of packets sent by each thread (across all sessions"},
+    { "period",             PERIOD,                 "n|prob:field=val[,field=val]",               0, "Inter-send period for each thread (in usec, or distribution)"},
+    { "rate",               RATE,                   "n",                                          0, "Packet sending rate (in pkts per sec)"},
+    { "wait-spin",          WAIT_SPIN,               0,                                           0, "Spin-wait instead of sleeping till next sending time"},
     { "ws",                 WAIT_SPIN,               0,  OPTION_ALIAS },
-    { "ramp-num-steps",     RAMP_NUM_STEPS,         "n",                   0, "Number of rate-steps"},
+    { "ramp-num-steps",     RAMP_NUM_STEPS,         "n",                                          0, "Number of rate-steps"},
     { "rns",                RAMP_NUM_STEPS,         "n", OPTION_ALIAS},
-    { "ramp-step-secs",     RAMP_STEP_SECS,         "n",                   0, "Duration of each rate-step (in sec)"},
+    { "ramp-step-secs",     RAMP_STEP_SECS,         "n",                                          0, "Duration of each rate-step (in sec)"},
     { "rss",                RAMP_STEP_SECS,         "n", OPTION_ALIAS},
-    { "ramp-delta-rate",    RAMP_DELTA_RATE,        "n",                   0, "Rate increment at each rate-step"},
+    { "ramp-delta-rate",    RAMP_DELTA_RATE,        "n",                                          0, "Rate increment at each rate-step"},
     { "rdr",                RAMP_DELTA_RATE,        "n", OPTION_ALIAS},
-    { "rate-filename",      RATE_FILENAME,          "path/to/file.dat",    0, "Load rates from a specified file"},
+    { "rate-filename",      RATE_FILENAME,          "path/to/file.dat",                           0, "Load rates from a specified file"},
     { "rfn",                RATE_FILENAME,          "path/to/file.dat", OPTION_ALIAS},
-    { "comp-time",          COMP_TIME,              "n",                   0, "Per-request processing time (distribution, or usec)"},
-    { "exp-comp",           EXPON_COMP_TIME,         0,                    0, "Exponentially distributed per-request processing times [currently not implemented]"},
-    { "ec",                 EXPON_COMP_TIME,         0, OPTION_ALIAS},
-    { "store-data",         STORE_DATA,             "n",                   0, "Per-store data payload size (in bytes)"},
-    { "load-data",          LOAD_DATA,              "n",                   0, "Per-load data payload size (in bytes)"},
-    { "skip",               SKIP_CMD,               "n[,prob=val]",        0, "Skip (with given probability) the next n commands"},
-    { "forward",            FORWARD_CMD, "ip:port[,ip:port,...][,nack=N]", 0, "Send a number of FORWARD message to the ip:port list, wait for N replies"},
-    { "snd-pkt-size",       SEND_REQUEST_SIZE,      "n",                   0, "Set payload size of sent requests (average, if -eps is specified) (in bytes)"},
-    { "ps",                 SEND_REQUEST_SIZE,      "n", OPTION_ALIAS},
-    { "exp-snd-pkt-size",   EXPON_SEND_REQUEST_SIZE, 0,                    0, "Exponentially distributed payload size of sent requests" },
-    { "eps",                EXPON_SEND_REQUEST_SIZE, 0, OPTION_ALIAS},
-    { "resp-pkt-size",      RESPONSE_SIZE,          "n",                   0, "Set payload size of received responses (average, if -ers is specified) (in bytes)"},
-    { "rs",                 RESPONSE_SIZE,          "n", OPTION_ALIAS},
-    { "exp-resp-pkt-size",  EXPON_RESPONSE_SIZE,     0,                    0, "Exponentially distributed payload size of received responses [currently not implemented]"},
-    { "ers",                EXPON_RESPONSE_SIZE,     0,  OPTION_ALIAS},
-    { "num-threads",        NUM_THREADS,            "N",                   0, "Number of threads dedicated to communication" },
+    { "comp-time",          COMP_TIME,              "n|prob:field=val[,field=val]",               0, "Per-request processing time (in usec, or distribution)"},
+    { "store-data",         STORE_DATA,             "n|prob:field=val[,field=val]",               0, "Per-store data payload size (in bytes, or distribution)"},
+    { "load-data",          LOAD_DATA,              "n|prob:field=val[,field=val]",               0, "Per-load data payload size (in bytes, or distribution)"},
+    { "skip",               SKIP_CMD,               "n[,prob:field=val[,field=val]]",             0, "Skip (with given probability) the next n commands"},
+    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,nack=N]",             0, "Send a number of FORWARD message to the ip:port list, wait for N replies"},
+    { "snd-pkt-size",       SEND_REQUEST_SIZE,      "n|prob:field=val[,field=val]",               0, "Set payload size of sent requests (in bytes, or distribution)"},
+    { "ps",                 SEND_REQUEST_SIZE,      "n|prob:field=val[,field=val]", OPTION_ALIAS},
+    { "resp-pkt-size",      RESPONSE_SIZE,          "n|prob:field=val[,field=val]",               0, "Set payload size of received responses (average, if -ers is specified) (in bytes)"},
+    { "rs",                 RESPONSE_SIZE,          "n|prob:field=val[,field=val]", OPTION_ALIAS},
+    { "num-threads",        NUM_THREADS,            "N",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "N", OPTION_ALIAS },
-    { "num-sessions",       NUM_SESSIONS,           "N",                   0, "Number of sessions each thread establishes with the (initial) distwalk node"},
+    { "num-sessions",       NUM_SESSIONS,           "N",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
     { "ns",                 NUM_SESSIONS,           "N", OPTION_ALIAS},      
-    { "no-delay",           NO_DELAY,             "0|1",                   0, "Set value of TCP_NODELAY socket option"},
+    { "no-delay",           NO_DELAY,             "0|1",                                          0, "Set value of TCP_NODELAY socket option"},
     { "nd",                 NO_DELAY,             "0|1", OPTION_ALIAS },
-    { "per-session-output", PER_SESSION_OUTPUT,       0,                   0, "Output response times at end of each session (implies some delay between sessions but saves memory)" },
+    { "per-session-output", PER_SESSION_OUTPUT,       0,                                          0, "Output response times at end of each session (implies some delay between sessions but saves memory)" },
     { "pso",                PER_SESSION_OUTPUT,       0, OPTION_ALIAS },
-    { "script-filename",    SCRIPT_FILENAME,        "path/to/file",        0, "Continue reading commands from script file (can be intermixed with regular options)"},
-    { "help",               HELP,                    0,                    0, "Show this help message", 1 },
-    { "usage",              USAGE,                   0,                    0, "Show a short usage message", 1 },
+    { "script-filename",    SCRIPT_FILENAME,        "path/to/file",                               0, "Continue reading commands from script file (can be intermixed with regular options)"},
+    { "help",               HELP,                    0,                                           0, "Show this help message", 1 },
+    { "usage",              USAGE,                   0,                                           0, "Show a short usage message", 1 },
     { 0 }
 };
 
@@ -506,9 +491,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         assert(use_period != 1);
         send_period_us_pd = pd_build_fixed(1000000.0 / atof(arg));
         use_period = 0;
-        break;
-    case EXPON_ARRIVAL:
-        use_exp_arrivals = 1;
         break;
     case WAIT_SPIN:
         use_wait_spinning = 1;
@@ -626,9 +608,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         assert(send_pkt_size_pd.val >= MIN_SEND_SIZE);
         assert(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE);
         break;
-    case EXPON_SEND_REQUEST_SIZE:
-        send_pkt_size_pd.prob = EXPON;
-        break;
     case RESPONSE_SIZE: {
         //TODO: attach last -rs to original reply
         pd_spec_t val;
@@ -643,9 +622,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             arguments->last_resp_size = val;
         }
         break; }
-    case EXPON_RESPONSE_SIZE:
-        use_exp_resp_size = 1;
-        break;
     case NUM_THREADS:
         arguments->num_threads = atoi(arg);
         break;
@@ -803,15 +779,15 @@ int main(int argc, char *argv[]) {
     printf("  num_threads: %d\n", input_args.num_threads);
     printf("  num_pkts=%lu (COMPUTE:%d, STORE:%d, LOAD:%d)\n", num_pkts,
            n_compute, n_store, n_load);
-    printf("  rate=%g, exp_arrivals=%d\n", 1000000.0 / send_period_us_pd.val, use_exp_arrivals);
+    printf("  rate=%g\n", 1000000.0 / send_period_us_pd.val);
     printf("  period=%sus\n", pd_str(&send_period_us_pd));
     printf("  waitspin=%d\n", use_wait_spinning);
     printf("  ramp_num_steps=%d, ramp_delta_rate=%d, ramp_step_secs=%d\n",
            ramp_num_steps, ramp_delta_rate, ramp_step_secs);
     printf("  pkt_size=%s (+%d for headers)\n", pd_str(&send_pkt_size_pd),
            TCPIP_HEADERS_SIZE);
-    /*printf("  resp_size=%lu (%lu with headers), use_exp_resp_size=%d\n", resp_size,
-           resp_size + TCPIP_HEADERS_SIZE, use_exp_resp_size); TODO: Update */
+    printf("  resp_size=%s (+%d with headers)\n", pd_str(&ccmd_last_reply(ccmd)->pd_val),
+           TCPIP_HEADERS_SIZE);
     printf("  min packet size due to header: send=%lu, reply=%lu\n",
            MIN_SEND_SIZE, MIN_REPLY_SIZE);
     printf("  max packet size: %d\n", BUF_SIZE);
