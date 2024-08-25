@@ -243,9 +243,6 @@ void *thread_receiver(void *data) {
     sprintf(thread_name, "rcvw-%d", thread_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
-    unsigned char *recv_buf = malloc(BUF_SIZE);
-    check(recv_buf != NULL);
-
 
     for (int i = 0; i < num_pkts; i++) {
         thread_data_t thr_data;
@@ -335,6 +332,7 @@ void *thread_receiver(void *data) {
                 "Session is over (after receive of pkt %d), closing socket\n",
                 i);
             close(clientSocket[thread_id]);
+            conn_free(thr_data.conn_id);
             if (use_per_session_output) {
                 int first_sess_pkt = i - (pkts_per_session - 1);
                 int sess_id = i / pkts_per_session;
@@ -815,5 +813,6 @@ int main(int argc, char *argv[]) {
 
     dw_log("Joined sender and receiver threads, exiting\n");
 
+    ccmd_destroy(&ccmd);
     return 0;
 }

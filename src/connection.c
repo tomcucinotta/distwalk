@@ -173,8 +173,10 @@ void conn_free(int conn_id) {
     //if (nthread > 1) sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
 
     conn_reset(&conns[conn_id]);
-    free(conns[conn_id].recv_buf);   conns[conn_id].recv_buf = NULL;
-    free(conns[conn_id].send_buf);   conns[conn_id].send_buf = NULL;
+    free(conns[conn_id].recv_buf);   
+    conns[conn_id].recv_buf = NULL;
+    free(conns[conn_id].send_buf);   
+    conns[conn_id].send_buf = NULL;
     conns[conn_id].sock = -1;
 
     //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
@@ -187,7 +189,7 @@ int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     new_recv_buf = malloc(BUF_SIZE);
     new_send_buf = malloc(BUF_SIZE);
 
-    if (new_recv_buf == NULL || new_send_buf == NULL)
+    if (!new_recv_buf || !new_send_buf)
         goto continue_free;
 
     int conn_id;

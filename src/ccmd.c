@@ -208,7 +208,7 @@ void ccmd_log(ccmd_t* q) {
     ccmd_node_t* curr = q->head_actions;
 
     while (curr) {
-        char opts[32] = "";
+        char opts[64] = "";
 
         switch (curr->cmd) {
             case STORE:

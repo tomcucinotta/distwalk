@@ -32,6 +32,7 @@ void pqueue_free(pqueue_t *queue) {
 	free(queue->nodes);
 	free(queue->heap);
 	free(queue->stack);
+	free(queue);
 }
 
 static void swap_node(pqueue_t *queue, pqueue_node_t *node0, pqueue_node_t *node1) {

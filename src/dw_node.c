@@ -1249,13 +1249,14 @@ int main(int argc, char *argv[]) {
             sys_check(pthread_create(&workers[i], NULL, conn_worker, (void *)&thread_infos[i]));
         }
     }
-
+    
     // Clean-ups
     if (input_args.num_threads > 1) {
         // Join worker threads
         for (int i = 0; i < input_args.num_threads; i++) {
             sys_check(pthread_join(workers[i], NULL));
             close(thread_infos[i].terminationfd);
+            pqueue_free(thread_infos[i].timeout_queue);
         }
 
         // Destroy conns mutexs
@@ -1264,6 +1265,8 @@ int main(int argc, char *argv[]) {
         }
 
         sys_check(pthread_mutex_destroy(&socks_mtx));
+    } else {
+        pqueue_free(thread_infos[0].timeout_queue);
     }
 
     if (input_args.storage_path[0] != '\0') {
