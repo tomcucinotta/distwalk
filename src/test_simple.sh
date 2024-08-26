@@ -1,6 +1,6 @@
 #!/bin/bash
 
-trap 'jobs -p | while read pid; do kill $pid; done; wait' SIGINT SIGTERM EXIT ERR
+trap 'jobs -p | while read pid; do kill -SIGUSR1 $pid; done; wait' SIGINT SIGTERM EXIT ERR
 set -e
 
 ./dw_node_debug --help

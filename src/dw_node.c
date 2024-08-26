@@ -133,7 +133,7 @@ pthread_mutex_t socks_mtx;
 
 int nthread = 1;
 
-void sigint_cleanup(int _) {
+void signal_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
     int temp_errno = errno; // to avoid errno spoil in multi-thread
 
@@ -1066,7 +1066,8 @@ int main(int argc, char *argv[]) {
     argp_parse(&argp, argc, argv, 0, 0, &input_args);
 
     // Setup SIGINT signal handler
-    signal(SIGINT, sigint_cleanup);
+    signal(SIGINT, signal_cleanup);
+    signal(SIGUSR1, signal_cleanup);
 
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
     
