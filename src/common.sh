@@ -22,6 +22,11 @@ client() {
     GCOV_PREFIX=gcov/client$id ./dw_client_debug "$@"
 }
 
+strace_client() {
+    sleep 0.5
+    GCOV_PREFIX=gcov/client strace -f ./dw_client_debug "$@"
+}
+
 node() {
     id=$(ps aux | grep dw_node_debug | grep -v grep | wc -l)
     mkdir -p gcov/node$id
@@ -32,6 +37,19 @@ node_bg() {
     id=$(ps aux | grep dw_node_debug | grep -v grep | wc -l)
     mkdir -p gcov/node$id
     GCOV_PREFIX=gcov/node$id ./dw_node_debug "$@" &
+    for ((i=0; i<5; i++)); do
+        if [ $(netstat -anp --inet | grep dw_node_debug | wc -l) -eq $[ $id + 1 ] ]; then
+            break;
+        fi
+        echo "dw_node_debug not showing up on netstat yet, waiting..."
+        sleep 0.2
+    done
+}
+
+strace_node() {
+    id=$(ps aux | grep dw_node_debug | grep -v grep | wc -l)
+    mkdir -p gcov/node$id
+    GCOV_PREFIX=gcov/node$id strace -f ./dw_node_debug "$@"
     for ((i=0; i<5; i++)); do
         if [ $(netstat -anp --inet | grep dw_node_debug | wc -l) -eq $[ $id + 1 ] ]; then
             break;
