@@ -45,6 +45,8 @@ unsigned long default_resp_size = 512;
 
 int no_delay = 1;
 int use_per_session_output = 0;
+int conn_retry_num = 1;
+int conn_retry_period_ms = 200;
 
 #define MAX_THREADS 32
 pthread_t sender[MAX_THREADS];
@@ -246,35 +248,50 @@ void *thread_receiver(void *data) {
 
     for (int i = 0; i < num_pkts; i++) {
         thread_data_t thr_data;
-
+        int rv;
         if (i % pkts_per_session == 0) {
-            /*---- Create the socket. The three arguments are: ----*/
-            /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
-             * this case) */
-            if (proto == TCP) {
-                clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
+            int conn_retry;
+            for(conn_retry = 1; conn_retry <= conn_retry_num; conn_retry++) {
+                /*---- Create the socket. The three arguments are: ----*/
+                /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
+                * this case) */
+                if (proto == TCP) {
+                    clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
 
-                sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
-                                 TCP_NODELAY, (void *)&no_delay,
-                                 sizeof(no_delay)));
-            } else {
-                clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM, 0);
+                    sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
+                                    TCP_NODELAY, (void *)&no_delay,
+                                    sizeof(no_delay)));
+                } else {
+                    clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM, 0);
+                }
+
+                dw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
+                    ntohs(myaddr.sin_port));
+
+                /*---- Bind the address struct to the socket ----*/
+                sys_check(bind(clientSocket[thread_id], (struct sockaddr *)&myaddr,
+                            sizeof(myaddr)));
+
+                /*---- Connect the socket to the server using the address struct
+                * ----*/
+                addr_size = sizeof(serveraddr);
+
+                dw_log("Connecting to %s:%d (sess_id=%d, retry=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i, conn_retry);
+
+                if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, addr_size)) == 0) {
+                    break;
+                } else {
+                    close(clientSocket[thread_id]);
+                    usleep(conn_retry_period_ms * 1000);
+                }
             }
 
-            dw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
-                   ntohs(myaddr.sin_port));
-
-            /*---- Bind the address struct to the socket ----*/
-            sys_check(bind(clientSocket[thread_id], (struct sockaddr *)&myaddr,
-                           sizeof(myaddr)));
-
-            /*---- Connect the socket to the server using the address struct
-             * ----*/
-            addr_size = sizeof(serveraddr);
-
-            dw_log("Connecting to %s:%d (i=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i);
-            sys_check(connect(clientSocket[thread_id],
-                              (struct sockaddr *)&serveraddr, addr_size));
+            // check if connection succeeded
+            if (rv != 0) {
+                close(clientSocket[thread_id]);
+                fprintf(stderr, "Connection to %s:%d failed: %s\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), strerror(errno));
+                return 0;
+            }
 
             /* spawn sender once connection is established */
 
@@ -402,6 +419,8 @@ enum argp_client_option_keys {
     PER_SESSION_OUTPUT,
     TCP_OPT_ARG,
     UDP_OPT_ARG,
+    CONN_RETRY_NUM,
+    CONN_RETRY_PERIOD,
 };
 
 struct argp_client_arguments {
@@ -441,6 +460,8 @@ static struct argp_option argp_client_options[] = {
     { "nt",                 NUM_THREADS,            "N", OPTION_ALIAS },
     { "num-sessions",       NUM_SESSIONS,           "N",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
     { "ns",                 NUM_SESSIONS,           "N", OPTION_ALIAS},      
+    { "retry-num",          CONN_RETRY_NUM,         "N",                                          0, "Number of connection retries to the (initial) distwalk node in case of failure"},
+    { "retry-period",       CONN_RETRY_PERIOD,      "N",                                          0, "Interval between subsequent connection retries to the (initial) distwalk node (in msec)"},
     { "no-delay",           NO_DELAY,             "0|1",                                          0, "Set value of TCP_NODELAY socket option"},
     { "nd",                 NO_DELAY,             "0|1", OPTION_ALIAS },
     { "per-session-output", PER_SESSION_OUTPUT,       0,                                          0, "Output response times at end of each session (implies some delay between sessions but saves memory)" },
@@ -627,6 +648,14 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->num_sessions = atoi(arg);
         check(arguments->num_sessions >= 1);
         break;
+    case CONN_RETRY_NUM:
+        conn_retry_num = atoi(arg);
+        check(conn_retry_num >= 1);
+        break;
+    case CONN_RETRY_PERIOD:
+        conn_retry_period_ms = atoi(arg);
+        check(conn_retry_period_ms >= 200);
+        break;
     case PER_SESSION_OUTPUT:
         use_per_session_output = 1;
         break;
@@ -699,7 +728,6 @@ int main(int argc, char *argv[]) {
     input_args.num_sessions = 1;
     input_args.num_threads = 1;
     input_args.last_resp_size = pd_build_fixed(default_resp_size);
-
     check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
 
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
@@ -792,6 +820,7 @@ int main(int argc, char *argv[]) {
     printf("  no_delay: %d\n", no_delay);
     printf("  num_sessions: %d\n", input_args.num_sessions);
     printf("  use_per_session_output: %d\n", use_per_session_output);
+    printf("  num_conn_retries: %d (retry_period: %d ms)\n", conn_retry_num, conn_retry_period_ms);
 
     printf("  request template: ");  ccmd_log(ccmd);
 
