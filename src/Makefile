@@ -54,7 +54,7 @@ TEST_SCRIPTS=$(wildcard test_*.sh)
 
 cov: all
 	@rm -f *.gcda *.gcov log_tests.txt
-	@for test in $(TEST_PROGRAMS) $(TEST_SCRIPTS); do echo -n "TEST $$test: "; if bash -c ./$$test >> log_tests.txt 2>&1; then echo "SUCCESS"; else echo "ERROR"; fi; done
+	@for test in $(TEST_PROGRAMS) $(TEST_SCRIPTS); do echo -n "TEST $$test: "; echo "\n\nTEST $$test:\n" >> log_tests.txt; if bash -c ./$$test >> log_tests.txt 2>&1; then echo "SUCCESS"; else echo "ERROR"; fi; done
 	gcovr
 
 dep:

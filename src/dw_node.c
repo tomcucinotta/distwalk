@@ -770,7 +770,7 @@ void* storage_worker(void* args) {
                 running = 0;
                 break;
             } else {
-                perror("epoll_wait() failed: ");
+                perror("epoll_wait() failed (storage_worker): ");
                 exit(EXIT_FAILURE);
             }
         }
@@ -890,7 +890,7 @@ void* conn_worker(void* args) {
                 running = 0;
                 break;
             } else {
-                perror("epoll_wait() failed: ");
+                perror("epoll_wait() failed (conn_worker): ");
                 exit(EXIT_FAILURE);
             }
         }
