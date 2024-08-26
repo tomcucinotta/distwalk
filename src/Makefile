@@ -23,7 +23,7 @@ doc:
 
 clean:
 	rm -f *.o *.gcno *.gcda *.gcov *~ $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
-	rm -rf html latex
+	rm -rf html latex gcov
 
 dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o connection.o request.o message.o
 dw_client_debug: dw_client_debug.o ccmd_debug.o distrib_debug.o thread_affinity_debug.o connection_debug.o request_debug.o message_debug.o
@@ -55,7 +55,9 @@ TEST_SCRIPTS=$(wildcard test_*.sh)
 cov: all
 	@rm -f *.gcda *.gcov log_tests.txt
 	@for test in $(TEST_PROGRAMS) $(TEST_SCRIPTS); do echo -n "TEST $$test: "; echo "\n\nTEST $$test:\n" >> log_tests.txt; if bash -c ./$$test >> log_tests.txt 2>&1; then echo "SUCCESS"; else echo "ERROR"; fi; done
-	gcovr
+	@sleep 1
+	@for d in gcov/*; do cp *.gcno $$d; done
+	@gcovr
 
 dep:
 	makedepend -- -Y *.c

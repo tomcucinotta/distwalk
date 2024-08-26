@@ -1067,7 +1067,6 @@ int main(int argc, char *argv[]) {
 
     // Setup SIGINT signal handler
     signal(SIGINT, signal_cleanup);
-    signal(SIGUSR1, signal_cleanup);
 
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
     

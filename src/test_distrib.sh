@@ -1,7 +1,6 @@
 #!/bin/bash
 
-trap 'jobs -p | while read pid; do kill $pid; done; wait' SIGINT SIGTERM EXIT ERR
-set -e
+. common.sh
 
 ./test_distrib_debug -h
 ./test_distrib_debug --help
