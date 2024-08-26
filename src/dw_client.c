@@ -148,7 +148,7 @@ int idx(int pkt_id) {
 void *thread_sender(void *data) {
     thread_data_t *p = (thread_data_t *)data;
 
-    sprintf(thread_name, "sndw-%d", p->thread_id);
+    sprintf(thread_name, "sendw-%d", p->thread_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
     int thread_id = p->thread_id;
@@ -240,7 +240,7 @@ void *thread_sender(void *data) {
 void *thread_receiver(void *data) {
     int thread_id = (int)(unsigned long)data;
 
-    sprintf(thread_name, "rcvw-%d", thread_id);
+    sprintf(thread_name, "recvw-%d", thread_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
 
@@ -433,7 +433,7 @@ static struct argp_option argp_client_options[] = {
     { "load-data",          LOAD_DATA,              "n|prob:field=val[,field=val]",               0, "Per-load data payload size (in bytes, or distribution)"},
     { "skip",               SKIP_CMD,               "n[,prob:field=val[,field=val]]",             0, "Skip (with given probability) the next n commands"},
     { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,nack=N]",             0, "Send a number of FORWARD message to the ip:port list, wait for N replies"},
-    { "snd-pkt-size",       SEND_REQUEST_SIZE,      "n|prob:field=val[,field=val]",               0, "Set payload size of sent requests (in bytes, or distribution)"},
+    { "send-pkt-size",      SEND_REQUEST_SIZE,      "n|prob:field=val[,field=val]",               0, "Set payload size of sent requests (in bytes, or distribution)"},
     { "ps",                 SEND_REQUEST_SIZE,      "n|prob:field=val[,field=val]", OPTION_ALIAS},
     { "resp-pkt-size",      RESPONSE_SIZE,          "n|prob:field=val[,field=val]",               0, "Set payload size of received responses (average, if -ers is specified) (in bytes)"},
     { "rs",                 RESPONSE_SIZE,          "n|prob:field=val[,field=val]", OPTION_ALIAS},
