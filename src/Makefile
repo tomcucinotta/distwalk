@@ -12,6 +12,10 @@ MAIN_PROGRAMS=dw_client dw_node
 TOOLS = gcovr
 TOOLS_CHECKER := $(foreach exec,$(TOOLS),$(if $(shell command -v $(exec)),,$(error "No $(exec) in PATH. Please install it")))
 
+COL_RED=\033[0;32m
+COL_GRN=\e[0;31m
+COL_DEF=\e[m
+
 main: $(MAIN_PROGRAMS)
 debug: $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
 tests: $(TEST_PROGRAMS)
@@ -54,7 +58,7 @@ TEST_SCRIPTS=$(wildcard test_*.sh)
 
 cov: all
 	@rm -f *.gcda *.gcov log_tests.txt
-	@for test in $(TEST_PROGRAMS) $(TEST_SCRIPTS); do echo -n "TEST $$test: "; echo "\n\nTEST $$test:\n" >> log_tests.txt; if bash -c ./$$test >> log_tests.txt 2>&1; then echo "SUCCESS"; else echo "ERROR"; fi; done
+	@for test in $(TEST_PROGRAMS) $(TEST_SCRIPTS); do echo -n "TEST $$test: "; echo "\n\nTEST $$test:\n" >> log_tests.txt; if bash -c ./$$test >> log_tests.txt 2>&1; then echo "$(COL_RED)SUCCESS$(COL_DEF)"; else echo "$(COL_GRN)ERROR$(COL_DEF)"; fi; done
 	@sleep 1
 	@for d in gcov/*; do cp *.gcno $$d; done
 	@gcovr
