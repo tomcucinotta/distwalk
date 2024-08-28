@@ -54,10 +54,10 @@ node_bg() {
     done
 }
 
-strace_node() {
+strace_node_bg() {
     id=$(ps aux | grep dw_node_debug | grep -v grep | wc -l)
     mkdir -p gcov/node$id
-    GCOV_PREFIX=gcov/node$id strace -f ./dw_node_debug "$@"
+    GCOV_PREFIX=gcov/node$id strace -f ./dw_node_debug "$@" &
     for ((i=0; i<5; i++)); do
         if [ $(netstat -anp --inet | grep dw_node_debug | wc -l) -eq $[ $id + 1 ] ]; then
             break;
