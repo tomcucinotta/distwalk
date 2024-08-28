@@ -951,11 +951,13 @@ void* conn_worker(void* args) {
 }
 
 enum argp_node_option_keys {
+    HELP = 'h',
+    USAGE = 0x100,
     BINDNAME = 'b',
     STORAGE_OPT_ARG = 's',
     MAX_STORAGE_SIZE = 'm',
 
-    TCP_OPT_ARG = 0x100,
+    TCP_OPT_ARG = 0x101,
     UDP_OPT_ARG,
     NUM_THREADS,
     SYNC,
@@ -992,6 +994,8 @@ static struct argp_option argp_node_options[] = {
     {"thread-affinity",   THREAD_AFFINITY,  "CORE LIST", OPTION_ARG_OPTIONAL, "Thread-to-core pinning (optionally specify a list of available cores)"},
     {"no-delay",          NO_DELAY,         "N",                    0, "Set value of TCP_NODELAY socket option [currently not implemented]"},
     {"nd",                NO_DELAY,         "N",       OPTION_ALIAS },
+    {"help",              HELP,               0,                    0, "Show this help message", 1 },
+    {"usage",             USAGE,              0,                    0, "Show a short usage message", 1 },
     { 0 }
 };
 
@@ -1001,6 +1005,12 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
     struct argp_node_arguments *arguments = state->input;
 
     switch(key) {
+    case HELP:
+        argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
+        break;
+    case USAGE:
+        argp_state_help(state, state->out_stream, ARGP_HELP_USAGE | ARGP_HELP_EXIT_OK);
+        break;
     case BINDNAME:
         arguments->bind_name = arg;
         break;
@@ -1063,7 +1073,7 @@ int main(int argc, char *argv[]) {
     input_args.num_threads = 1;
     input_args.no_delay = 1;
 
-    argp_parse(&argp, argc, argv, 0, 0, &input_args);
+    argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
 
     // Setup SIGINT signal handler
     signal(SIGINT, signal_cleanup);
