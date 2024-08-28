@@ -30,7 +30,9 @@ client_bg() {
 
 strace_client() {
     sleep 0.5
-    GCOV_PREFIX=gcov/client strace -f ./dw_client_debug "$@"
+    id=$(ps aux | grep dw_client_debug | grep -v grep | wc -l)
+    mkdir -p gcov/client$id
+    GCOV_PREFIX=gcov/client$id strace -f ./dw_client_debug "$@"
 }
 
 node() {
