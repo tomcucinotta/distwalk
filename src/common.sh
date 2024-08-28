@@ -22,6 +22,12 @@ client() {
     GCOV_PREFIX=gcov/client$id ./dw_client_debug "$@"
 }
 
+client_bg() {
+    id=$(ps aux | grep dw_client_debug | grep -v grep | wc -l)
+    mkdir -p gcov/client$id
+    GCOV_PREFIX=gcov/client$id ./dw_client_debug "$@" &
+}
+
 strace_client() {
     sleep 0.5
     GCOV_PREFIX=gcov/client strace -f ./dw_client_debug "$@"
