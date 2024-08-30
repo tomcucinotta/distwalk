@@ -547,7 +547,7 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
 
     for (message_t *m = conn_next_message(conn); m != NULL; m = conn_next_message(conn)) {
         // FORWARD finished
-        if (m->num == 0) {
+        if (message_first_cmd(m)->cmd == EOM) {
             dw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), 
                                                                            ntohs(conns[conn_id].target.sin_port), m->req_id);
             if (!handle_forward_reply(m->req_id, epollfd, infos)) {
