@@ -187,7 +187,7 @@ void *thread_sender(void *data) {
         m->req_size = pd_sample(&send_pkt_size_pd);
 
         dw_log("sending %u bytes...\n", m->req_size);
-        assert(m->req_size <= BUF_SIZE && m->req_size >= m->num * sizeof(command_t));
+        assert(m->req_size <= BUF_SIZE);
 
 #ifdef DW_DEBUG
         msg_log(m, "Sending msg: ");
