@@ -310,8 +310,8 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
             dw_log("Adding fd %d to epollfd %d\n", clientSocket, epollfd);
             sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientSocket, &ev));
 
-            dw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { fwd.fwd_host }),
-                   ntohs(fwd.fwd_port));
+            dw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { addr.sin_addr.s_addr }),
+                   ntohs(addr.sin_port));
 
             int rv = connect(clientSocket, &addr, sizeof(addr));
             dw_log("connect() returned: %d (errno: %s)\n", rv, strerror(errno));
