@@ -278,7 +278,7 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
     memset((char *) &addr, '\0', sizeof(struct sockaddr_in));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = fwd.fwd_host;
-    addr.sin_port = htonl(fwd.fwd_port);
+    addr.sin_port = fwd.fwd_port;
 
     int fwd_conn_id = conn_find_existing(addr, fwd.proto);
     if (fwd_conn_id == -1) {
