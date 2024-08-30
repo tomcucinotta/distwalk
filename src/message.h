@@ -59,8 +59,7 @@ typedef struct {
 typedef struct {
     uint32_t req_id;
     uint32_t req_size; // Overall message size in bytes, including commands and payload
-    uint8_t num;       // Number of valid entries in cmds[] (0 denotes a response message)
-    command_t cmds[];  // Up to 255 command_t
+    command_t cmds[];  // Series of command_t with variable size
 } message_t;
 
 const char* get_command_name(command_type_t cmd);
@@ -71,6 +70,17 @@ command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip);
 int cmd_type_size(command_type_t type);
 command_t* cmd_next(command_t *c);
 command_t* message_first_cmd(message_t *m);
+
+static inline int msg_num_cmd(message_t *m) {
+    int n = 0;
+    command_t *cmd = message_first_cmd(m);
+    while ((char*)cmd - (char*)m < m->req_size && cmd->cmd != EOM) {
+        n++;
+        cmd = cmd_next(cmd);
+    }
+    return n;
+}
+
 const void msg_log(message_t* m, char* padding);
 
 #endif /* __MESSAGE_H__ */

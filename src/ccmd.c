@@ -182,7 +182,6 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
     m->req_size -= cmd_type_size(EOM);
     cmd->cmd = EOM;
 
-    m->num = num + 1;
     return 1;
 }
 

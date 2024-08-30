@@ -348,7 +348,7 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
 #ifdef DW_DEBUG
     msg_log(m_dst, "  f: ");
 #endif
-    dw_log("  f: cmds[] has %d items, pkt_size is %u\n", m_dst->num,
+    dw_log("  f: cmds[] has %d items, pkt_size is %u\n", msg_num_cmd(m_dst),
            m_dst->req_size);
 
     if (conn_start_send(&conns[fwd_conn_id], addr) < 0)
@@ -400,11 +400,10 @@ int reply(req_info_t *req, message_t *m, command_t *cmd) {
 
     m_dst->req_id = m->req_id;
     m_dst->req_size = opts->resp_size;
-    m_dst->num = 1;
     m_dst->cmds[0].cmd = EOM;
 
     dw_log("Replying to req %u (conn_id=%d)\n", m->req_id, req->conn_id);
-    dw_log("  cmds[] has %d items, pkt_size is %u\n", m_dst->num,
+    dw_log("  cmds[] has %d items, pkt_size is %u\n", msg_num_cmd(m_dst),
            m_dst->req_size);
 #ifdef DW_DEBUG
     msg_log(m_dst, "REPLY ");
