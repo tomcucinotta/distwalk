@@ -56,7 +56,7 @@ test_pqueue_debug: test_pqueue_debug.o priority_queue_debug.o
 TEST_SCRIPTS=$(wildcard test_*.sh)
 
 cov: all
-	@rm -f *.gcda *.gcov log_tests.txt
+	@rm -rf *.gcda *.gcov log_tests.txt gcov/
 	@for test in $(TEST_PROGRAMS) $(TEST_SCRIPTS); do echo -n "TEST $$test: "; echo "\n\nTEST $$test:\n" >> log_tests.txt; if bash -c ./$$test >> log_tests.txt 2>&1; then echo "$(COL_RED)SUCCESS$(COL_DEF)"; else echo "$(COL_GRN)ERROR$(COL_DEF)"; fi; done
 	@sleep 1
 	@for d in gcov/*; do cp *.gcno $$d; done
