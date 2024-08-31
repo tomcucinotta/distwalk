@@ -268,6 +268,12 @@ void *thread_receiver(void *data) {
                 dw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
                     ntohs(myaddr.sin_port));
 
+
+                if (ntohs(myaddr.sin_port) != 0) {
+                    int val = 1;
+                    sys_check(setsockopt(clientSocket[thread_id], SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
+                }
+                
                 /*---- Bind the address struct to the socket ----*/
                 sys_check(bind(clientSocket[thread_id], (struct sockaddr *)&myaddr,
                             sizeof(myaddr)));
