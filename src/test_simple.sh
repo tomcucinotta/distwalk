@@ -11,7 +11,7 @@ client -h
 node --usage
 client --usage
 
-node_bg &
+node_bg
 client
 client -n 10
 client -C 10000
