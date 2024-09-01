@@ -709,11 +709,7 @@ void* storage_worker(void* args) {
     int epollfd;
     struct epoll_event ev, events[MAX_EVENTS];
 
-    epollfd = epoll_create1(0);
-    if (epollfd == -1) {
-        perror("epoll_create1");
-        exit(EXIT_FAILURE);
-    }
+    sys_check(epollfd = epoll_create1(0));
     
     // Add conn_worker(s) -> storage_worker communication pipe
     for (int i = 0; i < infos->nthread; i++) {
