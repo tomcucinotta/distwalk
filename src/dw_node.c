@@ -31,10 +31,9 @@
 
 #include "request.h"
 #include "connection.h"
+#include "address_utils.h"
 
 #define MAX_EVENTS 10
-#define DEFAULT_ADDR "0.0.0.0"
-#define DEFAULT_PORT 7891
 
 static inline uint64_t i2l(uint32_t ln, uint32_t rn) {
     return ((uint64_t) ln) << 32 | rn;
@@ -948,7 +947,7 @@ void* conn_worker(void* args) {
 enum argp_node_option_keys {
     HELP = 'h',
     USAGE = 0x100,
-    BINDNAME = 'b',
+    BIND_ADDR = 'b',
     STORAGE_OPT_ARG = 's',
     MAX_STORAGE_SIZE = 'm',
 
@@ -962,9 +961,8 @@ enum argp_node_option_keys {
 };
 
 struct argp_node_arguments {
-    char* bind_name;
+    char nodehostport[MAX_HOSTPORT_STRLEN];
     proto_t protocol;
-    int bind_port;
     char storage_path[MAX_STORAGE_PATH_STR];
     int periodic_sync_msec;
     size_t max_storage_size;
@@ -977,9 +975,9 @@ struct argp_node_arguments {
 
 static struct argp_option argp_node_options[] = {
     // long name, short name, value name, flag, description
-    {"bindname",          BINDNAME,         "NAME",                 0,  "DistWalk node name" },
-    {"tcp",               TCP_OPT_ARG,      "PORT",                 0,  "Use TCP communication protocol on the specified port" },
-    {"udp",               UDP_OPT_ARG,      "PORT",                 0,  "Use UDP communication protocol on the specified port"},
+    {"bind-addr",         BIND_ADDR,        "host[:port]|:port",    0,  "DistWalk node bindname and bindport" },
+    {"tcp",               TCP_OPT_ARG,       0,                     0,  "Use TCP communication protocol"},
+    {"udp",               UDP_OPT_ARG,       0,                     0,  "Use UDP communication protocol"},
     {"storage",           STORAGE_OPT_ARG,  "PATH/TO/STORAGE/FILE", 0,  "Path to the file used for storage"},
     {"max-storage-size",  MAX_STORAGE_SIZE, "N",                    0,  "Max size for the storage size (in bytes)"},
     {"nt",                NUM_THREADS,      "N",                    0,  "Number of threads dedicated to communication" },
@@ -1006,16 +1004,15 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
     case USAGE:
         argp_state_help(state, state->out_stream, ARGP_HELP_USAGE | ARGP_HELP_EXIT_OK);
         break;
-    case BINDNAME:
-        arguments->bind_name = arg;
+    case BIND_ADDR:
+        assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
+        strcpy(arguments->nodehostport, arg);
         break;
     case TCP_OPT_ARG:
         arguments->protocol = TCP;
-        arguments->bind_port = atol(arg);
         break;
     case UDP_OPT_ARG:
         arguments->protocol = UDP;
-        arguments->bind_port = atol(arg);
         break;
     case NO_DELAY: // currently not implemented
         arguments->no_delay = atoi(arg);
@@ -1056,9 +1053,8 @@ int main(int argc, char *argv[]) {
     struct argp_node_arguments input_args;
     
     // Default argp values
-    input_args.bind_name = DEFAULT_ADDR;
+    strcpy(input_args.nodehostport, DEFAULT_ADDR ":" DEFAULT_PORT);
     input_args.protocol = TCP;
-    input_args.bind_port = DEFAULT_PORT;
     input_args.storage_path[0] = '\0';
     input_args.periodic_sync_msec = -1;
     input_args.max_storage_size = 1000000;
@@ -1164,24 +1160,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /*---- Configure settings of the server address struct ----*/
-    /* Address family = Internet */
-    serverAddr.sin_family = AF_INET;
-    /* Set port number, using htons function to use proper byte order */
-    serverAddr.sin_port = htons(input_args.bind_port);
-
-    // Resolve hostname
-    dw_log("Resolving %s...\n", input_args.bind_name);
-    struct hostent *e = gethostbyname(input_args.bind_name);
-    check(e != NULL);
-    dw_log("Host %s resolved to %d bytes: %s\n", input_args.bind_name, e->h_length,
-           inet_ntoa(*(struct in_addr *)e->h_addr));
-
-    /* Set IP address */
-    memmove((char *) &serverAddr.sin_addr.s_addr, (char *)e->h_addr, e->h_length);
-
-    /* Set all bits of the padding field to 0 */
-    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
+    addr_parse(input_args.nodehostport, &serverAddr);
 
     for (int i = 0; i < input_args.num_threads; i++) {
         /*---- Create the socket(s). The three arguments are: ----*/
@@ -1204,7 +1183,7 @@ int main(int argc, char *argv[]) {
         sys_check(bind(thread_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
                         sizeof(serverAddr)));
 
-        dw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), input_args.bind_port);
+        dw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), ntohs(serverAddr.sin_port));
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
         if (input_args.protocol == TCP)

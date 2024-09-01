@@ -29,12 +29,12 @@ clean:
 	rm -f *.o *.gcno *.gcda *.gcov *~ $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
 	rm -rf html latex gcov
 
-dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o connection.o request.o message.o
-dw_client_debug: dw_client_debug.o ccmd_debug.o distrib_debug.o thread_affinity_debug.o connection_debug.o request_debug.o message_debug.o
-dw_client_tsan: dw_client_tsan.o ccmd_tsan.o dw_client_tsan.o distrib_tsan.o thread_affinity_tsan.o connection.o request.o message.o
-dw_node: dw_node.o thread_affinity.o priority_queue.o request.o connection.o message.o
-dw_node_debug: dw_node_debug.o thread_affinity_debug.o priority_queue_debug.o request_debug.o connection_debug.o message_debug.o
-dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request.o connection.o message.o
+dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o connection.o request.o message.o address_utils.o
+dw_client_debug: dw_client_debug.o ccmd_debug.o distrib_debug.o thread_affinity_debug.o connection_debug.o request_debug.o message_debug.o address_utils_debug.o
+dw_client_tsan: dw_client_tsan.o ccmd_tsan.o dw_client_tsan.o distrib_tsan.o thread_affinity_tsan.o connection.o request.o message.o address_utils_tsan.o
+dw_node: dw_node.o thread_affinity.o priority_queue.o request.o connection.o message.o address_utils.o
+dw_node_debug: dw_node_debug.o thread_affinity_debug.o priority_queue_debug.o request_debug.o connection_debug.o message_debug.o address_utils_debug.o
+dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request.o connection.o message.o address_utils_tsan.o
 
 test_distrib: test_distrib.o distrib.o
 test_distrib_debug: test_distrib_debug.o distrib_debug.o
@@ -70,11 +70,12 @@ dep:
 ccmd.o: ccmd.h message.h distrib.h dw_debug.h
 connection.o: connection.h message.h request.h priority_queue.h dw_debug.h
 distrib.o: distrib.h dw_debug.h
-dw_client.o: dw_debug.h distrib.h message.h connection.h request.h
+dw_client.o: dw_debug.h distrib.h message.h connection.h request.h address_utils.h
 dw_client.o: priority_queue.h timespec.h ccmd.h
-dw_node.o: dw_debug.h message.h timespec.h thread_affinity.h priority_queue.h
+dw_node.o: dw_debug.h message.h timespec.h thread_affinity.h priority_queue.h address_utils.h
 dw_node.o: request.h connection.h
 message.o: message.h
+address_utils.o: address_utils.h dw_debug.h
 node-fwd.o: message.h timespec.h
 priority_queue.o: priority_queue.h
 request.o: request.h message.h priority_queue.h dw_debug.h
