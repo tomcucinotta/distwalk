@@ -27,7 +27,7 @@
 __thread char thread_name[16];
 
 int use_wait_spinning = 0;
-int use_period = -1;
+int use_period = 1;
 
 ccmd_t* ccmd = NULL; // Ordered chain of commands
 
@@ -508,35 +508,27 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         num_pkts = atoi(arg);
         break;
     case PERIOD:
-        assert(use_period != 0);
         assert(pd_parse(&send_period_us_pd, arg));
-        use_period = 1;
         break;
     case RATE:
-        assert(use_period != 1);
         send_period_us_pd = pd_build_fixed(1000000.0 / atof(arg));
-        use_period = 0;
         break;
     case WAIT_SPIN:
         use_wait_spinning = 1;
         break;
     case RAMP_NUM_STEPS:
-        assert(use_period != 1);
         ramp_num_steps = atoi(arg);
         use_period = 0;
         break;
     case RAMP_STEP_SECS:
-        assert(use_period != 1);
         ramp_step_secs = atoi(arg);
         use_period = 0;
         break;
     case RAMP_DELTA_RATE:
-        assert(use_period != 1);
         ramp_delta_rate = atoi(arg);
         use_period = 0;
         break;
     case RATE_FILENAME:
-        assert(use_period != 1);
         ramp_fname = arg;
         use_period = 0;
         break;
@@ -544,7 +536,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         pd_spec_t val;
         assert(pd_parse(&val, arg));
         ccmd_add(ccmd, COMPUTE, &val);
-
         n_compute++;
         break; }
     case STORE_DATA: {
