@@ -21,24 +21,25 @@ NUM_RL_CLIENTS=$2
 NUM_THREADS=$3
 
 rm /tmp/dw_client_cross_fwd_*.log
+rm /tmp/dw_node_cross_fwd_*.log
 
-../src/dw_node --nt $NUM_THREADS --tcp 7000 &> /tmp/dw_node_cross_fwd_L.log &
+../src/dw_node_debug --nt $NUM_THREADS --tcp 7000 &> /tmp/dw_node_cross_fwd_L.log &
 NODEPID_L=$!
-../src/dw_node --nt $NUM_THREADS --tcp 7001 &> /tmp/dw_node_cross_fwd_R.log &
+../src/dw_node_debug --nt $NUM_THREADS --tcp 7001 &> /tmp/dw_node_cross_fwd_R.log &
 NODEPID_R=$!
 
 sleep 1
 CLIENTPIDS_LR=()
 for i in $(seq 1 1 $NUM_LR_CLIENTS)
 do
-	../src/dw_client --tcp :7000 -C 1000 -F :7001 -C 2000 -n 50 &> /tmp/dw_client_cross_fwd_LR_$i.log &
+	../src/dw_client_debug --cl :800$i --tcp :7000 -C 1000 -F :7001 -C 2000 -n 5 &> /tmp/dw_client_cross_fwd_LR_$i.log &
     CLIENTPIDS_LR[${i}]=$!
 done
 
 CLIENTPIDS_RL=()
 for i in $(seq 1 1 $NUM_RL_CLIENTS)
 do
-    ../src/dw_client --tcp :7001 -C 1000 -F :7000 -C 2000 -n 50 &> /tmp/dw_client_cross_fwd_RL_$i.log &
+    ../src/dw_client_debug --cl :900$i --tcp :7001 -C 1000 -F :7000 -C 2000 -n 5 &> /tmp/dw_client_cross_fwd_RL_$i.log &
     CLIENTPIDS_RL[${i}]=$!
 done
 
