@@ -5,7 +5,7 @@
 TMP_N0=$(mktemp /tmp/dw-node-fwd-1-XXX.dat)
 TMP_C0=$(mktemp /tmp/dw-client-fwd-XXX.dat)
 
-node_bg --tcp 7891 &> $TMP_N0
+node_bg -b :7891 --tcp &> $TMP_N0
 
 client -C 1000 -F localhost -C 2000
 client -C 1000 -F 127.0.0.1 -C 2000

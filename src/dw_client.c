@@ -23,6 +23,7 @@
 #include "connection.h"
 #include "timespec.h"
 #include "ccmd.h"
+#include "address_utils.h"
 
 __thread char thread_name[16];
 
@@ -52,54 +53,6 @@ int conn_retry_period_ms = 200;
 pthread_t sender[MAX_THREADS];
 pthread_t receiver[MAX_THREADS];
 
-#define DEFAULT_ADDR "127.0.0.1"
-#define DEFAULT_PORT "7891"
-
-
-// Support "host[:port]" or ":port" syntaxes
-void hostport_parse_and_config(char* host_str, struct sockaddr_in* addr) {
-    char* hostname = DEFAULT_ADDR;
-    int port = atoi(DEFAULT_PORT);
-    char* port_str;
-
-    check(strlen(host_str) > 0,
-          "Allowed host/port syntaxes are \"host[:port]\" or \":port\"");
-
-    // Get port
-    port_str = strchr(host_str, ':');
-    // Now host containts hostname (or ip) only
-    if (port_str) {
-        dw_log("port_str: %s\n", port_str);
-        *port_str = '\0';
-        port_str++;
-
-        // Convert port string to integer
-        char* end_ptr = NULL;
-        port = strtol(port_str, &end_ptr, 10);
-        check(!*end_ptr, "Port '%s' is not a numeric value!\n", port_str);
-    }
-
-    if (strlen(host_str) > 0)
-        hostname = host_str;
-    dw_log("host_str: %s\n", hostname);
-
-    // Resolve hostname
-    dw_log("Resolving %s...\n", hostname);
-    struct hostent *e = gethostbyname(hostname);
-    check(e != NULL);
-    dw_log("Host %s resolved to %d bytes: %s\n", hostname, e->h_length,
-           inet_ntoa(*(struct in_addr *)e->h_addr));
-
-    // Build Internet address
-    memset((char *) addr, '\0', sizeof(struct sockaddr_in));
-    addr->sin_family = AF_INET;
-    memmove((char *) &addr->sin_addr.s_addr, (char *)e->h_addr, e->h_length);
-    addr->sin_port = htons(port);
-
-    if (port_str)
-        // Restore original string (which was manipulated in-place)
-        *(port_str - 1) = ':';
-}
 
 #define TCPIP_HEADERS_SIZE 66
 #define MIN_SEND_SIZE (sizeof(message_t) + 2 * sizeof(command_t))
@@ -123,10 +76,7 @@ unsigned int ramp_delta_rate = 0;  // added to rate every ramp_secs
 unsigned int ramp_num_steps = 0;   // number of ramp-up steps
 char *ramp_fname = NULL;
 
-#define MAX_HOST_STRING 31
 proto_t proto = TCP;
-char serverhost[MAX_HOST_STRING] = DEFAULT_ADDR ":" DEFAULT_PORT;
-char clienthost[MAX_HOST_STRING] = "0.0.0.0:0";
 
 struct sockaddr_in serveraddr;
 struct sockaddr_in myaddr;
@@ -410,9 +360,9 @@ enum argp_client_option_keys {
     SKIP_CMD = 's',
     FORWARD_CMD = 'F',
     SCRIPT_FILENAME = 'f',
+    BIND_ADDR ='b',
 
-    BIND_CLIENT = 0x200,
-    WAIT_SPIN,
+    WAIT_SPIN = 0x200,
     RAMP_STEP_SECS,
     RAMP_DELTA_RATE,
     RAMP_NUM_STEPS,
@@ -432,12 +382,14 @@ enum argp_client_option_keys {
 struct argp_client_arguments {
     int num_sessions;
     int num_threads;
+    char clienthostport[MAX_HOSTPORT_STRLEN];
+    char nodehostport[MAX_HOSTPORT_STRLEN];
     pd_spec_t last_resp_size;
 };
 
 static struct argp_option argp_client_options[] = {
     // long name, short name, value name, flag, description
-    { "cl",                 BIND_CLIENT,            "host[:port]|:port",                          0, "Set client bindname and bindport"},
+    { "bind-addr",          BIND_ADDR,              "host[:port]|:port",                          0, "Set client bindname and bindport"},
     { "tcp",                TCP_OPT_ARG,            "host[:port]",                                0, "Use TCP communication protocol with the (initial) distwalk node"},
     { "udp",                UDP_OPT_ARG,            "host[:port]",                                0, "Use UDP communication protocol with the (initial) distwalk node"},
     { "num-pkts",           NUM_PKTS,               "n",                                          0, "Number of packets sent by each thread (across all sessions"},
@@ -490,18 +442,18 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case USAGE:
         argp_state_help(state, state->out_stream, ARGP_HELP_USAGE | ARGP_HELP_EXIT_OK);
         break;
-    case BIND_CLIENT:
-        strncpy(clienthost, arg, MAX_HOST_STRING-1);
-        clienthost[MAX_HOST_STRING-1] = '\0';
+    case BIND_ADDR:
+        assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
+        strcpy(arguments->clienthostport, arg);
         break;
     case TCP_OPT_ARG:
-        strncpy(serverhost, arg, MAX_HOST_STRING-1);
-        serverhost[MAX_HOST_STRING-1] = '\0';
+        assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
+        strcpy(arguments->nodehostport, arg);
         proto = TCP;
         break;
     case UDP_OPT_ARG:
-        strncpy(serverhost, arg, MAX_HOST_STRING-1);
-        serverhost[MAX_HOST_STRING-1] = '\0';
+        assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
+        strcpy(arguments->nodehostport, arg);
         proto = UDP;
         break;
     case NUM_PKTS:
@@ -590,7 +542,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 fwd_proto = UDP;
                 tok += 6;
             }
-            hostport_parse_and_config(tok, &addr);
+            addr_parse(tok, &addr);
 
             if (arg) {
                 fwd_type = MULTI_FORWARD;
@@ -722,6 +674,10 @@ int main(int argc, char *argv[]) {
     static struct argp argp = { argp_client_options, argp_client_parse_opt, 0, "Distwalk Client -- the client program \
                                                                                 \v NOTES: Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)" };
     struct argp_client_arguments input_args;
+    
+    strcpy(input_args.clienthostport, "0.0.0.0:0");
+    strcpy(input_args.nodehostport, DEFAULT_ADDR ":" DEFAULT_PORT);
+
     input_args.num_sessions = 1;
     input_args.num_threads = 1;
     input_args.last_resp_size = pd_build_fixed(default_resp_size);
@@ -784,11 +740,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    hostport_parse_and_config(serverhost, &serveraddr);
-    hostport_parse_and_config(clienthost, &myaddr);
-
-    /* Set all bits of the padding field to 0 */
-    memset(myaddr.sin_zero, '\0', sizeof(myaddr.sin_zero));
+    addr_parse(input_args.nodehostport, &serveraddr);
+    addr_parse(input_args.clienthostport, &myaddr);
 
     num_pkts = (num_pkts + input_args.num_sessions - 1) / input_args.num_sessions * input_args.num_sessions;
     pkts_per_session = num_pkts / input_args.num_sessions;
@@ -797,8 +750,8 @@ int main(int argc, char *argv[]) {
            (use_per_session_output && pkts_per_session <= MAX_PKTS));
 
     printf("Configuration:\n");
-    printf("  clienthost=%s\n", clienthost);
-    printf("  serverhost=%s\n", serverhost);
+    printf("  clienthost=%s\n", input_args.clienthostport);
+    printf("  serverhost=%s\n", input_args.nodehostport);
     printf("  num_threads: %d\n", input_args.num_threads);
     printf("  num_pkts=%lu (COMPUTE:%d, STORE:%d, LOAD:%d)\n", num_pkts,
            n_compute, n_store, n_load);
