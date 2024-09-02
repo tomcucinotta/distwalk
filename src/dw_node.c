@@ -563,8 +563,8 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
     return 1;
 }
 
-int finalize_conn(int epollfd, int conn_id) {
-    dw_log("finalize_conn() for conn %d\n", conn_id);
+int establish_conn(int epollfd, int conn_id) {
+    dw_log("establish_conn() for conn %d\n", conn_id);
     int val;
     socklen_t len = sizeof(val);
     sys_check(getsockopt(conns[conn_id].sock, SOL_SOCKET, SO_ERROR, (void*)&val, &len));
@@ -646,7 +646,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     }
     if ((p_ev->events & EPOLLOUT) && (type == CONNECT)) {
         dw_log("calling final_conn()\n");
-        if (!finalize_conn(epollfd, conn_id))
+        if (!establish_conn(epollfd, conn_id))
             goto err;
         // we need the send_messages() below to still be tried afterwards
     }
