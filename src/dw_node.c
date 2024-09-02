@@ -951,9 +951,7 @@ enum argp_node_option_keys {
     STORAGE_OPT_ARG = 's',
     MAX_STORAGE_SIZE = 'm',
 
-    TCP_OPT_ARG = 0x101,
-    UDP_OPT_ARG,
-    NUM_THREADS,
+    NUM_THREADS = 0x101,
     SYNC,
     ODIRECT,
     THREAD_AFFINITY,
@@ -975,20 +973,18 @@ struct argp_node_arguments {
 
 static struct argp_option argp_node_options[] = {
     // long name, short name, value name, flag, description
-    {"bind-addr",         BIND_ADDR,        "host[:port]|:port",    0,  "DistWalk node bindname and bindport" },
-    {"tcp",               TCP_OPT_ARG,       0,                     0,  "Use TCP communication protocol"},
-    {"udp",               UDP_OPT_ARG,       0,                     0,  "Use UDP communication protocol"},
-    {"storage",           STORAGE_OPT_ARG,  "PATH/TO/STORAGE/FILE", 0,  "Path to the file used for storage"},
-    {"max-storage-size",  MAX_STORAGE_SIZE, "N",                    0,  "Max size for the storage size (in bytes)"},
-    {"nt",                NUM_THREADS,      "N",                    0,  "Number of threads dedicated to communication" },
+    {"bind-addr",         BIND_ADDR,        "[proto[://]][host[:port]][:port]", 0,  "DistWalk node bindname, bindport, and communication protocol"},
+    {"storage",           STORAGE_OPT_ARG,  "PATH/TO/STORAGE/FILE",             0,  "Path to the file used for storage"},
+    {"max-storage-size",  MAX_STORAGE_SIZE, "N",                                0,  "Max size for the storage size (in bytes)"},
+    {"nt",                NUM_THREADS,      "N",                                0,  "Number of threads dedicated to communication" },
     {"num-threads",       NUM_THREADS,      "N",      OPTION_ALIAS },
-    {"sync",              SYNC,             "N",                    0,  "Periodically sync the written data on disk (in msec)" },
+    {"sync",              SYNC,             "N",                                0,  "Periodically sync the written data on disk (in msec)" },
     {"odirect",           ODIRECT,           0,                     0,  "Enable direct disk access"},
     {"thread-affinity",   THREAD_AFFINITY,  "CORE LIST", OPTION_ARG_OPTIONAL, "Thread-to-core pinning (optionally specify a list of available cores)"},
-    {"no-delay",          NO_DELAY,         "N",                    0, "Set value of TCP_NODELAY socket option [currently not implemented]"},
+    {"no-delay",          NO_DELAY,         "N",                                0, "Set value of TCP_NODELAY socket option [currently not implemented]"},
     {"nd",                NO_DELAY,         "N",       OPTION_ALIAS },
-    {"help",              HELP,               0,                    0, "Show this help message", 1 },
-    {"usage",             USAGE,              0,                    0, "Show a short usage message", 1 },
+    {"help",              HELP,               0,                                0, "Show this help message", 1 },
+    {"usage",             USAGE,              0,                                0, "Show a short usage message", 1 },
     { 0 }
 };
 
@@ -1006,13 +1002,59 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case BIND_ADDR:
         assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
-        strcpy(arguments->nodehostport, arg);
-        break;
-    case TCP_OPT_ARG:
-        arguments->protocol = TCP;
-        break;
-    case UDP_OPT_ARG:
-        arguments->protocol = UDP;
+
+        // (partial) parse checking
+        check(strstr(arg, "::") == NULL);
+        char* tok = strstr(arg, "://");
+        if (!tok) {
+            int parse_proto_check = 0;
+
+            if (strncmp(arg, "udp", 3) == 0) {
+                arguments->protocol = UDP;
+                parse_proto_check = 1;
+            }
+            if (strncmp(arg, "tcp", 3) == 0) {
+                arguments->protocol = TCP;
+                parse_proto_check = 1;
+            }
+
+            if (parse_proto_check) {
+                arg += 3;
+                if (arg[0] == ':') {
+                    arg++;
+                }
+            }
+
+            // addr_parse() will continue the parse checking
+            if (arg[0] != '\0')
+                strcpy(arguments->nodehostport, arg);
+        } else {
+            char* reserve;
+            tok = strtok_r(arg, "//", &reserve);
+
+            check(tok != NULL);
+
+            int parse_protocol_check = 0;
+            if (strncmp(tok, "udp:", 4) == 0) {
+                arguments->protocol = UDP;
+                parse_protocol_check = 1;
+            }
+            if (strncmp(tok, "tcp:", 4) == 0) {
+                arguments->protocol = TCP;
+                parse_protocol_check = 1;
+            }
+
+            if (parse_protocol_check) {
+                tok += 4;
+                check(tok[0] == '\0');
+
+                tok = strtok_r(NULL, "//", &reserve);
+            }
+
+            // addr_parse() will continue the parse checking
+            if (tok) 
+                strcpy(arguments->nodehostport, tok);
+        }
         break;
     case NO_DELAY: // currently not implemented
         arguments->no_delay = atoi(arg);
@@ -1183,7 +1225,7 @@ int main(int argc, char *argv[]) {
         sys_check(bind(thread_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
                         sizeof(serverAddr)));
 
-        dw_log("Node bound to %s:%d\n", inet_ntoa(serverAddr.sin_addr), ntohs(serverAddr.sin_port));
+        dw_log("Node bound to %s:%d (with protocol: %s)\n", inet_ntoa(serverAddr.sin_addr), ntohs(serverAddr.sin_port), proto_str(input_args.protocol));
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
         if (input_args.protocol == TCP)

@@ -2,7 +2,7 @@
 
 . common.sh
 
-node_bg --udp -b :7891 &
+node_bg -b udp://:7891 &
 client --udp 127.0.0.1:7891
 client --udp 127.0.0.1:7891 -n 10
 client --udp 127.0.0.1:7891 -C 10000
