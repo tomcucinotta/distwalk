@@ -36,4 +36,15 @@ static inline int ts_leq(struct timespec a, struct timespec b) {
             || (ts.tv_sec == 0 && ((signed long) ts.tv_nsec) < 0));
 }
 
+static inline int its_to_us(struct itimerspec t) {
+    return t.it_value.tv_sec * 1000000 + t.it_value.tv_nsec / 1000;
+}
+
+static inline struct itimerspec us_to_its(int micros) {
+    struct itimerspec timerspec = {0};
+    timerspec.it_value.tv_sec = (micros / 1000000);
+    timerspec.it_value.tv_nsec = (micros % 1000000) * 1000;
+    return timerspec;
+}
+
 #endif

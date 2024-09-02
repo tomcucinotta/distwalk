@@ -76,7 +76,7 @@ const char* get_event_str(event_t event) {
 typedef struct {
     int listen_sock;
     int terminationfd;  // special eventfd to handle termination
-    int timerfd;
+    int timerfd;        // special eventfd to handle forward timeouts
 
     pqueue_t *timeout_queue;
     int time_elapsed;
@@ -96,7 +96,7 @@ typedef struct {
     int storage_fd;
     char storage_path[MAX_STORAGE_PATH_STR];
 
-    int timerfd; // periodic timerfd
+    int timerfd; // special eventfd to handle periodic storage sync
     int periodic_sync_msec;
 
     int use_odirect;
@@ -112,7 +112,7 @@ typedef struct {
 
     unsigned char *store_buf;
 
-    int terminationfd;
+    int terminationfd; // special eventfd to handle termination
 } storage_info_t;
 
 typedef struct {
@@ -182,17 +182,6 @@ size_t safe_read(int fd, unsigned char *buf, size_t len) {
     return leftovers;
 }
 
-int timerspec_to_micros(struct itimerspec t) {
-    return t.it_value.tv_sec * 1000000 + t.it_value.tv_nsec / 1000;
-}
-
-struct itimerspec micros_to_timerspec(int micros) {
-    struct itimerspec timerspec = {0};
-    timerspec.it_value.tv_sec = (micros / 1000000);
-    timerspec.it_value.tv_nsec = (micros % 1000000) * 1000;
-    return timerspec;
-}
-
 void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros) {
     data_t data = {.value=req_id};
     req_info_t *req = req_get_by_id(req_id);
@@ -206,19 +195,18 @@ void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros) {
         sys_check(timerfd_gettime(infos->timerfd, &timerspec));
         new_micros += infos->time_elapsed;
         new_micros += pqueue_node_key(pqueue_top(infos->timeout_queue));
-        new_micros -= timerspec_to_micros(timerspec);
+        new_micros -= its_to_us(timerspec);
     } else {
         infos->time_elapsed = 0;
     }
 
     req->timeout_node = pqueue_insert(infos->timeout_queue, new_micros, data);
     if (req->timeout_node == pqueue_top(infos->timeout_queue)) {
-        struct itimerspec timerspec = micros_to_timerspec(micros);
+        struct itimerspec timerspec = us_to_its(micros);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
     }
 
     dw_log("TIMEOUT inserted, req_id: %d, timeout: %dus\n", req_id, micros);
-
 }
 
 // remove a timeout from a request and returns the time remained before timeout
@@ -234,7 +222,7 @@ int remove_timeout(thread_info_t* infos, int req_id, int epollfd) {
 
     req_timeout = pqueue_node_key(req->timeout_node);
     sys_check(timerfd_gettime(infos->timerfd, &timerspec));
-    time_elapsed = pqueue_node_key(top) - timerspec_to_micros(timerspec);
+    time_elapsed = pqueue_node_key(top) - its_to_us(timerspec);
 
     pqueue_remove(infos->timeout_queue, req->timeout_node);
     req->timeout_node = NULL;
@@ -248,12 +236,12 @@ int remove_timeout(thread_info_t* infos, int req_id, int epollfd) {
         int next_timeout = pqueue_node_key(pqueue_top(infos->timeout_queue));
         sys_check(timerfd_gettime(infos->timerfd, &timerspec));
         infos->time_elapsed = time_elapsed;
-        timerspec = micros_to_timerspec(next_timeout - time_elapsed);
+        timerspec = us_to_its(next_timeout - time_elapsed);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
         dw_log("TIMEOUT removed, req_id: %d, next interrupt: %dus\n", req_id, next_timeout - time_elapsed);
     } else {
         infos->time_elapsed = 0;
-        timerspec = micros_to_timerspec(0);
+        timerspec = us_to_its(0);
         sys_check(timerfd_settime(infos->timerfd, 0, &timerspec, NULL));
         dw_log("TIMEOUT removed, req_id: %d, timer disarmed.\n", req_id);
 
@@ -626,6 +614,7 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
         dw_log("TIMEOUT expired, failed, skipping: %d\n", fwd->on_fail_skip);
         
         req->curr_cmd = message_skip_cmds(m, req->curr_cmd, fwd->on_fail_skip);
+
         process_messages(req, epollfd, infos);
         conn_req_remove(conn, req);
     } else {
@@ -732,18 +721,18 @@ void* storage_worker(void* args) {
             exit(EXIT_FAILURE);
         }
 
-        struct itimerspec ts;
-        memset(&ts, 0, sizeof(ts));
+        struct itimerspec its;
+        memset(&its, 0, sizeof(its));
 
         struct timespec ts_template;
         ts_template.tv_sec =  infos->periodic_sync_msec / 1000;
         ts_template.tv_nsec = (infos->periodic_sync_msec % 1000) * 1000000;
 
         //both interval and value have been set
-        ts.it_value = ts_template;
-        ts.it_interval = ts_template;
+        its.it_value = ts_template;
+        its.it_interval = ts_template;
 
-        if (timerfd_settime(infos->timerfd, 0, &ts, NULL) < 0) {
+        if (timerfd_settime(infos->timerfd, 0, &its, NULL) < 0) {
             perror("timerfd_settime");
             exit(EXIT_FAILURE);
         }
@@ -751,7 +740,7 @@ void* storage_worker(void* args) {
         ev.events = EPOLLIN | EPOLLET;
         ev.data.u64 = i2l(TIMER, infos->timerfd);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev) < 0)
-            perror("epoll_ctl: terminationfd failed");
+            perror("epoll_ctl: timerfd failed");
     }
 
     while (running) {
