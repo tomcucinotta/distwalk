@@ -12,7 +12,7 @@
 
 typedef enum { COMPUTE, STORE, LOAD, PSKIP, FORWARD, MULTI_FORWARD, REPLY, EOM } command_type_t;
 
-typedef enum { UDP, TCP } proto_t;
+typedef enum { UDP, TCP, PROTO_NUMBER } proto_t;
 
 typedef struct {
     uint32_t pkt_size;    // size of forwarded packet
@@ -62,6 +62,7 @@ typedef struct {
     command_t cmds[];  // Series of command_t with variable size
 } message_t;
 
+const char *proto_str(proto_t proto);
 const char* get_command_name(command_type_t cmd);
 
 command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd);

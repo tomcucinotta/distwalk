@@ -6,6 +6,14 @@
 #   define min(a, b) ((a)>(b)?(b):(a))
 #endif
 
+inline const char *proto_str(proto_t proto) {
+    static const char *proto_str[PROTO_NUMBER] = {
+        "UDP",
+        "TCP",
+    };
+    return proto_str[proto];
+}
+
 inline const char* get_command_name(command_type_t cmd) {
     switch (cmd) {
     case COMPUTE: return "COMPUTE";
