@@ -4,7 +4,7 @@ CFLAGS_TSAN=-g -O2 -fsanitize=thread
 LDLIBS=-pthread -lm
 LDLIBS_DEBUG=-pthread -lm -lgcov
 
-TEST_PROGRAMS=test_distrib test_distrib_debug test_ccmd test_ccmd_debug test_pqueue test_pqueue_debug
+TEST_PROGRAMS=test_distrib test_distrib_debug test_ccmd test_ccmd_debug test_pqueue test_pqueue_debug test_timespec test_timespec_debug
 TSAN_PROGRAMS=dw_client_tsan dw_node_tsan
 DEBUG_PROGRAMS=dw_client_debug dw_node_debug
 MAIN_PROGRAMS=dw_client dw_node
@@ -42,7 +42,6 @@ test_ccmd: ccmd.o test_ccmd.o distrib.o message.o
 test_ccmd_debug: ccmd_debug.o test_ccmd_debug.o distrib.o message_debug.o
 test_pqueue: test_pqueue.o priority_queue.o
 test_pqueue_debug: test_pqueue_debug.o priority_queue_debug.o
-
 %_tsan: %_tsan.o
 	$(CC) -fsanitize=thread -o $@ $^ $(LDLIBS)
 %_debug: %_debug.o
@@ -82,4 +81,5 @@ request.o: request.h message.h priority_queue.h dw_debug.h
 test_ccmd.o: ccmd.h message.h distrib.h dw_debug.h
 test_distrib.o: distrib.h
 test_pqueue.o: priority_queue.h dw_debug.h
+test_timespec.o: timespec.h dw_debug.h
 thread_affinity.o: thread_affinity.h
