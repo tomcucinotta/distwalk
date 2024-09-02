@@ -4,7 +4,7 @@
 
 tmp=$(mktemp /tmp/test_retry_failure-XXX.dat)
 
-client_bg --tcp=127.0.0.1:7894 --retry-num 2 --retry-period 200 &> $tmp
+client_bg --to=tcp://127.0.0.1:7894 --retry-num 2 --retry-period 200 &> $tmp
 
 sleep 2
 node_bg -b :7894

@@ -12,7 +12,7 @@ node_bg -b :7892 &> $TMP_N1
 client -C 1000 -F localhost:7892 -C 2000
 client -C 1000 -F 127.0.0.1:7892 -C 2000
 
-client --tcp :7891 -C 1000 -F :7892 -C 2000 &> $TMP_C0
+client --to=tcp://:7891 -C 1000 -F :7892 -C 2000 &> $TMP_C0
 
 kill_all SIGINT
 

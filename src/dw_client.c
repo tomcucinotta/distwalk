@@ -373,8 +373,7 @@ enum argp_client_option_keys {
     NUM_THREADS,
     NUM_SESSIONS,
     PER_SESSION_OUTPUT,
-    TCP_OPT_ARG,
-    UDP_OPT_ARG,
+    TO_OPT_ARG,
     CONN_RETRY_NUM,
     CONN_RETRY_PERIOD,
 };
@@ -390,8 +389,7 @@ struct argp_client_arguments {
 static struct argp_option argp_client_options[] = {
     // long name, short name, value name, flag, description
     { "bind-addr",          BIND_ADDR,              "host[:port]|:port",                          0, "Set client bindname and bindport"},
-    { "tcp",                TCP_OPT_ARG,            "host[:port]",                                0, "Use TCP communication protocol with the (initial) distwalk node"},
-    { "udp",                UDP_OPT_ARG,            "host[:port]",                                0, "Use UDP communication protocol with the (initial) distwalk node"},
+    { "to",                 TO_OPT_ARG,             "[tcp|udp:[//]][host][:port]",                0, "Set distwalk target node host, port and protocol"},
     { "num-pkts",           NUM_PKTS,               "n",                                          0, "Number of packets sent by each thread (across all sessions"},
     { "period",             PERIOD,                 "n|prob:field=val[,field=val]",               0, "Inter-send period for each thread (in usec, or distribution)"},
     { "rate",               RATE,                   "n",                                          0, "Packet sending rate (in pkts per sec)"},
@@ -446,15 +444,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
         strcpy(arguments->clienthostport, arg);
         break;
-    case TCP_OPT_ARG:
+    case TO_OPT_ARG:
         assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
-        strcpy(arguments->nodehostport, arg);
-        proto = TCP;
-        break;
-    case UDP_OPT_ARG:
-        assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
-        strcpy(arguments->nodehostport, arg);
-        proto = UDP;
+        addr_proto_parse(arg, arguments->nodehostport, &proto);
         break;
     case NUM_PKTS:
         num_pkts = atoi(arg);

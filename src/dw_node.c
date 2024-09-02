@@ -1001,60 +1001,7 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         argp_state_help(state, state->out_stream, ARGP_HELP_USAGE | ARGP_HELP_EXIT_OK);
         break;
     case BIND_ADDR:
-        assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
-
-        // (partial) parse checking
-        check(strstr(arg, "::") == NULL);
-        char* tok = strstr(arg, "://");
-        if (!tok) {
-            int parse_proto_check = 0;
-
-            if (strncmp(arg, "udp", 3) == 0) {
-                arguments->protocol = UDP;
-                parse_proto_check = 1;
-            }
-            if (strncmp(arg, "tcp", 3) == 0) {
-                arguments->protocol = TCP;
-                parse_proto_check = 1;
-            }
-
-            if (parse_proto_check) {
-                arg += 3;
-                if (arg[0] == ':') {
-                    arg++;
-                }
-            }
-
-            // addr_parse() will continue the parse checking
-            if (arg[0] != '\0')
-                strcpy(arguments->nodehostport, arg);
-        } else {
-            char* reserve;
-            tok = strtok_r(arg, "//", &reserve);
-
-            check(tok != NULL);
-
-            int parse_protocol_check = 0;
-            if (strncmp(tok, "udp:", 4) == 0) {
-                arguments->protocol = UDP;
-                parse_protocol_check = 1;
-            }
-            if (strncmp(tok, "tcp:", 4) == 0) {
-                arguments->protocol = TCP;
-                parse_protocol_check = 1;
-            }
-
-            if (parse_protocol_check) {
-                tok += 4;
-                check(tok[0] == '\0');
-
-                tok = strtok_r(NULL, "//", &reserve);
-            }
-
-            // addr_parse() will continue the parse checking
-            if (tok) 
-                strcpy(arguments->nodehostport, tok);
-        }
+        addr_proto_parse(arg, arguments->nodehostport, &arguments->protocol);
         break;
     case NO_DELAY: // currently not implemented
         arguments->no_delay = atoi(arg);

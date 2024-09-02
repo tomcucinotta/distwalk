@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <assert.h>
 
 #include "address_utils.h"
 #include "dw_debug.h"
@@ -61,4 +62,60 @@ void addr_parse(char* hostport_str, struct sockaddr_in* addr) {
     if (port_str)
         // Restore original string (which was manipulated in-place)
         *(port_str - 1) = ':';
+}
+
+void addr_proto_parse(char* arg, char *nodehostport, proto_t *proto) {
+    assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
+    // (partial) parse checking
+    check(strstr(arg, "::") == NULL);
+    char* tok = strstr(arg, "://");
+    if (!tok) {
+        int parse_proto_check = 0;
+
+        if (strncmp(arg, "udp", 3) == 0) {
+            *proto = UDP;
+            parse_proto_check = 1;
+        }
+        if (strncmp(arg, "tcp", 3) == 0) {
+            *proto = TCP;
+            parse_proto_check = 1;
+        }
+
+        if (parse_proto_check) {
+            arg += 3;
+            if (arg[0] == ':') {
+                arg++;
+            }
+        }
+
+        // addr_parse() will continue the parse checking
+        if (arg[0] != '\0')
+            strcpy(nodehostport, arg);
+    } else {
+        char* reserve;
+        tok = strtok_r(arg, "//", &reserve);
+
+        check(tok != NULL);
+
+        int parse_protocol_check = 0;
+        if (strncmp(tok, "udp:", 4) == 0) {
+            *proto = UDP;
+            parse_protocol_check = 1;
+        }
+        if (strncmp(tok, "tcp:", 4) == 0) {
+            *proto = TCP;
+            parse_protocol_check = 1;
+        }
+
+        if (parse_protocol_check) {
+            tok += 4;
+            check(tok[0] == '\0');
+
+            tok = strtok_r(NULL, "//", &reserve);
+        }
+
+        // addr_parse() will continue the parse checking
+        if (tok) 
+            strcpy(nodehostport, tok);
+    }
 }
