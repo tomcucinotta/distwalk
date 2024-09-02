@@ -973,7 +973,7 @@ struct argp_node_arguments {
 
 static struct argp_option argp_node_options[] = {
     // long name, short name, value name, flag, description
-    {"bind-addr",         BIND_ADDR,        "[proto[://]][host[:port]][:port]", 0,  "DistWalk node bindname, bindport, and communication protocol"},
+    {"bind-addr",         BIND_ADDR,        "[tcp|udp:[//]][host][:port]", 0,  "DistWalk node bindname, bindport, and communication protocol"},
     {"storage",           STORAGE_OPT_ARG,  "PATH/TO/STORAGE/FILE",             0,  "Path to the file used for storage"},
     {"max-storage-size",  MAX_STORAGE_SIZE, "N",                                0,  "Max size for the storage size (in bytes)"},
     {"nt",                NUM_THREADS,      "N",                                0,  "Number of threads dedicated to communication" },
