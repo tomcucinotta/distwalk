@@ -77,6 +77,7 @@ typedef struct {
     int listen_sock;
     int terminationfd;  // special eventfd to handle termination
     int timerfd;        // special eventfd to handle forward timeouts
+    int epollfd;
 
     pqueue_t *timeout_queue;
     int time_elapsed;
@@ -131,6 +132,11 @@ storage_info_t storage_info;
 pthread_mutex_t socks_mtx;
 
 int nthread = 1;
+
+atomic_int next_thread_cnt = 0;
+
+typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
+accept_mode_t accept_mode = AM_CHILD;
 
 void signal_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
@@ -829,43 +835,43 @@ void* conn_worker(void* args) {
         dw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
     }
 
-    int epollfd;
     struct epoll_event ev, events[MAX_EVENTS];
 
-    sys_check(epollfd = epoll_create1(0));
+    sys_check(infos->epollfd = epoll_create1(0));
 
-    // Add listen socket
-    int conn_id = conn_find_sock(infos->listen_sock);
-    
-    ev.events = EPOLLIN;
+    if (accept_mode != AM_PARENT || infos == thread_infos) {
+        // Add listen socket
+        int conn_id = conn_find_sock(infos->listen_sock);
 
-    if(conn_id == -1) // TCP
-        ev.data.u64 = i2l(LISTEN, infos->listen_sock);
-    else // UDP
-        ev.data.u64 = i2l(SOCKET, conn_id);
-    sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->listen_sock, &ev) == -1);
+        ev.events = EPOLLIN;
+        if(conn_id == -1) // TCP
+            ev.data.u64 = i2l(LISTEN, infos->listen_sock);
+        else // UDP
+            ev.data.u64 = i2l(SOCKET, conn_id);
+        sys_check(epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->listen_sock, &ev) == -1);
+    }
 
     // Add termination fd
     ev.events = EPOLLIN;
     ev.data.u64 = i2l(TERMINATION, infos->terminationfd);
-    sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev));
+    sys_check(epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev));
 
     // Add timer fd
     ev.events = EPOLLIN;
     ev.data.u64 = i2l(TIMER, infos->timerfd);
-    sys_check(epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev));
+    sys_check(epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev));
 
     // Add storage reply fd
     if (infos->storage_path[0] != '\0') {
         ev.events = EPOLLIN;
         ev.data.u64 = i2l(STORAGE, infos->store_replyfd);
-        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->store_replyfd, &ev) < 0)
+        if (epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->store_replyfd, &ev) < 0)
             perror("epoll_ctl: storefd failed");
     }
 
     while (running) {
         dw_log("epoll_wait()ing...\n");
-        int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+        int nfds = epoll_wait(infos->epollfd, events, MAX_EVENTS, -1);
         if (nfds == -1) {
             perror("epoll_wait");
 
@@ -899,7 +905,7 @@ void* conn_worker(void* args) {
                 int conn_id = conn_alloc(conn_sock, addr, TCP);
                 if (conn_id < 0) {
                     fprintf(stderr, "Could not allocate new conn_info_t, closing...\n");
-                    close_and_forget(epollfd, conn_sock);
+                    close_and_forget(infos->epollfd, conn_sock);
                     continue;
                 }
 
@@ -907,7 +913,8 @@ void* conn_worker(void* args) {
                 ev.events = EPOLLIN;
                 ev.data.u64 = i2l(SOCKET, conn_id);
 
-                if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
+                int next_thread_id = accept_mode == AM_PARENT ? (atomic_fetch_add(&next_thread_cnt, 1) % nthread) : (infos - thread_infos);
+                if (epoll_ctl(thread_infos[next_thread_id].epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
             } else if (type == STORAGE) {
                 check(infos->storage_path[0] != '\0' && fd == infos->store_replyfd);
@@ -919,13 +926,13 @@ void* conn_worker(void* args) {
                 }
 
                 dw_log("STORAGE ACK for req_id %d\n", req_id_ACK);
-                process_messages(req_get_by_id(req_id_ACK), epollfd, infos);
-                //exec_request(epollfd, &events[i], infos);
+                process_messages(req_get_by_id(req_id_ACK), infos->epollfd, infos);
+                //exec_request(infos->epollfd, &events[i], infos);
             } else if (type == TERMINATION) {
                 running = 0;
                 break;
             } else {
-                exec_request(epollfd, &events[i], infos);
+                exec_request(infos->epollfd, &events[i], infos);
             }
         }
     }
@@ -937,6 +944,7 @@ enum argp_node_option_keys {
     HELP = 'h',
     USAGE = 0x100,
     BIND_ADDR = 'b',
+    ACCEPT_MODE = 'a',
     STORAGE_OPT_ARG = 's',
     MAX_STORAGE_SIZE = 'm',
 
@@ -963,6 +971,7 @@ struct argp_node_arguments {
 static struct argp_option argp_node_options[] = {
     // long name, short name, value name, flag, description
     {"bind-addr",         BIND_ADDR,        "[tcp|udp:[//]][host][:port]", 0,  "DistWalk node bindname, bindport, and communication protocol"},
+    {"accept-mode",       ACCEPT_MODE,      "child|shared|parent", 0,    "Accept mode (per-worker thread, shared or parent-only listening queue)"},
     {"storage",           STORAGE_OPT_ARG,  "PATH/TO/STORAGE/FILE",             0,  "Path to the file used for storage"},
     {"max-storage-size",  MAX_STORAGE_SIZE, "N",                                0,  "Max size for the storage size (in bytes)"},
     {"nt",                NUM_THREADS,      "N",                                0,  "Number of threads dedicated to communication" },
@@ -991,6 +1000,14 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case BIND_ADDR:
         addr_proto_parse(arg, arguments->nodehostport, &arguments->protocol);
+        break;
+    case ACCEPT_MODE:
+        if (strcmp(arg, "child") == 0)
+            accept_mode = AM_CHILD;
+        else if (strcmp(arg, "shared") == 0)
+            accept_mode = AM_SHARED;
+        else if (strcmp(arg, "parent") == 0)
+            accept_mode = AM_PARENT;
         break;
     case NO_DELAY: // currently not implemented
         arguments->no_delay = atoi(arg);
@@ -1024,6 +1041,37 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         return ARGP_ERR_UNKNOWN;
     }
     return 0;
+}
+
+void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct sockaddr_in serverAddr) {
+    if (accept_mode == AM_CHILD || i == 0) {
+        if (proto == TCP) {
+            thread_infos[i].listen_sock = socket(PF_INET, SOCK_STREAM, 0);
+        } else {
+            thread_infos[i].listen_sock = socket(PF_INET, SOCK_DGRAM, 0);
+            int conn_id = conn_alloc(thread_infos[i].listen_sock, serverAddr, UDP);
+            conn_set_status_by_id(conn_id, READY);
+        }
+        int val = 1;
+        sys_check(setsockopt(thread_infos[i].listen_sock, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
+        if (accept_mode == AM_CHILD)
+            sys_check(setsockopt(thread_infos[i].listen_sock, SOL_SOCKET, SO_REUSEPORT, (void *)&val, sizeof(val)));
+
+        /*---- Bind the address struct to the socket ----*/
+        sys_check(bind(thread_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
+                        sizeof(serverAddr)));
+
+        dw_log("Node bound to %s:%d (with protocol: %s)\n", inet_ntoa(serverAddr.sin_addr), ntohs(serverAddr.sin_port), proto_str(proto));
+
+        /*---- Listen on the socket, with 5 max connection requests queued ----*/
+        if (proto == TCP)
+            sys_check(listen(thread_infos[i].listen_sock, 5));
+        dw_log("Accepting new connections...\n");
+    } else if (accept_mode == AM_SHARED) {
+        thread_infos[i].listen_sock = thread_infos[0].listen_sock;
+    } else if (accept_mode == AM_PARENT) {
+        thread_infos[i].listen_sock = -1;
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -1145,28 +1193,7 @@ int main(int argc, char *argv[]) {
         /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
         * case) */
 
-        if (input_args.protocol == TCP) {
-            thread_infos[i].listen_sock = socket(PF_INET, SOCK_STREAM, 0);
-        } else {
-            thread_infos[i].listen_sock = socket(PF_INET, SOCK_DGRAM, 0);
-            int conn_id = conn_alloc(thread_infos[i].listen_sock, serverAddr, UDP);
-            conn_set_status_by_id(conn_id, READY);
-        }
-
-        int val = 1;
-        sys_check(setsockopt(thread_infos[i].listen_sock, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
-        sys_check(setsockopt(thread_infos[i].listen_sock, SOL_SOCKET, SO_REUSEPORT, (void *)&val, sizeof(val)));
-
-        /*---- Bind the address struct to the socket ----*/
-        sys_check(bind(thread_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
-                        sizeof(serverAddr)));
-
-        dw_log("Node bound to %s:%d (with protocol: %s)\n", inet_ntoa(serverAddr.sin_addr), ntohs(serverAddr.sin_port), proto_str(input_args.protocol));
-
-        /*---- Listen on the socket, with 5 max connection requests queued ----*/
-        if (input_args.protocol == TCP)
-            sys_check(listen(thread_infos[i].listen_sock, 5));
-        dw_log("Accepting new connections...\n");
+        init_listen_sock(i, accept_mode, input_args.protocol, serverAddr);
 
         thread_infos[i].terminationfd = eventfd(0, 0);
         thread_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
