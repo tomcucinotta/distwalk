@@ -837,8 +837,6 @@ void* conn_worker(void* args) {
 
     struct epoll_event ev, events[MAX_EVENTS];
 
-    sys_check(infos->epollfd = epoll_create1(0));
-
     if (accept_mode != AM_PARENT || infos == thread_infos) {
         // Add listen socket
         int conn_id = conn_find_sock(infos->listen_sock);
@@ -916,6 +914,7 @@ void* conn_worker(void* args) {
                 int next_thread_id = accept_mode == AM_PARENT ? (atomic_fetch_add(&next_thread_cnt, 1) % nthread) : (infos - thread_infos);
                 if (epoll_ctl(thread_infos[next_thread_id].epollfd, EPOLL_CTL_ADD, conn_sock, &ev) < 0)
                         perror("epoll_ctl() failed");
+                dw_log("conn_id: %d assigned to connw-%d\n", conn_id, thread_infos[next_thread_id].worker_id);
             } else if (type == STORAGE) {
                 check(infos->storage_path[0] != '\0' && fd == infos->store_replyfd);
 
@@ -1195,6 +1194,7 @@ int main(int argc, char *argv[]) {
 
         init_listen_sock(i, accept_mode, input_args.protocol, serverAddr);
 
+        sys_check(thread_infos[i].epollfd = epoll_create1(0));
         thread_infos[i].terminationfd = eventfd(0, 0);
         thread_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
         thread_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
