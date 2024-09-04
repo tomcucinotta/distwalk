@@ -6,8 +6,10 @@
 #include <pthread.h>
 #include <errno.h>
 #include <assert.h>
+#include <stdlib.h>
 
 #include "thread_affinity.h"
+#include "dw_debug.h"
 
 // Based on taskset human-readable format
 void aff_list_parse(char *str, cpu_set_t* mask, int ncpu) {
@@ -16,9 +18,10 @@ void aff_list_parse(char *str, cpu_set_t* mask, int ncpu) {
     int val;
     int max;
 
+    int step = 1;
     CPU_ZERO(mask);
     while ((tok = strsep(&str, ",")) != NULL) {
-        if (sscanf(tok, "%d-%d", &min, &max) == 2) {
+        if (sscanf(tok, "%d-%d:%d", &min, &max, &step) >= 2) {
             if (min > max) {
                 int tmp = max;
 
@@ -26,18 +29,23 @@ void aff_list_parse(char *str, cpu_set_t* mask, int ncpu) {
                 min = tmp;
             }
             
-            assert(min >= 0 && min < ncpu);
-            assert(max >= 0 && max < ncpu);
+            check(min >= 0 && min < ncpu);
+            check(max >= 0 && max < ncpu);
+            check(step > 0);
 
-            for (int i=min; i<=max; i++) {
+            for (int i=min; i<=max; i += step) {
                 CPU_SET(i, mask);
             }
-        }
-        else if (sscanf(tok, "%d", &val) == 1) {
-            assert(val >= 0 && val < ncpu);
+        } else if (sscanf(tok, "-%d", &max) == 1 || sscanf(tok, "%d-", &min) == 1) {
+            fprintf(stderr, "thread_affinity parsing error: core range '%s' not allowed\n", tok);
+            exit(EXIT_FAILURE);
+        } else if (sscanf(tok, "%d", &val) == 1) {
+            check(val >= 0 && val < ncpu);
             CPU_SET(val, mask);
+        } else {
+            fprintf(stderr, "thread_affinity parsing error: '%s' not allowed\n", tok);
+            exit(EXIT_FAILURE);
         }
-        // else: format error
     }
 }
 

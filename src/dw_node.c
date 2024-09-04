@@ -947,11 +947,10 @@ enum argp_node_option_keys {
     ACCEPT_MODE = 'a',
     STORAGE_OPT_ARG = 's',
     MAX_STORAGE_SIZE = 'm',
-
+    THREAD_AFFINITY = 'c',
     NUM_THREADS = 0x101,
     SYNC,
     ODIRECT,
-    THREAD_AFFINITY,
     NO_DELAY,
     BACKLOG_LENGTH,
 };
@@ -981,7 +980,7 @@ static struct argp_option argp_node_options[] = {
     {"num-threads",       NUM_THREADS,      "n", OPTION_ALIAS },
     {"sync",              SYNC,             "msec",                           0,  "Periodically sync the written data on disk" },
     {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access"},
-    {"thread-affinity",   THREAD_AFFINITY,  "CORE LIST", OPTION_ARG_OPTIONAL,     "Thread-to-core pinning (optionally specify a list of available cores)"},
+    {"thread-affinity",   THREAD_AFFINITY,  "auto|cX,cZ[,cA-cD[:step]]",            0,   "Thread-to-core pinning (automatic or user-defined list using taskset syntax)"},
     {"no-delay",          NO_DELAY,         "n",                              0, "Set value of TCP_NODELAY socket option [currently not implemented]"},
     {"nd",                NO_DELAY,         "n", OPTION_ALIAS },
     {"help",              HELP,              0,                               0, "Show this help message", 1 },
@@ -1039,7 +1038,7 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case THREAD_AFFINITY:
         arguments->use_thread_affinity = 1;
-        if (arg && arg[0] != '-') {
+        if (strcmp(arg, "auto") != 0) {
             arguments->thread_affinity_list = arg;
         }
         break;
