@@ -137,6 +137,7 @@ atomic_int next_thread_cnt = 0;
 
 typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
 accept_mode_t accept_mode = AM_CHILD;
+int listen_backlog = 5;
 
 void signal_cleanup(int _) {
     (void)_;  // to avoid unused var warnings
@@ -952,6 +953,7 @@ enum argp_node_option_keys {
     ODIRECT,
     THREAD_AFFINITY,
     NO_DELAY,
+    BACKLOG_LENGTH,
 };
 
 struct argp_node_arguments {
@@ -969,19 +971,21 @@ struct argp_node_arguments {
 
 static struct argp_option argp_node_options[] = {
     // long name, short name, value name, flag, description
-    {"bind-addr",         BIND_ADDR,        "[tcp|udp:[//]][host][:port]", 0,  "DistWalk node bindname, bindport, and communication protocol"},
-    {"accept-mode",       ACCEPT_MODE,      "child|shared|parent", 0,    "Accept mode (per-worker thread, shared or parent-only listening queue)"},
-    {"storage",           STORAGE_OPT_ARG,  "PATH/TO/STORAGE/FILE",             0,  "Path to the file used for storage"},
-    {"max-storage-size",  MAX_STORAGE_SIZE, "N",                                0,  "Max size for the storage size (in bytes)"},
-    {"nt",                NUM_THREADS,      "N",                                0,  "Number of threads dedicated to communication" },
-    {"num-threads",       NUM_THREADS,      "N",      OPTION_ALIAS },
-    {"sync",              SYNC,             "N",                                0,  "Periodically sync the written data on disk (in msec)" },
-    {"odirect",           ODIRECT,           0,                     0,  "Enable direct disk access"},
-    {"thread-affinity",   THREAD_AFFINITY,  "CORE LIST", OPTION_ARG_OPTIONAL, "Thread-to-core pinning (optionally specify a list of available cores)"},
-    {"no-delay",          NO_DELAY,         "N",                                0, "Set value of TCP_NODELAY socket option [currently not implemented]"},
-    {"nd",                NO_DELAY,         "N",       OPTION_ALIAS },
-    {"help",              HELP,               0,                                0, "Show this help message", 1 },
-    {"usage",             USAGE,              0,                                0, "Show a short usage message", 1 },
+    {"bind-addr",         BIND_ADDR,        "[tcp|udp:[//]][host][:port]",    0,  "DistWalk node bindname, bindport, and communication protocol"},
+    {"accept-mode",       ACCEPT_MODE,      "child|shared|parent",            0,  "Accept mode (per-worker thread, shared or parent-only listening queue)"},
+    {"backlog-length",    BACKLOG_LENGTH,   "n",                              0,  "Maximum pending connections queue length"},
+    {"bl",                BACKLOG_LENGTH,   "n", OPTION_ALIAS},
+    {"storage",           STORAGE_OPT_ARG,  "path/to/storage/file",           0,  "Path to the file used for storage"},
+    {"max-storage-size",  MAX_STORAGE_SIZE, "nbytes",                         0,  "Max size for the storage size"},
+    {"nt",                NUM_THREADS,      "n",                              0,  "Number of threads dedicated to communication" },
+    {"num-threads",       NUM_THREADS,      "n", OPTION_ALIAS },
+    {"sync",              SYNC,             "msec",                           0,  "Periodically sync the written data on disk" },
+    {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access"},
+    {"thread-affinity",   THREAD_AFFINITY,  "CORE LIST", OPTION_ARG_OPTIONAL,     "Thread-to-core pinning (optionally specify a list of available cores)"},
+    {"no-delay",          NO_DELAY,         "n",                              0, "Set value of TCP_NODELAY socket option [currently not implemented]"},
+    {"nd",                NO_DELAY,         "n", OPTION_ALIAS },
+    {"help",              HELP,              0,                               0, "Show this help message", 1 },
+    {"usage",             USAGE,             0,                               0, "Show a short usage message", 1 },
     { 0 }
 };
 
@@ -1007,6 +1011,9 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
             accept_mode = AM_SHARED;
         else if (strcmp(arg, "parent") == 0)
             accept_mode = AM_PARENT;
+        break;
+    case BACKLOG_LENGTH:
+        listen_backlog = atoi(arg);
         break;
     case NO_DELAY: // currently not implemented
         arguments->no_delay = atoi(arg);
@@ -1064,8 +1071,8 @@ void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct so
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
         if (proto == TCP)
-            sys_check(listen(thread_infos[i].listen_sock, 5));
-        dw_log("Accepting new connections...\n");
+            sys_check(listen(thread_infos[i].listen_sock, listen_backlog));
+        dw_log("Accepting new connections (max backlog: %d)...\n", listen_backlog);
     } else if (accept_mode == AM_SHARED) {
         thread_infos[i].listen_sock = thread_infos[0].listen_sock;
     } else if (accept_mode == AM_PARENT) {
