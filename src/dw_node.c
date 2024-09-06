@@ -129,7 +129,7 @@ __thread char thread_name[16];
 pthread_t storer;
 storage_info_t storage_info;
 
-pthread_mutex_t socks_mtx;
+//pthread_mutex_t socks_mtx;
 
 int nthread = 1;
 
@@ -1217,18 +1217,18 @@ int main(int argc, char *argv[]) {
     }
 
     // Init conns mutexs
-    for (int i = 0; i < MAX_CONNS; i++) {
-        sys_check(pthread_mutex_init(&conns[i].mtx, NULL));
-    }
+    //for (int i = 0; i < MAX_CONNS; i++) {
+    //    sys_check(pthread_mutex_init(&conns[i].mtx, NULL));
+    //}
 
     // Init socks mutex
     // TODO: change sock_add and sock_dell's logic to avoid lock re-entrancy
-    pthread_mutexattr_t attr;
+    //pthread_mutexattr_t attr;
 
-    pthread_mutexattr_init(&attr);
-    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    //pthread_mutexattr_init(&attr);
+    //pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 
-    sys_check(pthread_mutex_init(&socks_mtx, &attr));
+    //sys_check(pthread_mutex_init(&socks_mtx, &attr));
 
     // Init storage thread
     if (input_args.storage_path[0] != '\0') {
@@ -1255,11 +1255,11 @@ int main(int argc, char *argv[]) {
         }
 
         // Destroy conns mutexs
-        for (int i = 0; i < MAX_CONNS; i++) {
-            sys_check(pthread_mutex_destroy(&conns[i].mtx));
-        }
+        //for (int i = 0; i < MAX_CONNS; i++) {
+        //    sys_check(pthread_mutex_destroy(&conns[i].mtx));
+        //}
 
-        sys_check(pthread_mutex_destroy(&socks_mtx));
+        //sys_check(pthread_mutex_destroy(&socks_mtx));
     } else {
         pqueue_free(thread_infos[0].timeout_queue);
     }
