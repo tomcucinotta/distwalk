@@ -33,7 +33,7 @@ __attribute__((weak)) __thread char thread_name[16];
 #define sys_check(call) do {	 \
     int __rv = (call);		 \
     if (__rv < 0) {		 \
-      perror("Error: " #call);	 \
+      fprintf(stderr, "Error: %s: %s [%s:%d]\n", #call, strerror(errno), __FILE__, __LINE__);	 \
       exit(EXIT_FAILURE);	 \
     }				 \
   } while (0)
@@ -41,8 +41,8 @@ __attribute__((weak)) __thread char thread_name[16];
 // Exit immediately if cond is violated
 #define check(cond, ...) do {	 \
     if (!(cond)) {		 \
-        fprintf(stderr, "Error (" #cond ") " __VA_ARGS__);       \
-      fprintf(stderr, "\n");     \
+      fprintf(stderr, "Error:" #cond ": " __VA_ARGS__);       \
+      fprintf(stderr, " [%s:%d]\n", __FILE__, __LINE__);     \
       exit(EXIT_FAILURE);	 \
     }				 \
   } while (0)
@@ -50,7 +50,7 @@ __attribute__((weak)) __thread char thread_name[16];
 // Execute stmt if cond is violated
 #define check_do(cond, stmt) do {		 \
     if (!(cond)) {				 \
-      fprintf(stderr, "Error: %s\n", #cond);     \
+      fprintf(stderr, "Error: %s [%s:%d]\n", #cond, __FILE__, __LINE__);     \
       stmt;					 \
     }						 \
   } while (0)
@@ -58,7 +58,7 @@ __attribute__((weak)) __thread char thread_name[16];
 // Dump error on stderr if cond is violated, and ignore
 #define check_ignore(cond) do {			 \
     if (!(cond)) {				 \
-      fprintf(stderr, "Error: %s\n", #cond);     \
+      fprintf(stderr, "Error: %s [%s:%d]\n", #cond, __FILE__, __LINE__);     \
     }						 \
   } while (0)
 
