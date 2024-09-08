@@ -119,7 +119,7 @@ command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip) {
 
 inline const void msg_log(message_t* m, char* padding) {
     printf("%s", padding);
-    printf("message (req_id: %u, req_size: %u, num: %u): ", m->req_id, m->req_size, msg_num_cmd(m));
+    printf("message (req_id: %u, req_size: %u, num: %u, status: %d): ", m->req_id, m->req_size, msg_num_cmd(m), m->status);
 
     command_t *c = message_first_cmd(m), *pre_c;
     while (c->cmd != EOM) {

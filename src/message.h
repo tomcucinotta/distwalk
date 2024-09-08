@@ -44,8 +44,8 @@ typedef struct {
 */
 
 typedef struct {
-    uint32_t resp_size;      // REPLY pkt size
-    uint8_t n_ack;         // reply concern
+    uint32_t resp_size;   // REPLY pkt size
+    uint8_t n_ack;        // reply concern
 } reply_opts_t;
 
 // TODO: Here we need all quantities to be network-ordered
@@ -59,6 +59,7 @@ typedef struct {
 typedef struct {
     uint32_t req_id;
     uint32_t req_size; // Overall message size in bytes, including commands and payload
+    int8_t status;    // 0 success, error otherwise (tipically set by dw_node)
     command_t cmds[];  // Series of command_t with variable size
 } message_t;
 

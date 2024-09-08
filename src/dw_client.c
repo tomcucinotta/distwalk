@@ -290,6 +290,11 @@ void *thread_receiver(void *data) {
         msg_log(m, "received message: ");
 #endif
 
+        if (m->status != 0) {
+            dw_log("REPLY reported an error\n");
+            goto skip;
+        }
+
         struct timespec ts_now;
         clock_gettime(clk_id, &ts_now);
         unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
@@ -407,7 +412,7 @@ static struct argp_option argp_client_options[] = {
     { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val]",               0, "Per-store data payload size"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",               0, "Per-load data payload size"},
     { "skip",               SKIP_CMD,               "n[,prob:field=val[,field=val]]",             0, "Skip (with given probability) the next n commands"},
-    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,nack=n]",             0, "Send a number of FORWARD message to the ip:port list, wait for n replies"},
+    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,nack=n][,timeout=n][,retry=n]",             0, "Send a number of FORWARD message to the ip:port list, wait for n replies"},
     { "send-pkt-size",      SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]", OPTION_ALIAS},
     { "resp-pkt-size",      RESPONSE_SIZE,          "nbytes|prob:field=val[,field=val]",               0, "Set payload size of received responses"},
@@ -523,10 +528,16 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
 
         char *tok;
         int n_ack = 0;
+        int timeout_us = 500000;
+        int retry_num = 0;
         int i = 0;
         
         while ((tok = strsep(&arg, ",")) != NULL) {
             if (sscanf(tok, "nack=%d", &n_ack) == 1)
+                continue;
+            if (sscanf(tok, "timeout=%d", &timeout_us) == 1)
+                continue;
+            if (sscanf(tok, "retry=%d", &retry_num) == 1)
                 continue;
 
             int fwd_proto = TCP;
@@ -544,16 +555,16 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             ccmd_add(ccmd, fwd_type, &val);
             ccmd_last_action(ccmd)->fwd.fwd_port = addr.sin_port;
             ccmd_last_action(ccmd)->fwd.fwd_host = addr.sin_addr.s_addr;
-            // TODO: customize forward timeout and opts
-            ccmd_last_action(ccmd)->fwd.timeout = 0;
-            ccmd_last_action(ccmd)->fwd.retries = 0;
-            ccmd_last_action(ccmd)->fwd.on_fail_skip = 0;
+            
+            ccmd_last_action(ccmd)->fwd.timeout = timeout_us;
+            ccmd_last_action(ccmd)->fwd.retries = retry_num;
+            ccmd_last_action(ccmd)->fwd.on_fail_skip = 1;
             ccmd_last_action(ccmd)->fwd.proto = fwd_proto;
 
             i++;
         }
 
-        // TODO: allow n_ack 0 ???
+        // TODO: allow n_ack 0 when reply messages will be optional 
         if (n_ack == 0 || (n_ack > 0 && n_ack > i)) {
             n_ack = i;
         }

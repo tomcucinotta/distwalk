@@ -400,6 +400,7 @@ int reply(req_info_t *req, message_t *m, command_t *cmd) {
     m_dst->req_id = m->req_id;
     m_dst->req_size = opts->resp_size;
     m_dst->cmds[0].cmd = EOM;
+    m_dst->status = m->status;
 
     dw_log("Replying to req %u (conn_id=%d)\n", m->req_id, req->conn_id);
     dw_log("  cmds[] has %d items, pkt_size is %u\n", msg_num_cmd(m_dst),
@@ -626,11 +627,12 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
         dw_log("TIMEOUT expired, failed, skipping: %d\n", fwd->on_fail_skip);
         
         req->curr_cmd = message_skip_cmds(m, req->curr_cmd, fwd->on_fail_skip);
-
+        m->status = -1;
         process_messages(req, epollfd, infos);
-        conn_req_remove(conn, req);
     } else {
         dw_log("TIMEOUT expired, failed\n");
+
+        m->status = -1;
         conn_req_remove(conn, req);
     }
 }
@@ -651,13 +653,18 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
     if ((type == SOCKET || type == CONNECT) && (conn->sock == -1 || conn->recv_buf == NULL))
         return;
 
+    if(p_ev->events & EPOLLERR || p_ev->events & EPOLLHUP) {
+        dw_log("FORWARD connection failed, conn_id=%d\n", conn_id);
+        goto err;
+    }
+
     if (p_ev->events & EPOLLIN) {
         dw_log("calling recv_mesg()\n");
         if (!conn_recv(conn))
             goto err;
     }
     if ((p_ev->events & EPOLLOUT) && (type == CONNECT)) {
-        dw_log("calling final_conn()\n");
+        dw_log("calling establish_conn()\n");
         if (!establish_conn(epollfd, conn_id))
             goto err;
         // we need the send_messages() below to still be tried afterwards
