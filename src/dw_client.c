@@ -522,46 +522,53 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         n_load++; // @TODO What's the purpose of this?
         break; }
     case FORWARD_CMD: {
-        struct sockaddr_in addr;
+        struct sockaddr_in fwd_addr;
         command_type_t fwd_type = FORWARD;
         pd_spec_t val = pd_build_fixed(default_resp_size);
 
-        char *tok;
         int n_ack = 0;
         int timeout_us = 500000;
         int retry_num = 0;
         int i = 0;
-        
-        while ((tok = strsep(&arg, ",")) != NULL) {
-            if (sscanf(tok, "nack=%d", &n_ack) == 1)
-                continue;
-            if (sscanf(tok, "timeout=%d", &timeout_us) == 1)
-                continue;
-            if (sscanf(tok, "retry=%d", &retry_num) == 1)
-                continue;
 
-            int fwd_proto = TCP;
-            if (strncmp(tok, "udp://", 6) == 0) {
-                fwd_proto = UDP;
-                tok += 6;
+        char* reserve;
+        char *tok = strtok_r(arg, ",", &reserve);
+        while (tok != NULL) {
+            if (strncmp(tok, "nack=", 5) == 0) {
+                n_ack = atoi(tok + 5);
+            } else if (strncmp(tok, "timeout=", 8) == 0) {
+                timeout_us = atoi(tok + 8);
+            } else if (strncmp(tok, "retry=", 6) == 0) {
+                retry_num = atoi(tok + 6);
+            } else {
+                char fwdhostport[MAX_HOSTPORT_STRLEN];
+                proto_t fwd_proto = TCP;
+
+                addr_proto_parse(tok, fwdhostport, &fwd_proto);
+                addr_parse(fwdhostport, &fwd_addr);
+
+                if (i > 0) {
+                    if (i == 1) { // morph previous FORWARD in MULTI_FORWARD
+                        ccmd_last_action(ccmd)->cmd = MULTI_FORWARD;
+                    }
+
+                    fwd_type = MULTI_FORWARD;
+                }
+
+                // TODO: customize forward pkt size
+                ccmd_add(ccmd, fwd_type, &val);
+                ccmd_last_action(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
+                ccmd_last_action(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
+                
+                ccmd_last_action(ccmd)->fwd.timeout = timeout_us;
+                ccmd_last_action(ccmd)->fwd.retries = retry_num;
+                ccmd_last_action(ccmd)->fwd.on_fail_skip = 1;
+                ccmd_last_action(ccmd)->fwd.proto = fwd_proto;
+
+                i++;
             }
-            addr_parse(tok, &addr);
 
-            if (arg) {
-                fwd_type = MULTI_FORWARD;
-            }
-
-            // TODO: customize forward pkt size
-            ccmd_add(ccmd, fwd_type, &val);
-            ccmd_last_action(ccmd)->fwd.fwd_port = addr.sin_port;
-            ccmd_last_action(ccmd)->fwd.fwd_host = addr.sin_addr.s_addr;
-            
-            ccmd_last_action(ccmd)->fwd.timeout = timeout_us;
-            ccmd_last_action(ccmd)->fwd.retries = retry_num;
-            ccmd_last_action(ccmd)->fwd.on_fail_skip = 1;
-            ccmd_last_action(ccmd)->fwd.proto = fwd_proto;
-
-            i++;
+            tok = strtok_r(NULL, ",", &reserve);
         }
 
         // TODO: allow n_ack 0 when reply messages will be optional 
