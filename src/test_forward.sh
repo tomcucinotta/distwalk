@@ -30,7 +30,7 @@ sleep 1
 
 kill_all SIGINT
 
-cat $TMP_N0 | grep -q "Connection refused"
+cat $TMP_N0 | grep -q "FORWARD connection failed, conn_id=1" # old msg: "Connection refused"
 
 rm $TMP_N0
 rm $TMP_N1
