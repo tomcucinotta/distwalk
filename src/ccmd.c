@@ -27,7 +27,7 @@ ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
         exit(EXIT_FAILURE);
     }
 
-    ccmd_node_t* new_node = malloc(sizeof(ccmd_node_t));
+    ccmd_node_t* new_node = calloc(1, sizeof(ccmd_node_t));
     new_node->cmd = cmd;
     new_node->pd_val = *p_pd_spec;
 
@@ -77,7 +77,7 @@ void ccmd_attach_last_reply(ccmd_t* q, pd_spec_t *p_pd_spec) {
         ccmd_add(q, REPLY, p_pd_spec);
     }
     else {
-        ccmd_node_t* new_node = malloc(sizeof(ccmd_node_t));
+        ccmd_node_t* new_node = calloc(1, sizeof(ccmd_node_t));
         new_node->next = NULL;
         new_node->cmd = REPLY;
         new_node->pd_val = *p_pd_spec;
