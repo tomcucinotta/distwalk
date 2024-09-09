@@ -49,7 +49,7 @@ int use_per_session_output = 0;
 int conn_retry_num = 1;
 int conn_retry_period_ms = 200;
 
-#define MAX_THREADS 32
+#define MAX_THREADS 128
 pthread_t sender[MAX_THREADS];
 pthread_t receiver[MAX_THREADS];
 
@@ -584,6 +584,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break; }
     case NUM_THREADS:
         arguments->num_threads = atoi(arg);
+        check(arguments->num_threads >= 1 && arguments->num_threads <= MAX_THREADS);
         break;
     case NUM_SESSIONS:
         arguments->num_sessions = atoi(arg);
@@ -771,7 +772,8 @@ int main(int argc, char *argv[]) {
 
 
 
-    for (int i = 0; i < MAX_THREADS; i++) clientSocket[i] = -1;
+    for (int i = 0; i < MAX_THREADS; i++)
+        clientSocket[i] = -1;
 
     // Remember in ts_start the abs start time of the experiment
     clock_gettime(clk_id, &ts_start);
@@ -780,7 +782,8 @@ int main(int argc, char *argv[]) {
         assert(pthread_create(&receiver[i], NULL, thread_receiver,
                               (void *)(unsigned long)i) == 0);
 
-    for (int i = 0; i < input_args.num_threads; i++) pthread_join(receiver[i], NULL);
+    for (int i = 0; i < input_args.num_threads; i++)
+        pthread_join(receiver[i], NULL);
 
     dw_log("Joined sender and receiver threads, exiting\n");
 
