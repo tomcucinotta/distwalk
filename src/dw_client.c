@@ -411,7 +411,7 @@ static struct argp_option argp_client_options[] = {
     { "comp-time",          COMP_TIME,              "usec|prob:field=val[,field=val]",               0, "Per-request processing time"},
     { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val]",               0, "Per-store data payload size"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",               0, "Per-load data payload size"},
-    { "skip",               SKIP_CMD,               "n[,prob:field=val[,field=val]]",             0, "Skip (with given probability) the next n commands"},
+    { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
     { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,nack=n][,timeout=n][,retry=n]",             0, "Send a number of FORWARD message to the ip:port list, wait for n replies"},
     { "send-pkt-size",      SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]", OPTION_ALIAS},
