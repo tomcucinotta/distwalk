@@ -49,7 +49,7 @@ int use_per_session_output = 0;
 int conn_retry_num = 1;
 int conn_retry_period_ms = 200;
 
-#define MAX_THREADS 128
+#define MAX_THREADS 256
 pthread_t sender[MAX_THREADS];
 pthread_t receiver[MAX_THREADS];
 
@@ -63,8 +63,8 @@ pthread_t receiver[MAX_THREADS];
 
 clockid_t clk_id = CLOCK_REALTIME;
 int clientSocket[MAX_THREADS];
-long usecs_send[MAX_THREADS][MAX_PKTS];
-long usecs_elapsed[MAX_THREADS][MAX_PKTS];
+long *usecs_send[MAX_THREADS];
+long *usecs_elapsed[MAX_THREADS];
 // abs start-time of the experiment
 struct timespec ts_start;
 
@@ -323,8 +323,8 @@ void *thread_receiver(void *data) {
                 }
                 // make sure we reset the send timestamp and elapsed array to
                 // zeros for the next session
-                memset(&usecs_send[thread_id][0], 0, sizeof(usecs_send[thread_id]));
-                memset(&usecs_elapsed[thread_id][0], 0, sizeof(usecs_elapsed[thread_id]));
+                memset(&usecs_send[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
+                memset(&usecs_elapsed[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
             }
             dw_log("Joining sender thread\n");
             pthread_join(sender[thread_id], NULL);
@@ -770,10 +770,16 @@ int main(int argc, char *argv[]) {
     // Init random number generator
     srand(time(NULL));
 
-
-
-    for (int i = 0; i < MAX_THREADS; i++)
+    for (int i = 0; i < MAX_THREADS; i++) {
         clientSocket[i] = -1;
+        if (i < input_args.num_threads) {
+            check(usecs_send[i] = malloc(sizeof(usecs_send[0][0]) * MAX_PKTS));
+            check(usecs_elapsed[i] = malloc(sizeof(usecs_send[0][0]) * MAX_PKTS));
+        } else {
+            usecs_send[i] = NULL;
+            usecs_elapsed[i] = NULL;
+        }
+    }
 
     // Remember in ts_start the abs start time of the experiment
     clock_gettime(clk_id, &ts_start);
