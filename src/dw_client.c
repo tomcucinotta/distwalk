@@ -793,6 +793,11 @@ int main(int argc, char *argv[]) {
 
     dw_log("Joined sender and receiver threads, exiting\n");
 
+    for (int i = 0; i < input_args.num_threads; i++) {
+        free(usecs_send[i]);
+        free(usecs_elapsed[i]);
+    }
+    
     ccmd_destroy(&ccmd);
     return 0;
 }
