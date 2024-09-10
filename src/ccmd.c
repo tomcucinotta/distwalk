@@ -129,7 +129,6 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
     check(m, "ccmd_dump() error - NullPointer message_t*");
 
     ccmd_node_t* curr = q->head_actions;
-    int num = q->num;
 
     double x = 0;
     command_t *cmd = message_first_cmd(m);
@@ -158,12 +157,10 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
             case PSKIP:
                 drand48_r(&rnd_buf, &x);
                 dw_log("skip: x=%g, prob=%g\n", x, curr->pd_val.val);
-                if (x <= curr->pd_val.val) {
-                    num -= curr->n_skip;
+                if (x <= curr->pd_val.val)
                     curr = ccmd_skip(curr, curr->n_skip);
-                }
-                num--;
-                break;
+                curr = curr->next;
+                continue;
             case MULTI_FORWARD:
             case FORWARD:
                 *cmd_get_opts(fwd_opts_t, cmd) = curr->fwd;
