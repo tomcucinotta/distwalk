@@ -70,7 +70,7 @@ const char* get_event_str(event_t event) {
 }
 
 // used with --per-client-thread
-#define MAX_THREADS 32
+#define MAX_THREADS 256
 #define MAX_STORAGE_PATH_STR 100
 
 typedef struct {
@@ -124,6 +124,11 @@ typedef struct {
 
 pthread_t workers[MAX_THREADS];
 thread_info_t thread_infos[MAX_THREADS];
+
+// Pipe comm
+int fds[MAX_THREADS][2];
+int fds2[MAX_THREADS][2];
+
 __thread char thread_name[16];
 
 pthread_t storer;
@@ -1104,10 +1109,6 @@ int main(int argc, char *argv[]) {
     
     cpu_set_t mask;
     struct sockaddr_in serverAddr;
-
-    // Pipe comm
-    int fds[MAX_THREADS][2];
-    int fds2[MAX_THREADS][2];
 
     // Storage info defaults
     storage_info.storage_fd = -1;
