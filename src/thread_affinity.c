@@ -36,11 +36,9 @@ void aff_list_parse(char *str, cpu_set_t* mask, int ncpu) {
             for (int i=min; i<=max; i += step) {
                 CPU_SET(i, mask);
             }
-        } else if (sscanf(tok, "-%d", &max) == 1 || sscanf(tok, "%d-", &min) == 1) {
-            fprintf(stderr, "thread_affinity parsing error: core range '%s' not allowed\n", tok);
-            exit(EXIT_FAILURE);
-        } else if (sscanf(tok, "%d", &val) == 1) {
-            check(val >= 0 && val < ncpu);
+        } else if (sscanf(tok, "%d-", &val) == 1 || sscanf(tok, "-%d", &val) == 1 || sscanf(tok, "%d", &val) == 1) {
+            val = abs(val);
+            check(val < ncpu);
             CPU_SET(val, mask);
         } else {
             fprintf(stderr, "thread_affinity parsing error: '%s' not allowed\n", tok);
