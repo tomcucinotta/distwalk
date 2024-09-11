@@ -14,7 +14,7 @@ int main(int argc, char **argv) {
     ++argv;
     while (argc > 0) {
         if (strcmp(argv[0], "-h") == 0 || strcmp(argv[0], "--help") == 0) {
-            printf("Usage: test_expon [-h|--help] [-n <num_samples> = 1000] [-d distrib = 10.0]\n");
+            printf("Usage: test_distrib [-h|--help] [-n <num_samples> = 1000] [-d distrib = 10.0]\n");
             exit(0);
         } else if (strcmp(argv[0], "-n") == 0) {
             assert(argc >= 2);
@@ -33,7 +33,10 @@ int main(int argc, char **argv) {
 
     pd_init(time(NULL));
 
-    printf("distrib=%s\n", pd_str(&val));
-    for (int i = 0; i < num_samples; i++)
-        printf("%g\n", pd_sample(&val));
-}
+    // TODO: We need a way to verify that our probability distribution implementations are correct w.r.t the theoretical ones
+    //printf("distrib=%s\n", pd_str(&val));
+    for (int i = 0; i < num_samples; i++) {
+        pd_sample(&val);
+        //printf("%g\n", pd_sample(&val));
+    }
+}   
