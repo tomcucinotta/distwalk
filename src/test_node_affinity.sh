@@ -20,4 +20,8 @@ strace_node_bg --thread-affinity=2-2 &> $tmp
 kill_all SIGINT
 grep "sched_setaffinity(.*\[2\]" $tmp
 
+strace_node_bg --thread-affinity=2 &> $tmp
+kill_all SIGINT
+grep "sched_setaffinity(.*\[2\]" $tmp
+
 rm $tmp
