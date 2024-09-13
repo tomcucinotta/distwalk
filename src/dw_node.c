@@ -13,8 +13,8 @@
 #include <string.h>
 #include <sched.h>
 #include <sys/epoll.h>
-#include <sys/eventfd.h>
 #include <sys/timerfd.h>
+#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h> /* See NOTES */
@@ -49,22 +49,22 @@ static inline void l2i(uint64_t n, uint32_t* ln, uint32_t* rn) {
 
 typedef enum {
     LISTEN,
-    TERMINATION,
     STORAGE,
     TIMER,
     CONNECT,
     SOCKET,
+    TERMINATION,
     EVENT_NUMBER
 } event_t;
 
 const char* get_event_str(event_t event) {
     static char *event_str[EVENT_NUMBER] = {
         "LISTEN",
-        "TERMINATION",
         "STORAGE",
         "TIMER",
         "CONNECT",
         "SOCKET"
+        "TERMINATION"
     };
     return event_str[event];
 }
@@ -75,8 +75,8 @@ const char* get_event_str(event_t event) {
 
 typedef struct {
     int listen_sock;
-    int terminationfd;  // special eventfd to handle termination
-    int timerfd;        // special eventfd to handle forward timeouts
+    int terminationfd;  // special signalfd to handle termination
+    int timerfd;        // special timerfd to handle forward timeouts
     int epollfd;
 
     pqueue_t *timeout_queue;
@@ -97,7 +97,7 @@ typedef struct {
     int storage_fd;
     char storage_path[MAX_STORAGE_PATH_STR];
 
-    int timerfd; // special eventfd to handle periodic storage sync
+    int timerfd; // special timerfd to handle periodic storage sync
     int periodic_sync_msec;
 
     int use_odirect;
@@ -113,7 +113,7 @@ typedef struct {
 
     unsigned char *store_buf;
 
-    int terminationfd; // special eventfd to handle termination
+    int terminationfd; // special signalfd to handle termination
 } storage_info_t;
 
 typedef struct {
@@ -143,21 +143,6 @@ atomic_int next_thread_cnt = 0;
 typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
 accept_mode_t accept_mode = AM_CHILD;
 int listen_backlog = 5;
-
-void signal_cleanup() {
-    int temp_errno = errno; // to avoid errno spoil in multi-thread
-
-    // terminate workers by sending a notification
-    // on their terminationfd
-    if (nthread > 1) {
-        for (int i = 0; i < nthread; i++) {
-            eventfd_write(thread_infos[i].terminationfd, 1);
-        }
-    }
-
-    eventfd_write(storage_info.terminationfd, 1);
-    errno = temp_errno;
-}
 
 void safe_write(int fd, unsigned char *buf, size_t len) {
     while (len > 0) {
@@ -726,7 +711,7 @@ void* storage_worker(void* args) {
     }
 
     // Add termination handler
-    ev.events = EPOLLIN | EPOLLET;
+    ev.events = EPOLLIN;
     ev.data.u64 = i2l(TERMINATION, infos->terminationfd);
     if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->terminationfd, &ev) < 0)
         perror("epoll_ctl: terminationfd failed");
@@ -767,10 +752,7 @@ void* storage_worker(void* args) {
         if (nfds == -1) {
             perror("epoll_wait");
 
-            if (errno == EINTR) {
-                running = 0;
-                break;
-            } else {
+            if (errno != EINTR) {
                 perror("epoll_wait() failed (storage_worker): ");
                 exit(EXIT_FAILURE);
             }
@@ -782,6 +764,7 @@ void* storage_worker(void* args) {
             l2i(events[i].data.u64, (uint32_t*)&type, (uint32_t*) &fd);
 
             if (type == TERMINATION) {
+                dw_log("TERMINATION\n");
                 running = 0;
                 break;
             } else if (type == TIMER) {
@@ -885,10 +868,7 @@ void* conn_worker(void* args) {
         if (nfds == -1) {
             perror("epoll_wait");
 
-            if (errno == EINTR) {
-                running = 0;
-                break;
-            } else {
+            if (errno != EINTR) {
                 perror("epoll_wait() failed (conn_worker): ");
                 exit(EXIT_FAILURE);
             }
@@ -940,6 +920,7 @@ void* conn_worker(void* args) {
                 process_messages(req_get_by_id(req_id_ACK), infos->epollfd, infos);
                 //exec_request(infos->epollfd, &events[i], infos);
             } else if (type == TERMINATION) {
+                dw_log("TERMINATION\n");
                 running = 0;
                 break;
             } else {
@@ -1107,14 +1088,13 @@ int main(int argc, char *argv[]) {
     input_args.no_delay = 1;
 
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
-
-    // Setup SIGINT signal handler
-    struct sigaction cleanup_action;
-    cleanup_action.sa_handler = signal_cleanup;
-    sigemptyset(&cleanup_action.sa_mask);
-    cleanup_action.sa_flags = 0;
-
-    sys_check(sigaction(SIGINT, &cleanup_action, NULL));
+    
+    // Handle SIGINT and SIGTERM via epoll
+    sigset_t term_sigmask;
+    sigemptyset(&term_sigmask);
+    sigaddset(&term_sigmask, SIGTERM);
+    sigaddset(&term_sigmask, SIGINT);
+    sys_check(pthread_sigmask(SIG_BLOCK, &term_sigmask, 0));
 
     // Setup thread name
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
@@ -1170,7 +1150,7 @@ int main(int argc, char *argv[]) {
         blk_size = s.st_blksize;
         dw_log("blk_size = %lu\n", blk_size);
 
-        storage_info.terminationfd = eventfd(0, 0);
+        storage_info.terminationfd = signalfd(-1, &term_sigmask, 0);
         storage_info.store_buf = malloc(BUF_SIZE);
 
         for (int i = 0; i < input_args.num_threads; i++) {
@@ -1214,7 +1194,7 @@ int main(int argc, char *argv[]) {
         init_listen_sock(i, accept_mode, input_args.protocol, serverAddr);
 
         sys_check(thread_infos[i].epollfd = epoll_create1(0));
-        thread_infos[i].terminationfd = eventfd(0, 0);
+        thread_infos[i].terminationfd = signalfd(-1, &term_sigmask, 0);
         thread_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
         thread_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
         thread_infos[i].use_thread_affinity = input_args.use_thread_affinity;
