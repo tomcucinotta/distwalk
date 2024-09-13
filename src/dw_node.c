@@ -654,7 +654,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         return;
 
     if(p_ev->events & EPOLLERR || p_ev->events & EPOLLHUP) {
-        dw_log("FORWARD connection failed, conn_id=%d\n", conn_id);
+        dw_log("Connection to remote peer refused, conn_id=%d\n", conn_id);
         goto err;
     }
 
