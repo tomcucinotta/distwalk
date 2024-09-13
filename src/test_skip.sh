@@ -26,12 +26,12 @@ kill_all SIGINT
 
 node_bg &> $TMP
 
-client -C 10 -p 50 --skip 1,prob=0.5 -C 20 -n 100
+client -C 10 --skip 1,prob=0.5 -C 20 -n 100
 
 [ $(grep -c "COMPUTE.10us" $TMP) -eq 100 ]
 [ $(grep -c "COMPUTE.20us" $TMP) -lt 59 ]
 
-client -C 15 -p 50 --skip 1,prob=0.3 -C 25 -n 100
+client -C 15 --skip 1,prob=0.3 -C 25 -n 100
 
 [ $(grep -c "COMPUTE.15us" $TMP) -eq 100 ]
 [ $(grep -c "COMPUTE.25us" $TMP) -lt 79 ]
