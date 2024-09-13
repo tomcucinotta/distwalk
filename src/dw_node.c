@@ -53,6 +53,7 @@ typedef enum {
     TIMER,
     CONNECT,
     SOCKET,
+    STATS,
     TERMINATION,
     EVENT_NUMBER
 } event_t;
@@ -64,6 +65,7 @@ const char* get_event_str(event_t event) {
         "TIMER",
         "CONNECT",
         "SOCKET",
+        "STATS",
         "TERMINATION"
     };
     return event_str[event];
@@ -77,6 +79,7 @@ typedef struct {
     int listen_sock;
     int terminationfd;  // special signalfd to handle termination
     int timerfd;        // special timerfd to handle forward timeouts
+    int statfd;          // special signalfd to print statistics
     int epollfd;
 
     pqueue_t *timeout_queue;
@@ -91,6 +94,10 @@ typedef struct {
     int worker_id;
     int use_thread_affinity;
     int core_id; // core pinning
+
+    // load-balancing stats
+    atomic_int active_conns;
+    atomic_int active_reqs;
 } thread_info_t;
 
 typedef struct {
@@ -307,6 +314,7 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
                 conn_set_status_by_id(fwd_conn_id, CONNECTING);
             } else {
                 conn_set_status_by_id(fwd_conn_id, READY);
+                infos->active_conns++;
             }
         }
     }
@@ -374,7 +382,7 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
 }
 
 // returns 1 if reply sent correctly, 0 otherwise
-int reply(req_info_t *req, message_t *m, command_t *cmd) {
+int reply(req_info_t *req, message_t *m, command_t *cmd, thread_info_t* infos) {
     message_t *m_dst = conn_send_message(&conns[req->conn_id]);
     reply_opts_t *opts = cmd_get_opts(reply_opts_t, cmd);
     assert(m_dst->req_size >= opts->resp_size);
@@ -395,6 +403,7 @@ int reply(req_info_t *req, message_t *m, command_t *cmd) {
 
     conn_info_t *conn = conn_get_by_id(req->conn_id);
     conn_req_remove(conn, req);
+    infos->active_reqs--;
     return conn_start_send(&conns[req->conn_id], req->target);
 }
 
@@ -479,7 +488,7 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
             return 0;
         case REPLY:
             dw_log("Handling REPLY: req_id=%d\n", m->req_id);
-            if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd)) {
+            if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd, infos)) {
                 fprintf(stderr, "reply() failed, conn_id: %d\n", req->conn_id);
                 return -1;
             }
@@ -542,6 +551,8 @@ int obtain_messages(int conn_id, int epollfd, thread_info_t* infos) {
                 fprintf(stderr, "conn_req_add() failed\n");
                 return 0;
             }
+            infos->active_reqs++;
+
             req->message_ptr = (unsigned char*) m;
             req->curr_cmd = message_first_cmd(m);
             int executed = process_single_message(req, epollfd, infos);
@@ -617,6 +628,7 @@ void handle_timeout(int epollfd, thread_info_t *infos) {
 
         m->status = -1;
         conn_req_remove(conn, req);
+        infos->active_reqs--;
     }
 }
 
@@ -650,6 +662,7 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
         dw_log("calling establish_conn()\n");
         if (!establish_conn(epollfd, conn_id))
             goto err;
+        infos->active_conns++;
         // we need the send_messages() below to still be tried afterwards
     }
     if (p_ev->events & EPOLLOUT && conn->curr_send_size > 0 && conn_get_status(conn) != CONNECTING && conn_get_status(conn) != NOT_INIT) {
@@ -680,11 +693,15 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, thread_info_t* in
                conn->sock, conn_id, conn->curr_send_size);
         sys_check(epoll_ctl(epollfd, EPOLL_CTL_MOD, conn->sock, &ev2));
         conn_set_status(conn, READY);
+        infos->active_conns++;
     }
 
     return;
 
  err:
+    if (conns->proto == TCP && conn_get_status(conn) == READY) {
+        infos->active_conns--;
+    }
     close_and_forget(epollfd, conn->sock);
     conn_free(conn_id);
 }
@@ -739,7 +756,7 @@ void* storage_worker(void* args) {
             exit(EXIT_FAILURE);
         }
         
-        ev.events = EPOLLIN | EPOLLET;
+        ev.events = EPOLLIN;
         ev.data.u64 = i2l(TIMER, infos->timerfd);
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev) < 0)
             perror("epoll_ctl: timerfd failed");
@@ -853,6 +870,13 @@ void* conn_worker(void* args) {
     ev.data.u64 = i2l(TIMER, infos->timerfd);
     sys_check(epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->timerfd, &ev));
 
+    // Add stat fd
+    if (infos->statfd != -1) {
+        ev.events = EPOLLIN;
+        ev.data.u64 = i2l(STATS, infos->statfd);
+        sys_check(epoll_ctl(infos->epollfd, EPOLL_CTL_ADD, infos->statfd, &ev));
+    }
+
     // Add storage reply fd
     if (infos->storage_path[0] != '\0') {
         ev.events = EPOLLIN;
@@ -899,6 +923,7 @@ void* conn_worker(void* args) {
                 }
 
                 conn_set_status_by_id(conn_id, READY);
+                infos->active_conns++;
                 ev.events = EPOLLIN;
                 ev.data.u64 = i2l(SOCKET, conn_id);
 
@@ -919,8 +944,34 @@ void* conn_worker(void* args) {
                 process_messages(req_get_by_id(req_id_ACK), infos->epollfd, infos);
                 //exec_request(infos->epollfd, &events[i], infos);
             } else if (type == TERMINATION) {
+                // no need to disarm signal, since we are killing the node anyway
                 dw_log("TERMINATION\n");
                 running = 0;
+                break;
+            } else if (type == STATS) {
+                // disarm signal
+                struct signalfd_siginfo sfdi;
+                if (read(fd, &sfdi, sizeof(struct signalfd_siginfo)) != sizeof(struct signalfd_siginfo)) {
+                    perror("signal read");
+                    running = 0;
+                    break;
+                }
+
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+
+                int total_active_conns = 0;
+                int total_active_reqs = 0;
+                for (int i = 0; i < nthread; i++) {
+                    total_active_conns += thread_infos[i].active_conns;
+                    total_active_reqs  += thread_infos[i].active_reqs;
+                    printf("[%ld.%09ld][%s] STATS worker-id: %d, active-conns: %d, active-reqs: %d\n", ts.tv_sec, ts.tv_nsec, 
+                                                                                            thread_name, thread_infos[i].worker_id, 
+                                                                                            thread_infos[i].active_conns, thread_infos[i].active_reqs);
+                }
+                printf("[%ld.%09ld][%s] STATS total-active-conns: %d, total-active-reqs: %d\n", ts.tv_sec, ts.tv_nsec, thread_name, 
+                                                                                            total_active_conns, total_active_reqs);
+
                 break;
             } else {
                 exec_request(infos->epollfd, &events[i], infos);
@@ -1094,6 +1145,12 @@ int main(int argc, char *argv[]) {
     sigaddset(&term_sigmask, SIGTERM);
     sigaddset(&term_sigmask, SIGINT);
     sys_check(pthread_sigmask(SIG_BLOCK, &term_sigmask, 0));
+    
+    // Handle SIGUSR1 via epoll (on thread_info[0] only)
+    sigset_t stat_sigmask;
+    sigemptyset(&stat_sigmask);
+    sigaddset(&stat_sigmask, SIGUSR1);
+    sys_check(pthread_sigmask(SIG_BLOCK, &stat_sigmask, 0));
 
     // Setup thread name
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
@@ -1198,6 +1255,12 @@ int main(int argc, char *argv[]) {
         thread_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
         thread_infos[i].use_thread_affinity = input_args.use_thread_affinity;
         
+        if (i == 0) {
+            thread_infos[i].statfd = signalfd(-1, &stat_sigmask, 0);
+        } else {
+            thread_infos[i].statfd = -1;   
+        }
+
         // Round-robin thread-core pinning
         if (input_args.use_thread_affinity) {
             thread_infos[i].core_id = core_it;
@@ -1206,6 +1269,9 @@ int main(int argc, char *argv[]) {
         }
 
         thread_infos[i].worker_id = i;
+
+        thread_infos[i].active_conns = 0;
+        thread_infos[i].active_reqs = 0;
     }
 
     // Init conns mutexs
