@@ -144,8 +144,7 @@ typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
 accept_mode_t accept_mode = AM_CHILD;
 int listen_backlog = 5;
 
-void signal_cleanup(int _) {
-    (void)_;  // to avoid unused var warnings
+void signal_cleanup() {
     int temp_errno = errno; // to avoid errno spoil in multi-thread
 
     // terminate workers by sending a notification
@@ -1110,8 +1109,14 @@ int main(int argc, char *argv[]) {
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
 
     // Setup SIGINT signal handler
-    signal(SIGINT, signal_cleanup);
+    struct sigaction cleanup_action;
+    cleanup_action.sa_handler = signal_cleanup;
+    sigemptyset(&cleanup_action.sa_mask);
+    cleanup_action.sa_flags = 0;
 
+    sys_check(sigaction(SIGINT, &cleanup_action, NULL));
+
+    // Setup thread name
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
     
     cpu_set_t mask;
