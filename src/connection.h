@@ -8,9 +8,7 @@
 #include "message.h"
 #include "request.h"
 
-#ifndef MAX_CONNS
-#   define MAX_CONNS 16
-#endif
+#define MAX_CONNS 16
 
 typedef enum {
     NOT_INIT,
