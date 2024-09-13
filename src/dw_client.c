@@ -15,8 +15,6 @@
 #include <unistd.h>
 #include <argp.h>
 
-#define MAX_CONNS 32
-
 #include "dw_debug.h"
 #include "distrib.h"
 #include "message.h"
