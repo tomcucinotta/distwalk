@@ -178,7 +178,7 @@ void conn_free(int conn_id) {
     free(conns[conn_id].send_buf);   
     conns[conn_id].send_buf = NULL;
     conns[conn_id].sock = -1;
-
+    conns[conn_id].status = CLOSE;
     //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
 }
 
@@ -306,7 +306,7 @@ int conn_send(conn_info_t *conn) {
 
         if (errno = EPIPE || errno == ECONNRESET) {
             dw_log("SEND Connection closed by remote end conn_id=%d\n", conn->conn_id);
-            conns[conn->conn_id].status = CLOSE;
+            conn->status = CLOSE;
             return 0;
         }
 
