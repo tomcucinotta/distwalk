@@ -183,15 +183,6 @@ void conn_free(int conn_id) {
 }
 
 int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
-    unsigned char *new_recv_buf = NULL;
-    unsigned char *new_send_buf = NULL;
-
-    new_recv_buf = calloc(BUF_SIZE, sizeof(unsigned char));
-    new_send_buf = calloc(BUF_SIZE, sizeof(unsigned char));
-
-    if (!new_recv_buf || !new_send_buf)
-        goto continue_free;
-
     int conn_id;
     for (conn_id = 0; conn_id < MAX_CONNS; conn_id++) {
         //if (nthread > 1) sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
@@ -201,6 +192,15 @@ int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
         //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
     }
     if (conn_id == MAX_CONNS)
+        return -1;
+
+    unsigned char *new_recv_buf = NULL;
+    unsigned char *new_send_buf = NULL;
+
+    new_recv_buf = calloc(BUF_SIZE, sizeof(unsigned char));
+    new_send_buf = calloc(BUF_SIZE, sizeof(unsigned char));
+
+    if (!new_recv_buf || !new_send_buf)
         goto continue_free;
 
     conns[conn_id].conn_id = conn_id;
