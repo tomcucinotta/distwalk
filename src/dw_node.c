@@ -63,7 +63,7 @@ const char* get_event_str(event_t event) {
         "STORAGE",
         "TIMER",
         "CONNECT",
-        "SOCKET"
+        "SOCKET",
         "TERMINATION"
     };
     return event_str[event];
