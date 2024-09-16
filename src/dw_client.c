@@ -78,7 +78,6 @@ proto_t proto = TCP;
 
 struct sockaddr_in serveraddr;
 struct sockaddr_in myaddr;
-socklen_t addr_size;
 
 unsigned long pkts_per_session;
 
@@ -228,11 +227,9 @@ void *thread_receiver(void *data) {
 
                 /*---- Connect the socket to the server using the address struct
                 * ----*/
-                addr_size = sizeof(serveraddr);
-
                 dw_log("Connecting to %s:%d (sess_id=%d, retry=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i, conn_retry);
 
-                if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, addr_size)) == 0) {
+                if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, sizeof(serveraddr))) == 0) {
                     break;
                 } else {
                     close(clientSocket[thread_id]);

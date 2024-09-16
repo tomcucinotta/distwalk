@@ -172,10 +172,10 @@ double pd_sample(pd_spec_t *p) {
     return val;
 }
 
-static char s[64];
 
 // stringify spec into static array and return it
 char *pd_str(pd_spec_t *p) {
+    static char s[64];
     double scale;
     int k;
     switch (p->prob) {
