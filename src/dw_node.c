@@ -281,7 +281,7 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, th
         fwd_conn_id = conn_alloc(clientSocket, addr, fwd.proto);
 
         if (fwd_conn_id == -1) {
-            fprintf(stderr, "conn_add() failed, closing\n");
+            fprintf(stderr, "conn_alloc() failed, closing\n");
             close(clientSocket);
             return 0;
         }
@@ -354,7 +354,7 @@ int handle_forward_reply(int req_id, int epollfd, thread_info_t* infos) {
     req_info_t *req = req_get_by_id(req_id);
 
     if (!req) {
-        dw_log("Could not match a response to FORWARD, req_id=%d - Dropped\n", req_id);
+        dw_log("Could not match a response to FORWARD, req_id:%d - Dropped\n", req_id);
         return 1;
     }
 
@@ -463,8 +463,7 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
     message_t *m = req_get_message(req);
 
     for (command_t *cmd = req->curr_cmd; cmd->cmd != EOM; cmd = cmd_next(cmd)) {
-        dw_log("PROCESS req_id: %d,  command: %s\n", req->req_id, get_command_name(cmd->cmd));
-
+        dw_log("PROCESS conn_id: %d, req_id: %d,  command: %s\n", req->conn_id, req->req_id, get_command_name(cmd->cmd));
         switch(cmd->cmd) {
         case COMPUTE:
             compute_for(cmd_get_opts(comp_opts_t, cmd)->comp_time_us);
