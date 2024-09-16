@@ -20,7 +20,6 @@ typedef enum {
 } conn_status_t;
 
 typedef struct {
-    int conn_id;
     proto_t proto;                // transport protocol to use (TCP or UDP)
     int sock;                     // -1 for unused conn_info_t
     conn_status_t status;         // status of the connection
@@ -59,6 +58,8 @@ conn_status_t conn_set_status(conn_info_t* conn, conn_status_t status);
 conn_status_t conn_set_status_by_id(int conn_id, conn_status_t status);
 
 conn_info_t* conn_get_by_id(int conn_id);
+int conn_get_id_by_ptr(conn_info_t * conn);
+
 req_info_t* conn_req_add(conn_info_t *conn);
 req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req);
 
