@@ -21,9 +21,9 @@ const char *conn_status_str(conn_status_t s) {
 
 void conn_init() {
     for (int i = 0; i < MAX_CONNS; i++) {
-        conns[i].sock = -1;
         conns[i].recv_buf = NULL;
         conns[i].send_buf = NULL;
+        conns[i].sock = -1;
     }
 }
 
@@ -35,6 +35,7 @@ conn_status_t conn_set_status(conn_info_t* conn, conn_status_t status) {
 
     return prev;
 }
+
 conn_status_t conn_set_status_by_id(int conn_id, conn_status_t status) {
     return conn_set_status(conn_get_by_id(conn_id), status);
 }
@@ -42,6 +43,7 @@ conn_status_t conn_set_status_by_id(int conn_id, conn_status_t status) {
 conn_status_t conn_get_status(conn_info_t* conn) {
     return conn->status;
 }
+
 conn_status_t conn_get_status_by_id(int conn_id) {
     return conn_get_status(conn_get_by_id(conn_id));
 }
@@ -151,8 +153,8 @@ void conn_del_id(int id) {
     //if (nthread > 1) sys_check(pthread_mutex_lock(&socks_mtx));
 
     dw_log("marking conns[%d] invalid\n", id);
-    conns[id].sock = -1;
     conn_reset(&conns[id]);
+    conns[id].sock = -1;
 
     //if (nthread > 1) sys_check(pthread_mutex_unlock(&socks_mtx));
 }
@@ -181,8 +183,8 @@ void conn_free(int conn_id) {
     conns[conn_id].recv_buf = NULL;
     free(conns[conn_id].send_buf);   
     conns[conn_id].send_buf = NULL;
-    conns[conn_id].sock = -1;
     conns[conn_id].status = CLOSE;
+    conns[conn_id].sock = -1;
     //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
 }
 
