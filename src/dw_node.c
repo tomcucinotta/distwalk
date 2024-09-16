@@ -1274,11 +1274,6 @@ int main(int argc, char *argv[]) {
         thread_infos[i].active_reqs = 0;
     }
 
-    // Init conns mutexs
-    //for (int i = 0; i < MAX_CONNS; i++) {
-    //    sys_check(pthread_mutex_init(&conns[i].mtx, NULL));
-    //}
-
     // Init socks mutex
     // TODO: change sock_add and sock_dell's logic to avoid lock re-entrancy
     //pthread_mutexattr_t attr;
@@ -1311,11 +1306,6 @@ int main(int argc, char *argv[]) {
             close(thread_infos[i].terminationfd);
             pqueue_free(thread_infos[i].timeout_queue);
         }
-
-        // Destroy conns mutexs
-        //for (int i = 0; i < MAX_CONNS; i++) {
-        //    sys_check(pthread_mutex_destroy(&conns[i].mtx));
-        //}
 
         //sys_check(pthread_mutex_destroy(&socks_mtx));
     } else {

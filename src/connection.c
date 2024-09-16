@@ -24,6 +24,7 @@ void conn_init() {
         conns[i].recv_buf = NULL;
         conns[i].send_buf = NULL;
         conns[i].sock = -1;
+        conns[i].busy = 0;
     }
 }
 
@@ -176,8 +177,6 @@ int conn_del_sock(int sock) {
 void conn_free(int conn_id) {
     dw_log("Freeing conn %d\n", conn_id);
 
-    //if (nthread > 1) sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
-
     conn_reset(&conns[conn_id]);
     free(conns[conn_id].recv_buf);   
     conns[conn_id].recv_buf = NULL;
@@ -185,21 +184,22 @@ void conn_free(int conn_id) {
     conns[conn_id].send_buf = NULL;
     conns[conn_id].status = CLOSE;
     conns[conn_id].sock = -1;
-    //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
+    conns[conn_id].busy = 0;
 }
 
 int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     int conn_id;
     for (conn_id = 0; conn_id < MAX_CONNS; conn_id++) {
-        //if (nthread > 1) sys_check(pthread_mutex_lock(&conns[conn_id].mtx));
-        if (conns[conn_id].sock == -1)
-            break;  // unlock mutex above after mallocs
-
-        //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
+        int expected = 0;
+        int desired = 1;
+        if (atomic_compare_exchange_strong(&conns[conn_id].busy, &expected, desired)) {
+            break;
+        }
     }
     if (conn_id == MAX_CONNS)
         return -1;
 
+    // From here, safe to assume that conns[conn_id] is thread-safe
     unsigned char *new_recv_buf = NULL;
     unsigned char *new_send_buf = NULL;
 
@@ -216,9 +216,7 @@ int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     conns[conn_id].recv_buf = new_recv_buf;
     conns[conn_id].send_buf = new_send_buf;
     conns[conn_id].parent_thread = pthread_self(); 
-    //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
 
-    // From here, safe to assume that conns[conn_id] is thread-safe
     dw_log("CONN allocated, conn_id: %d\n", conn_id);
     conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf;
     conns[conn_id].curr_proc_buf = conns[conn_id].recv_buf;
@@ -226,8 +224,6 @@ int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     conns[conn_id].curr_send_buf = conns[conn_id].send_buf;
     conns[conn_id].curr_send_size = 0;
     conns[conn_id].serialize_request = 0;
-
-    //if (nthread > 1) sys_check(pthread_mutex_unlock(&conns[conn_id].mtx));
 
     return conn_id;
 

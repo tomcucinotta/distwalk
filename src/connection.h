@@ -40,7 +40,7 @@ typedef struct {
     req_info_t *req_list;
     unsigned int serialize_request;
     pthread_t parent_thread;
-    //pthread_mutex_t mtx;
+    atomic_int busy;             // 1 if conn is allocated, 0 otherwise
 } conn_info_t;
 
 extern conn_info_t conns[MAX_CONNS];
