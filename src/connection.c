@@ -184,18 +184,15 @@ void conn_free(int conn_id) {
     conns[conn_id].send_buf = NULL;
     conns[conn_id].status = CLOSE;
     conns[conn_id].sock = -1;
-    conns[conn_id].busy = 0;
+    atomic_store(&conns[conn_id].busy, 0);
 }
 
 int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     int conn_id;
-    for (conn_id = 0; conn_id < MAX_CONNS; conn_id++) {
-        int expected = 0;
-        int desired = 1;
-        if (atomic_compare_exchange_strong(&conns[conn_id].busy, &expected, desired)) {
+    for (conn_id = 0; conn_id < MAX_CONNS; conn_id++)
+        if (atomic_exchange(&conns[conn_id].busy, 1) == 0)
             break;
-        }
-    }
+
     if (conn_id == MAX_CONNS)
         return -1;
 
