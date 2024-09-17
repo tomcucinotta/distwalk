@@ -717,7 +717,7 @@ int main(int argc, char *argv[]) {
             if (num_pkts == 0 || num_pkts > cnt) num_pkts = cnt;
         } else {
             num_pkts = 0;
-            int r = send_period_us_pd.val;
+            int r = 1000000 / send_period_us_pd.val;
             for (int s = 0; s < ramp_num_steps; s++) {
                 num_pkts += r * ramp_step_secs;
                 r += ramp_delta_rate;
