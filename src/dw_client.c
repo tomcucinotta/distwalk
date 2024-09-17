@@ -30,11 +30,6 @@ int use_period = 1;
 
 ccmd_t* ccmd = NULL; // Ordered chain of commands
 
-// For print only
-unsigned int n_store = 0;    // Number of STORE requests
-unsigned int n_load = 0;     // Number of LOAD requests
-unsigned int n_compute = 0;  // Number of COMPUTE requests
-
 unsigned int default_compute_us = 1000;
 
 pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 1024, .std = NAN, .min = NAN, .max = NAN };
@@ -66,7 +61,7 @@ long *usecs_elapsed[MAX_THREADS];
 // abs start-time of the experiment
 struct timespec ts_start;
 
-unsigned long num_pkts = 0;
+unsigned long num_pkts = 1;
 
 unsigned int rates[MAX_RATES];
 unsigned int ramp_step_secs = 0;   // if non-zero, supersedes num_pkts
@@ -481,21 +476,16 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         pd_spec_t val;
         assert(pd_parse(&val, arg));
         ccmd_add(ccmd, COMPUTE, &val);
-        n_compute++;
         break; }
     case STORE_DATA: {
         pd_spec_t val;
         assert(pd_parse(&val, arg));
         ccmd_add(ccmd, STORE, &val);
-
-        n_store++;
         break; }
     case LOAD_DATA: {
         pd_spec_t val;
         assert(pd_parse(&val, arg));
         ccmd_add(ccmd, LOAD, &val);
-
-        n_load++; 
         break; }
     case SKIP_CMD: {
         pd_spec_t val = pd_build_fixed(1.0);
@@ -514,8 +504,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         check(n_skip != -1, "--skip needs a positive integer as arg\n");
         ccmd_node_t *p = ccmd_add(ccmd, PSKIP, &val);
         p->n_skip = n_skip;
-
-        n_load++; // @TODO What's the purpose of this?
         break; }
     case FORWARD_CMD: {
         struct sockaddr_in fwd_addr;
@@ -703,19 +691,9 @@ int main(int argc, char *argv[]) {
     ccmd_attach_last_reply(ccmd, &input_args.last_resp_size);
     ccmd_last_reply(ccmd)->resp.n_ack = 1;
 
-    if (n_compute + n_store + n_load > 0 && num_pkts <= 0) {
-        num_pkts = 1;
-    }
-
-    if (n_compute + n_load + n_store <= 0) {
-        if (num_pkts <= 0) {
-            num_pkts = 1;
-        }
-
+    if (!ccmd_last_action(ccmd)) {
         pd_spec_t val = pd_build_fixed(default_compute_us);
         ccmd_add(ccmd, COMPUTE, &val);
-
-        n_compute++;
     }
 
     if (ramp_step_secs != 0) {
@@ -760,8 +738,7 @@ int main(int argc, char *argv[]) {
     printf("  clienthost=%s\n", input_args.clienthostport);
     printf("  serverhost=%s\n", input_args.nodehostport);
     printf("  num_threads: %d\n", input_args.num_threads);
-    printf("  num_pkts=%lu (COMPUTE:%d, STORE:%d, LOAD:%d)\n", num_pkts,
-           n_compute, n_store, n_load);
+    printf("  num_pkts=%lu\n", num_pkts);
     printf("  rate=%g\n", 1000000.0 / send_period_us_pd.val);
     printf("  period=%sus\n", pd_str(&send_period_us_pd));
     printf("  waitspin=%d\n", use_wait_spinning);
