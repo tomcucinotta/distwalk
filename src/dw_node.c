@@ -1052,6 +1052,10 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
             accept_mode = AM_SHARED;
         else if (strcmp(arg, "parent") == 0)
             accept_mode = AM_PARENT;
+        else {
+            printf("Invalid accept mode parameter: %s\n", arg);
+            exit(EXIT_FAILURE);
+        }
         break;
     case BACKLOG_LENGTH:
         listen_backlog = atoi(arg);
