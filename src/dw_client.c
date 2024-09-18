@@ -187,6 +187,8 @@ void *thread_receiver(void *data) {
     sprintf(thread_name, "recvw-%d", thread_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
+    message_t *m = NULL;
+    int recv = 0;
 
     for (int i = 0; i < num_pkts; i++) {
         thread_data_t thr_data;
@@ -257,11 +259,10 @@ void *thread_receiver(void *data) {
         /*---- Read the message from the server into the buffer ----*/
         // TODO: support receive of variable reply-size requests
         conn_info_t *conn = conn_get_by_id(thr_data.conn_id);
-        message_t *m = NULL;
-        int recv;
 
         do {
-            recv = conn_recv(conn);
+            if (m == NULL)
+                recv = conn_recv(conn);
             m = conn_next_message(conn);
         } while (recv > 0 && m == NULL);
 
@@ -292,7 +293,7 @@ void *thread_receiver(void *data) {
                               (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
         usecs_elapsed[thread_id][idx(pkt_id)] =
             usecs - usecs_send[thread_id][idx(pkt_id)];
-        dw_log("req_id %u elapsed %ld us\n", pkt_id,
+        dw_log("thread_id %d sess_id % req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
                usecs_elapsed[thread_id][idx(pkt_id)]);
 
     skip:
