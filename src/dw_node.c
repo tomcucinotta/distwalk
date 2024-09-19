@@ -478,14 +478,14 @@ int process_single_message(req_info_t *req, int epollfd, thread_info_t *infos) {
             compute_for(cmd_get_opts(comp_opts_t, cmd)->comp_time_us);
             break;
         case FORWARD:
-        case MULTI_FORWARD:
+        case MULTI_FORWARD: {
             int to_skip = start_forward(req, m, cmd, epollfd, infos);
             if (to_skip == 0) {
                 fprintf(stderr, "Error: could not execute FORWARD\n");
                 return -1;
             }
             req->curr_cmd = cmd;
-            return 0;
+            return 0; }
         case REPLY:
             dw_log("Handling REPLY: req_id=%d\n", m->req_id);
             if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd, infos)) {
