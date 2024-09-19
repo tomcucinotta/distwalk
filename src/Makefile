@@ -1,3 +1,5 @@
+SHELL=/bin/bash
+
 CFLAGS=-Wall -O3 
 CFLAGS_DEBUG=-g -DDW_DEBUG -fprofile-arcs -ftest-coverage
 CFLAGS_TSAN=-g -O2 -fsanitize=thread
@@ -9,8 +11,8 @@ TSAN_PROGRAMS=dw_client_tsan dw_node_tsan
 DEBUG_PROGRAMS=dw_client_debug dw_node_debug
 MAIN_PROGRAMS=dw_client dw_node
 
-TOOLS = gcovr
-TOOLS_CHECKER := $(foreach exec,$(TOOLS),$(if $(shell command -v $(exec)),,$(error "No $(exec) in PATH. Please install it")))
+TOOLS=bash gcovr
+TOOLS_CHECKER:=$(foreach exec,$(TOOLS),$(if $(shell which $(exec)),,$(error "No $(exec) in PATH. Please install it")))
 
 COL_RED=\033[0;32m
 COL_GRN=\e[0;31m
