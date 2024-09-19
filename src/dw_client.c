@@ -293,7 +293,7 @@ void *thread_receiver(void *data) {
                               (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
         usecs_elapsed[thread_id][idx(pkt_id)] =
             usecs - usecs_send[thread_id][idx(pkt_id)];
-        dw_log("thread_id %d sess_id % req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
+        dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
                usecs_elapsed[thread_id][idx(pkt_id)]);
 
     skip:
