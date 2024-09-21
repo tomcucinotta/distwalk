@@ -238,7 +238,7 @@ void *thread_receiver(void *data) {
             if (rv != 0) {
                 close(clientSocket[thread_id]);
                 fprintf(stderr, "Connection to %s:%d failed: %s\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), strerror(errno));
-                return 0;
+                exit(EXIT_FAILURE);
             }
 
             /* spawn sender once connection is established */
