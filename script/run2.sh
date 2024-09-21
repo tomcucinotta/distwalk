@@ -45,10 +45,10 @@ echo "Killing existing instances on client $CLIENT if any..."
 run_on $CLIENT killall client node client_debug node_debug 2> /dev/null
 
 echo "Node setup:"
-run_on $SERVER sudo ./setup.sh
+run_on $SERVER sudo ./cpu-setup.sh
 
 echo "Client setup:"
-run_on $CLIENT sudo ./setup.sh
+run_on $CLIENT sudo ./cpu-setup.sh
 
 echo "Node NIC configuration and limits:"
 run_on $SERVER sudo ./tc.sh show
@@ -142,9 +142,9 @@ for PS in $PSS; do
 done
 
 echo "Client teardown:"
-run_on $CLIENT sudo ./teardown.sh
+run_on $CLIENT sudo ./cpu-teardown.sh
 
 echo "Node teardown:"
-run_on $SERVER sudo ./teardown.sh
+run_on $SERVER sudo ./cpu-teardown.sh
 
 echo "Done, quitting."
