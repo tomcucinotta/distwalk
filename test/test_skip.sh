@@ -9,7 +9,7 @@ node_bg &> $TMP
 client -C 500 --skip 1 -C 1000
 
 grep -q "COMPUTE.500us" $TMP
-grep -q "COMPUTE.1000us" $TMP || true
+! grep -q "COMPUTE.1000us" $TMP
 
 kill_all SIGINT
 
@@ -18,8 +18,8 @@ node_bg &> $TMP
 client -C 500 --skip 2 -C 1000 -C 1500 -C 2000
 
 grep -q "COMPUTE.500us" $TMP
-grep -q "COMPUTE.1000us" $TMP || true
-grep -q "COMPUTE.1500us" $TMP || true
+! grep -q "COMPUTE.1000us" $TMP
+! grep -q "COMPUTE.1500us" $TMP
 grep -q "COMPUTE.2000us" $TMP
 
 kill_all SIGINT

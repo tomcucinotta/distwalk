@@ -20,9 +20,14 @@ rm $tmp
 
 node_bg -a parent --nt 2
 
-elapsed=($(client -C 1000000 -p 1000000 --nt 4 | grep 'elapsed:' | sed -e 's/.*elapsed: //; s/ us.*//'))
+client -C 1000000 -p 1000000 --nt 4 &> $tmp
+
+elapsed=($(cat $tmp | grep 'elapsed:' | sed -e 's/.*elapsed: //; s/ us.*//'))
 
 [ ${elapsed[0]} -gt 999000 ] && [ $elapsed -lt 1001000 ]
 [ ${elapsed[1]} -gt 999000 ] && [ $elapsed -lt 1001000 ]
 [ ${elapsed[2]} -gt 1999000 ] && [ $elapsed -lt 2001000 ]
 [ ${elapsed[3]} -gt 1999000 ] && [ $elapsed -lt 2001000 ]
+
+kill_all SIGINT
+rm $tmp

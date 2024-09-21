@@ -8,9 +8,12 @@ kill_all() {
             kill -$sig $(pidof $p)
         fi
     done
+    wait
+
+    id=0
 }
 
-trap 'kill_all SIGINT; wait' SIGINT SIGTERM EXIT ERR
+trap 'kill_all SIGINT' SIGINT SIGTERM EXIT ERR
 set -e
 shopt -s expand_aliases
 
@@ -20,7 +23,6 @@ id=0
 
 run() {
     outdir=gcov/prog-$id
-    id=$[$id+1]
     mkdir -p $outdir
     curdir=$(pwd)
     (cd ../src; PATH="$PATH:." GCOV_PREFIX=$curdir/$outdir "$@")
@@ -28,38 +30,60 @@ run() {
 
 client() {
     run dw_client_debug "$@"
+    id=$[$id+1]
 }
 
 client_bg() {
     run dw_client_debug "$@" &
+    id=$[$id+1]
 }
 
 strace_client() {
     run strace -f dw_client_debug "$@"
+    id=$[$id+1]
 }
 
 node() {
     run dw_node_debug "$@"
+    id=$[$id+1]
 }
 
 node_bg() {
+    inc=1
+    if [ "$1" == "--wait-bind-num" ]; then
+        inc=$2
+        shift 2
+    fi
+    n_beg=$(netstat -anp --inet 2> /dev/null | grep -c dw_node || true)
+    n_exp=$[$n_beg+$inc]
     run dw_node_debug "$@" &
+    id=$[$id+1]
     for ((i=0; i<5; i++)); do
-        if [ $(netstat -anp --inet | grep dw_node_debug | wc -l) -eq $[ $id + 1 ] ]; then
+        n=$(netstat -anp --inet 2> /dev/null | grep -c dw_node || true)
+        if [ $n -eq $n_exp ]; then
             break;
         fi
-        echo "dw_node_debug not showing up on netstat yet, waiting..."
+        echo "dw_node_debug showing up $n times, not $n_exp ones up on netstat, waiting..."
         sleep 0.2
     done
 }
 
 strace_node_bg() {
+    inc=1
+    if [ "$1" == "--wait-bind-num" ]; then
+        inc=$2
+        shift 2
+    fi
+    n_beg=$(netstat -anp --inet 2> /dev/null | grep -c dw_node || true)
+    n_exp=$[ $n_beg + $inc ]
     run strace -f dw_node_debug "$@" &
+    id=$[$id+1]
     for ((i=0; i<5; i++)); do
-        if [ $(netstat -anp --inet | grep dw_node_debug | wc -l) -eq $[ $id + 1 ] ]; then
+        n=$(netstat -anp --inet 2> /dev/null | grep -c dw_node || true)
+        if [ $n -eq $n_exp ]; then
             break;
         fi
-        echo "dw_node_debug not showing up on netstat yet, waiting..."
+        echo "dw_node_debug showing up $n times, not $n_exp ones up on netstat on netstat, waiting..."
         sleep 0.2
     done
 }

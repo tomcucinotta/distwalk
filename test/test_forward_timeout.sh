@@ -21,6 +21,6 @@ sleep 2
 node_bg -b :7892
 sleep 2
 
-cat $tmp
-cat $tmp | grep -q "Got complete message (req_id: 0, req_size: 512, num: 0, status: 0)"
+grep -q "Got complete message (req_id: 0, req_size: 512, num: 0, status: 0)" $tmp
+
 rm $tmp

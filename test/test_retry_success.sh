@@ -9,5 +9,8 @@ client_bg --to=tcp://127.0.0.1:7894 --retry-num 10 --retry-period 1000 &> $tmp
 sleep 2
 node_bg -b :7894
 
-cat $tmp
-cat $tmp | grep -q "CONN allocated"
+sleep 1
+
+grep -q "CONN allocated" $tmp
+
+rm $tmp
