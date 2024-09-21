@@ -16,35 +16,34 @@ shopt -s expand_aliases
 
 export GCOV_PREFIX_STRIP=$(pwd | sed -e 's#/##' | tr "/" "\n" | wc -l)
 
+id=0
+
+run() {
+    outdir=gcov/prog-$id
+    id=$[$id+1]
+    mkdir -p $outdir
+    curdir=$(pwd)
+    (cd ../src; PATH="$PATH:." GCOV_PREFIX=$curdir/$outdir "$@")
+}
+
 client() {
-    id=$(ps aux | grep dw_client_debug | grep -v grep | wc -l)
-    mkdir -p gcov/client$id
-    GCOV_PREFIX=gcov/client$id ./dw_client_debug "$@"
+    run dw_client_debug "$@"
 }
 
 client_bg() {
-    id=$(ps aux | grep dw_client_debug | grep -v grep | wc -l)
-    mkdir -p gcov/client$id
-    GCOV_PREFIX=gcov/client$id ./dw_client_debug "$@" &
+    run dw_client_debug "$@" &
 }
 
 strace_client() {
-    sleep 0.5
-    id=$(ps aux | grep dw_client_debug | grep -v grep | wc -l)
-    mkdir -p gcov/client$id
-    GCOV_PREFIX=gcov/client$id strace -f ./dw_client_debug "$@"
+    run strace -f dw_client_debug "$@"
 }
 
 node() {
-    id=$(ps aux | grep dw_node_debug | grep -v grep | wc -l)
-    mkdir -p gcov/node$id
-    GCOV_PREFIX=gcov/node$id ./dw_node_debug "$@"
+    run dw_node_debug "$@"
 }
 
 node_bg() {
-    id=$(ps aux | grep dw_node_debug | grep -v grep | wc -l)
-    mkdir -p gcov/node$id
-    GCOV_PREFIX=gcov/node$id ./dw_node_debug "$@" &
+    run dw_node_debug "$@" &
     for ((i=0; i<5; i++)); do
         if [ $(netstat -anp --inet | grep dw_node_debug | wc -l) -eq $[ $id + 1 ] ]; then
             break;
@@ -55,9 +54,7 @@ node_bg() {
 }
 
 strace_node_bg() {
-    id=$(ps aux | grep dw_node_debug | grep -v grep | wc -l)
-    mkdir -p gcov/node$id
-    GCOV_PREFIX=gcov/node$id strace -f ./dw_node_debug "$@" &
+    run strace -f dw_node_debug "$@" &
     for ((i=0; i<5; i++)); do
         if [ $(netstat -anp --inet | grep dw_node_debug | wc -l) -eq $[ $id + 1 ] ]; then
             break;

@@ -14,21 +14,20 @@ MAIN_PROGRAMS=dw_client dw_node
 TOOLS=bash gcovr
 TOOLS_CHECKER:=$(foreach exec,$(TOOLS),$(if $(shell which $(exec)),,$(error "No $(exec) in PATH. Please install it")))
 
-COL_RED=\033[0;32m
-COL_GRN=\e[0;31m
-COL_DEF=\e[m
-
 main: $(MAIN_PROGRAMS)
 debug: $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
 tests: $(TEST_PROGRAMS)
 
 all: main debug tests
 
+run-tests: all
+	cd ../test && ./run-tests.sh
+
 doc:
 	doxygen
 
 clean:
-	rm -f *.o *.gcno *.gcda *.gcov *~ $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
+	rm -f *.o *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
 	rm -rf html latex gcov
 
 dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o connection.o request.o message.o address_utils.o
@@ -55,13 +54,6 @@ test_pqueue_debug: test_pqueue_debug.o priority_queue_debug.o
 	$(CC) -c $(CFLAGS_TSAN)  -o $@ $<
 
 TEST_SCRIPTS=$(wildcard test_*.sh)
-
-cov: all
-	@rm -rf *.gcda *.gcov log_tests.txt gcov/
-	@for test in $(TEST_PROGRAMS) $(TEST_SCRIPTS); do echo -n "TEST $$test: "; echo "\n\nTEST $$test:\n" >> log_tests.txt; if bash -c ./$$test >> log_tests.txt 2>&1; then echo "$(COL_RED)SUCCESS$(COL_DEF)"; else echo "$(COL_GRN)ERROR$(COL_DEF)"; fi; done
-	@sleep 1
-	@for d in gcov/*; do cp *.gcno $$d; done
-	@gcovr
 
 dep:
 	makedepend -- -Y *.c
