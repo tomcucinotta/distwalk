@@ -1,9 +1,10 @@
 SHELL=/bin/bash
 
-CFLAGS=-Wall -O3 
+CFLAGS=-Wall -O3 -fPIE -DVERSION="\"$$(grep -e '^VERSION=' stress-ng/Makefile | sed -e 's/VERSION=//')\""
 CFLAGS_DEBUG=-g -DDW_DEBUG -fprofile-arcs -ftest-coverage
 CFLAGS_TSAN=-g -O2 -fsanitize=thread
-LDLIBS=-pthread -lm
+#LDLIBS=-pthread -lm -lGLdispatch -ljpeg -lGL -lEGL -lbsd -lsctp -lgbm -lgmp -lapparmor -lz -lcrypt
+LDLIBS=-pthread -lm -lbsd
 LDLIBS_DEBUG=-pthread -lm -lgcov
 
 TEST_PROGRAMS=test_distrib test_distrib_debug test_ccmd test_ccmd_debug test_pqueue test_pqueue_debug test_timespec test_timespec_debug
@@ -12,6 +13,11 @@ DEBUG_PROGRAMS=dw_client_debug dw_node_debug
 MAIN_PROGRAMS=dw_client dw_node
 
 TOOLS=bash gcovr
+
+STRESSNG_GIT=https://github.com/ColinIanKing/stress-ng.git
+STRESSNG_SRCS=$(patsubst %,stress-ng/%,stress-cpu.c core-cpu-cache.c core-cpu.c core-numa.c core-net.c core-mwc.c core-setting.c core-opts.c core-log.c core-helper.c core-hash.c core-shim.c core-time.c core-sort.c core-parse-opts.c core-lock.c core-killpid.c)
+STRESSNG_OBJS=$(patsubst %.c,%.o,$(STRESSNG_SRCS)) stress-ng-stub.o
+.NOTINTERMEDIATE: $(STRESSNG_SRCS)
 
 main: $(MAIN_PROGRAMS)
 debug: $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
@@ -27,13 +33,21 @@ doc:
 	doxygen
 
 clean:
-	rm -f *.o *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
+	rm -f *.o stress-ng/*.o *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
 	rm -rf html latex gcov
+
+distclean: clean
+	rm -rf stress-ng
+
+stress-ng/%.c:
+	git clone --depth=1 $(STRESSNG_GIT)
+	cd stress-ng && make config.h git-commit-id.h
 
 dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o connection.o request.o message.o address_utils.o
 dw_client_debug: dw_client_debug.o ccmd_debug.o distrib_debug.o thread_affinity_debug.o connection_debug.o request_debug.o message_debug.o address_utils_debug.o
 dw_client_tsan: dw_client_tsan.o ccmd_tsan.o dw_client_tsan.o distrib_tsan.o thread_affinity_tsan.o connection.o request.o message.o address_utils_tsan.o
-dw_node: dw_node.o thread_affinity.o priority_queue.o request.o connection.o message.o address_utils.o
+dw_node: dw_node.o thread_affinity.o priority_queue.o request.o connection.o message.o address_utils.o $(STRESSNG_OBJS)
+	$(CXX) -o $@ $^ $(LDLIBS)
 dw_node_debug: dw_node_debug.o thread_affinity_debug.o priority_queue_debug.o request_debug.o connection_debug.o message_debug.o address_utils_debug.o
 dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request.o connection.o message.o address_utils_tsan.o
 
