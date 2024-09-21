@@ -2,6 +2,26 @@
 
 . common.sh
 
+## check syntax
+
+node_bg -a child
+kill_all SIGINT
+node_bg --accept-mode child
+kill_all SIGINT
+node_bg -a parent
+kill_all SIGINT
+node_bg --accept-mode parent
+kill_all SIGINT
+node_bg -a shared
+kill_all SIGINT
+node_bg --accept-mode shared
+kill_all SIGINT
+
+! node_bg -a xxx --num-threads=2
+! node_bg --accept-mode xxx --num-threads=2
+! node_bg -a child1 --num-threads=2
+! node_bg -a parent1 --num-threads=2
+
 ## check with netstat
 
 node_bg -a child --num-threads=2
