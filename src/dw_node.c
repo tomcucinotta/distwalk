@@ -28,7 +28,7 @@
 #include "timespec.h"
 #include "thread_affinity.h"
 #include "priority_queue.h"
-
+#include "sched_attr.h"
 #include "request.h"
 #include "connection.h"
 #include "address_utils.h"
@@ -94,6 +94,7 @@ typedef struct {
     int worker_id;
     int use_thread_affinity;
     int core_id; // core pinning
+    struct sched_attr sched_attrs;
 
     // load-balancing stats
     atomic_int active_conns;
@@ -846,6 +847,8 @@ void* conn_worker(void* args) {
         dw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
     }
 
+    sys_check(sched_setattr(0, &infos->sched_attrs, 0));
+
     struct epoll_event ev, events[MAX_EVENTS];
 
     if (accept_mode != AM_PARENT || infos == thread_infos) {
@@ -991,6 +994,7 @@ enum argp_node_option_keys {
     MAX_STORAGE_SIZE = 'm',
     THREAD_AFFINITY = 'c',
     NUM_THREADS = 0x101,
+    SCHED_POLICY = 0x102,
     SYNC,
     ODIRECT,
     NO_DELAY,
@@ -1008,6 +1012,7 @@ struct argp_node_arguments {
     char* thread_affinity_list;
     int num_threads;
     int no_delay;
+    struct sched_attr sched_attrs;
 };
 
 static struct argp_option argp_node_options[] = {
@@ -1022,11 +1027,12 @@ static struct argp_option argp_node_options[] = {
     {"num-threads",       NUM_THREADS,      "n", OPTION_ALIAS },
     {"sync",              SYNC,             "msec",                           0,  "Periodically sync the written data on disk" },
     {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access"},
-    {"thread-affinity",   THREAD_AFFINITY,  "auto|cX,cZ[,cA-cD[:step]]",            0,   "Thread-to-core pinning (automatic or user-defined list using taskset syntax)"},
-    {"no-delay",          NO_DELAY,         "n",                              0, "Set value of TCP_NODELAY socket option [currently not implemented]"},
+    {"thread-affinity",   THREAD_AFFINITY,  "auto|cX,cZ[,cA-cD[:step]]",      0,  "Thread-to-core pinning (automatic or user-defined list using taskset syntax)"},
+    {"sched-policy",      SCHED_POLICY,     "other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us", 0,  "Scheduling policy (defaults to other)"},
+    {"no-delay",          NO_DELAY,         "n",                              0,  "Set value of TCP_NODELAY socket option [currently not implemented]"},
     {"nd",                NO_DELAY,         "n", OPTION_ALIAS },
-    {"help",              HELP,              0,                               0, "Show this help message", 1 },
-    {"usage",             USAGE,             0,                               0, "Show a short usage message", 1 },
+    {"help",              HELP,              0,                               0,  "Show this help message", 1 },
+    {"usage",             USAGE,             0,                               0,  "Show a short usage message", 1 },
     { 0 }
 };
 
@@ -1088,6 +1094,39 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
             arguments->thread_affinity_list = arg;
         }
         break;
+    case SCHED_POLICY:
+        if (strncmp(arg, "other", 5) == 0) {
+            arguments->sched_attrs.sched_policy = SCHED_OTHER;
+            int val;
+            if (sscanf(arg + 5, ":%d", &val) == 1)
+                arguments->sched_attrs.sched_nice = val;
+            else
+                check(arg[5] == 0, "Wrong syntax to --sched-policy=other");
+        } else if (strncmp(arg, "rr", 2) == 0) {
+            arguments->sched_attrs.sched_policy = SCHED_RR;
+            int val;
+            int rv = sscanf(arg + 2, ":%d", &val);
+            check(rv == 1, "Wrong syntax for --sched-policy=rr");
+            arguments->sched_attrs.sched_priority = val;
+        } else if (strncmp(arg, "fifo", 4) == 0) {
+            arguments->sched_attrs.sched_policy = SCHED_FIFO;
+            int val;
+            int rv = sscanf(arg + 4, ":%d", &val);
+            check(rv == 1, "Wrong syntax for --sched-policy=fifo");
+            arguments->sched_attrs.sched_priority = val;
+        } else if (strncmp(arg, "dl", 2) == 0) {
+            arguments->sched_attrs.sched_policy = SCHED_DEADLINE;
+            unsigned long val, val2;
+            int rv = sscanf(arg + 2, ":%lu,%lu", &val,&val2);
+            check(rv == 2, "Wrong syntax for --sched-policy=dl");
+            arguments->sched_attrs.sched_runtime = val * 1000;
+            arguments->sched_attrs.sched_deadline = val2 * 1000;
+            arguments->sched_attrs.sched_period = val2 * 1000;
+        } else {
+            fprintf(stderr, "Wrong argument to --sched-policy option\n");
+            exit(EXIT_FAILURE);
+        }
+        break;
     default:
         return ARGP_ERR_UNKNOWN;
     }
@@ -1140,6 +1179,7 @@ int main(int argc, char *argv[]) {
     input_args.thread_affinity_list = NULL;    
     input_args.num_threads = 1;
     input_args.no_delay = 1;
+    input_args.sched_attrs = (struct sched_attr) { .size = sizeof(struct sched_attr), .sched_policy = SCHED_OTHER, .sched_flags = 0 };
 
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
     
@@ -1258,6 +1298,7 @@ int main(int argc, char *argv[]) {
         thread_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
         thread_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
         thread_infos[i].use_thread_affinity = input_args.use_thread_affinity;
+        thread_infos[i].sched_attrs = input_args.sched_attrs;
         
         if (i == 0) {
             thread_infos[i].statfd = signalfd(-1, &stat_sigmask, 0);
