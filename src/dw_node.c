@@ -152,38 +152,38 @@ typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
 accept_mode_t accept_mode = AM_CHILD;
 int listen_backlog = 5;
 
-void safe_write(int fd, unsigned char *buf, size_t len) {
+int safe_write(int fd, unsigned char *buf, size_t len) {
     while (len > 0) {
-        int sent;
-        if ((sent = write(fd, buf, len)) < 0) {
+        int written;
+        if ((written = write(fd, buf, len)) < 0) {
             perror("write() failed");
-            return;
+            return -1;
         }
-        buf += sent;
-        len -= sent;
+        buf += written;
+        len -= written;
     }
+
+    return 0;
 }
 
-size_t safe_read(int fd, unsigned char *buf, size_t len) {
-    size_t leftovers = len;
-
-    while (leftovers > 0) {
+int safe_read(int fd, unsigned char *buf, size_t len) {
+    while (len > 0) {
         int received;
-        if ((received = read(fd, buf, leftovers)) < 0) {
+        if ((received = read(fd, buf, len)) < 0) {
             perror("read() failed");
-            return leftovers;
+            return -1;
         }
 
         if (received == 0) {
-            fprintf(stderr, "read() EoF\n");
-            break;
+            lseek(fd, 0, SEEK_SET);
+            continue;
         }
 
         buf += received;
-        leftovers -= received;
+        len -= received;
     }
 
-    return leftovers;
+    return 0;
 }
 
 void insert_timeout(thread_info_t* infos, int req_id, int epollfd, int micros) {
@@ -419,20 +419,27 @@ void compute_for(unsigned long usecs) {
 
 unsigned long blk_size = 0;
 
-void store(storage_info_t* storage_info, unsigned char* buf, size_t bytes) {
+void store(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes) {
     // generate the data to be stored
-    if (storage_info->use_odirect) bytes = (bytes + blk_size - 1) / blk_size * blk_size;
-    dw_log("STORE: storing %lu bytes\n", bytes);
+    if (storage_info->use_odirect) total_bytes = (total_bytes + blk_size - 1) / blk_size * blk_size;
+    dw_log("STORE: storing %lu bytes\n", total_bytes);
 
     //write, otherwise over-write
-    if (storage_info->storage_offset + bytes > storage_info->max_storage_size) {
+    if (storage_info->storage_offset + total_bytes > storage_info->max_storage_size) {
         lseek(storage_info->storage_fd, 0, SEEK_SET);
         storage_info->storage_offset = 0;
     }
 
-    safe_write(storage_info->storage_fd, buf, bytes);
+    size_t stored_bytes = 0;
+    size_t bytes = 0;
+    while (stored_bytes < total_bytes) {
+        bytes = (total_bytes - stored_bytes > BUF_SIZE) ? BUF_SIZE : (total_bytes - stored_bytes);
+        check(safe_write(storage_info->storage_fd, buf, bytes) != -1);
 
-    storage_info->storage_offset += bytes;
+        stored_bytes += bytes;
+    }
+
+    storage_info->storage_offset += total_bytes;
 
     if (storage_info->periodic_sync_msec < 0)
         fsync(storage_info->storage_fd);
@@ -446,16 +453,22 @@ void store(storage_info_t* storage_info, unsigned char* buf, size_t bytes) {
     }
 }
 
-void load(storage_info_t* storage_info, unsigned char* buf, size_t bytes, size_t* leftovers) {
-    dw_log("LOAD: loading %lu bytes\n", bytes);
-
-    if (storage_info->storage_offset + bytes > storage_info->storage_eof) {
+void load(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes) {
+    dw_log("LOAD: loading %lu bytes\n", total_bytes);
+    if (storage_info->storage_offset + total_bytes > storage_info->storage_eof) {
         lseek(storage_info->storage_fd, 0, SEEK_SET);
         storage_info->storage_offset = 0;
     }
 
-    *leftovers = safe_read(storage_info->storage_fd, buf, bytes);
-    storage_info->storage_offset += bytes;
+    size_t read_bytes = 0;
+    size_t bytes = 0;
+    while (read_bytes < total_bytes) {
+        bytes = (total_bytes - read_bytes > BUF_SIZE) ? BUF_SIZE : (total_bytes - read_bytes);
+        check(safe_read(storage_info->storage_fd, buf, bytes) != -1);
+
+        read_bytes += bytes;
+        storage_info->storage_offset += bytes;
+    }
 }
 
 // this invalidates the conn_info_t in conns[] referring sock, if any
@@ -818,8 +831,7 @@ void* storage_worker(void* args) {
                 if (storage_cmd->cmd == STORE) {
                     store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd)->store_nbytes);
                 } else if (storage_cmd->cmd == LOAD) {
-                    size_t leftovers;
-                    load(infos, infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd)->load_nbytes, &leftovers);
+                    load(infos, infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd)->load_nbytes);
                 } else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");
                     continue;
