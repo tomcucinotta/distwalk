@@ -1026,7 +1026,7 @@ static struct argp_option argp_node_options[] = {
     {"nt",                NUM_THREADS,      "n",                              0,  "Number of threads dedicated to communication" },
     {"num-threads",       NUM_THREADS,      "n", OPTION_ALIAS },
     {"sync",              SYNC,             "msec",                           0,  "Periodically sync the written data on disk" },
-    {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access"},
+    {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access (bypass read/write cache)"},
     {"thread-affinity",   THREAD_AFFINITY,  "auto|cX,cZ[,cA-cD[:step]]",      0,  "Thread-to-core pinning (automatic or user-defined list using taskset syntax)"},
     {"sched-policy",      SCHED_POLICY,     "other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us", 0,  "Scheduling policy (defaults to other)"},
     {"no-delay",          NO_DELAY,         "n",                              0,  "Set value of TCP_NODELAY socket option [currently not implemented]"},
@@ -1080,7 +1080,7 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         arguments->periodic_sync_msec = atoi(arg);
         break;
     case MAX_STORAGE_SIZE:
-        arguments->max_storage_size = atoi(arg);
+        arguments->max_storage_size = atol(arg);
         break;
     case NUM_THREADS:
         arguments->num_threads = atoi(arg);
@@ -1173,7 +1173,7 @@ int main(int argc, char *argv[]) {
     input_args.protocol = TCP;
     input_args.storage_path[0] = '\0';
     input_args.periodic_sync_msec = -1;
-    input_args.max_storage_size = 1000000;
+    input_args.max_storage_size = 1024 * 1024 * 1024;
     input_args.use_odirect = 0;
     input_args.use_thread_affinity = 0;
     input_args.thread_affinity_list = NULL;    
