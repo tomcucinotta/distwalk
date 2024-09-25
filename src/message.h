@@ -25,23 +25,18 @@ typedef struct {
 } fwd_opts_t;
 
 typedef struct {
+    uint32_t offset;
     uint32_t load_nbytes;
 } load_opts_t;
 
 typedef struct {
+    uint32_t offset;
     uint32_t store_nbytes;
 } store_opts_t;
 
 typedef struct {
     uint32_t comp_time_us;
 } comp_opts_t;
-
-//TODO: consider whether to use this structs
-/*typedef struct {
-    uint64_t offset;
-    uint32_t pkt_size;   // size of forwarded packet
-} store_opts_t;
-*/
 
 typedef struct {
     uint32_t resp_size;   // REPLY pkt size

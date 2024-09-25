@@ -34,6 +34,8 @@ unsigned int default_compute_us = 1000;
 
 pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 1024, .std = NAN, .min = NAN, .max = NAN };
 pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 10000, .std = NAN, .min = NAN, .max = NAN };
+pd_spec_t load_offset_pd = { .prob = FIXED, .val = -1, .std = NAN, .min = NAN, .max = NAN };
+pd_spec_t store_offset_pd = { .prob = FIXED, .val = -1, .std = NAN, .min = NAN, .max = NAN };
 
 unsigned long default_resp_size = 512;
 
@@ -354,6 +356,8 @@ enum argp_client_option_keys {
     COMP_TIME = 'C',
     STORE_DATA = 'S',
     LOAD_DATA = 'L',
+    STORE_OFFSET = 0x101,
+    LOAD_OFFSET = 0x102,
     SKIP_CMD = 's',
     FORWARD_CMD = 'F',
     SCRIPT_FILENAME = 'f',
@@ -400,9 +404,11 @@ static struct argp_option argp_client_options[] = {
     { "rdr",                RAMP_DELTA_RATE,        "n", OPTION_ALIAS},
     { "rate-filename",      RATE_FILENAME,          "path/to/file.dat",                           0, "Load rates from a specified file"},
     { "rfn",                RATE_FILENAME,          "path/to/file.dat", OPTION_ALIAS},
-    { "comp-time",          COMP_TIME,              "usec|prob:field=val[,field=val]",               0, "Per-request processing time"},
-    { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val]",               0, "Per-store data payload size"},
-    { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",               0, "Per-load data payload size"},
+    { "comp-time",          COMP_TIME,              "usec|prob:field=val[,field=val]",            0, "Per-request processing time"},
+    { "store-offset",       STORE_OFFSET,           "nbytes|prob:field=val[,field=val]",          0, "Per-store file offset"},
+    { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val]",          0, "Per-store data payload size"},
+    { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
+    { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
     { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
     { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,nack=n][,timeout=n][,retry=n]",             0, "Send a number of FORWARD message to the ip:port list, wait for n replies"},
     { "send-pkt-size",      SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests"},
@@ -478,15 +484,23 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         assert(pd_parse(&val, arg));
         ccmd_add(ccmd, COMPUTE, &val);
         break; }
+    case LOAD_OFFSET: {
+        assert(pd_parse(&load_offset_pd, arg));
+        break; }
+    case STORE_OFFSET: {
+        assert(pd_parse(&store_offset_pd, arg));
+        break; }
     case STORE_DATA: {
         pd_spec_t val;
         assert(pd_parse(&val, arg));
         ccmd_add(ccmd, STORE, &val);
+        ccmd_last_action(ccmd)->pd_val2 = store_offset_pd;
         break; }
     case LOAD_DATA: {
         pd_spec_t val;
         assert(pd_parse(&val, arg));
         ccmd_add(ccmd, LOAD, &val);
+        ccmd_last_action(ccmd)->pd_val2 = load_offset_pd;
         break; }
     case SKIP_CMD: {
         pd_spec_t val = pd_build_fixed(1.0);

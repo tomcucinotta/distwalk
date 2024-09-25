@@ -419,15 +419,22 @@ void compute_for(unsigned long usecs) {
 
 unsigned long blk_size = 0;
 
-void store(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes) {
+void store(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes, uint32_t offset) {
     // generate the data to be stored
     if (storage_info->use_odirect) total_bytes = (total_bytes + blk_size - 1) / blk_size * blk_size;
-    dw_log("STORE: storing %lu bytes\n", total_bytes);
+    dw_log("STORE: storing %lu bytes from %u offset\n", total_bytes, offset);
 
-    //write, otherwise over-write
-    if (storage_info->storage_offset + total_bytes > storage_info->max_storage_size) {
-        lseek(storage_info->storage_fd, 0, SEEK_SET);
-        storage_info->storage_offset = 0;
+    if (offset != -1) {
+        if (lseek(storage_info->storage_fd, offset, SEEK_SET) < 0) {
+            perror("lseek() failed");
+            return; // @todo propagate error
+        }
+        storage_info->storage_offset = offset;
+    } else {
+        if (storage_info->storage_offset + total_bytes > storage_info->max_storage_size) {
+            lseek(storage_info->storage_fd, 0, SEEK_SET);
+            storage_info->storage_offset = 0;
+        }
     }
 
     size_t stored_bytes = 0;
@@ -453,11 +460,19 @@ void store(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes)
     }
 }
 
-void load(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes) {
-    dw_log("LOAD: loading %lu bytes\n", total_bytes);
-    if (storage_info->storage_offset + total_bytes > storage_info->storage_eof) {
-        lseek(storage_info->storage_fd, 0, SEEK_SET);
-        storage_info->storage_offset = 0;
+void load(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes, size_t offset) {
+    dw_log("LOAD: loading %lu bytes from %lu offset\n", total_bytes, offset);
+    if (offset != -1) {
+        if (lseek(storage_info->storage_fd, offset, SEEK_SET) < 0) {
+            perror("lseek() failed");
+            return; // @todo propagate error
+        }
+        storage_info->storage_offset = offset;
+    } else {
+        if (storage_info->storage_offset + total_bytes > storage_info->storage_eof) {
+            lseek(storage_info->storage_fd, 0, SEEK_SET);
+            storage_info->storage_offset = 0;
+        }
     }
 
     size_t read_bytes = 0;
@@ -467,8 +482,8 @@ void load(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes) 
         check(safe_read(storage_info->storage_fd, buf, bytes) != -1);
 
         read_bytes += bytes;
-        storage_info->storage_offset += bytes;
     }
+    storage_info->storage_offset += total_bytes;
 }
 
 // this invalidates the conn_info_t in conns[] referring sock, if any
@@ -829,9 +844,11 @@ void* storage_worker(void* args) {
                 dw_log("STORAGE cmd from conn_id %d\n", req_id);
 
                 if (storage_cmd->cmd == STORE) {
-                    store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd)->store_nbytes);
+                    store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd)->store_nbytes,
+                    cmd_get_opts(store_opts_t, storage_cmd)->offset);
                 } else if (storage_cmd->cmd == LOAD) {
-                    load(infos, infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd)->load_nbytes);
+                    load(infos, infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd)->load_nbytes,
+                    cmd_get_opts(store_opts_t, storage_cmd)->offset);
                 } else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");
                     continue;

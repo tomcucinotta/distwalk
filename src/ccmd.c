@@ -142,12 +142,14 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
 
         switch (curr->cmd) {
             case STORE:
+                cmd_get_opts(store_opts_t, cmd)->offset = pd_sample(&curr->pd_val2);
                 cmd_get_opts(store_opts_t, cmd)->store_nbytes = pd_sample(&curr->pd_val);
                 break;
             case COMPUTE:
                 cmd_get_opts(comp_opts_t, cmd)->comp_time_us = pd_sample(&curr->pd_val);
                 break;
             case LOAD:
+                cmd_get_opts(load_opts_t, cmd)->offset = pd_sample(&curr->pd_val2);
                 cmd_get_opts(load_opts_t, cmd)->load_nbytes = pd_sample(&curr->pd_val);
                 break;
             case REPLY: 

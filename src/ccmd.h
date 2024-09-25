@@ -17,6 +17,7 @@
 typedef struct ccmd_node_t {
     command_type_t cmd;
     pd_spec_t pd_val;
+    pd_spec_t pd_val2;
     fwd_opts_t fwd;
     reply_opts_t resp;
     int n_skip;
