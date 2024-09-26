@@ -419,7 +419,11 @@ void compute_for(unsigned long usecs) {
 
 unsigned long blk_size = 0;
 
-void store(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes, uint32_t offset) {
+void store(storage_info_t* storage_info, unsigned char* buf, store_opts_t *store_opts) {
+    size_t total_bytes = store_opts->store_nbytes;
+    uint32_t offset = store_opts->offset;
+    uint8_t sync = store_opts->sync;
+
     // generate the data to be stored
     if (storage_info->use_odirect) total_bytes = (total_bytes + blk_size - 1) / blk_size * blk_size;
     dw_log("STORE: storing %lu bytes from %u offset\n", total_bytes, offset);
@@ -447,7 +451,9 @@ void store(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes,
     }
     storage_info->storage_offset += total_bytes;
 
-    fsync(storage_info->storage_fd);
+    if (sync) {
+        fsync(storage_info->storage_fd);
+    }
 
     if (storage_info->storage_offset > storage_info->storage_eof) {
         storage_info->storage_eof = storage_info->storage_offset;
@@ -458,8 +464,11 @@ void store(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes,
     }
 }
 
-void load(storage_info_t* storage_info, unsigned char* buf, size_t total_bytes, size_t offset) {
-    dw_log("LOAD: loading %lu bytes from %lu offset\n", total_bytes, offset);
+void load(storage_info_t* storage_info, unsigned char* buf, load_opts_t *load_opts) {
+    size_t total_bytes = load_opts->load_nbytes;
+    uint32_t offset = load_opts->offset;
+
+    dw_log("LOAD: loading %lu bytes from %u offset\n", total_bytes, offset);
     if (offset != -1) {
         if (lseek(storage_info->storage_fd, offset, SEEK_SET) < 0) {
             perror("lseek() failed");
@@ -837,9 +846,9 @@ void* storage_worker(void* args) {
                 dw_log("STORAGE cmd from conn_id %d\n", req_id);
 
                 if (storage_cmd->cmd == STORE) {
-                    store(&(infos->storage_info), infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd)->store_nbytes, cmd_get_opts(store_opts_t, storage_cmd)->offset);
+                    store(&(infos->storage_info), infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd));
                 } else if (storage_cmd->cmd == LOAD) {
-                    load(&(infos->storage_info), infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd)->load_nbytes, cmd_get_opts(store_opts_t, storage_cmd)->offset);
+                    load(&(infos->storage_info), infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd));
                 } else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");
                     continue;
@@ -1045,7 +1054,7 @@ static struct argp_option argp_node_options[] = {
     {"nt",                NUM_THREADS,      "n",                              0,  "Number of threads dedicated to communication" },
     {"num-threads",       NUM_THREADS,      "n", OPTION_ALIAS },
     {"sync",              SYNC,             "msec",                           0,  "Periodically sync the written data on disk" },
-    {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access (bypass read/write cache)"},
+    {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access (bypass read/write OS caches)"},
     {"thread-affinity",   THREAD_AFFINITY,  "auto|cX,cZ[,cA-cD[:step]]",      0,  "Thread-to-core pinning (automatic or user-defined list using taskset syntax)"},
     {"sched-policy",      SCHED_POLICY,     "other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us", 0,  "Scheduling policy (defaults to other)"},
     {"no-delay",          NO_DELAY,         "n",                              0,  "Set value of TCP_NODELAY socket option [currently not implemented]"},

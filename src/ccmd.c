@@ -142,6 +142,7 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
 
         switch (curr->cmd) {
             case STORE:
+                *cmd_get_opts(store_opts_t, cmd) = curr->store;
                 cmd_get_opts(store_opts_t, cmd)->offset = pd_sample(&curr->pd_val2);
                 cmd_get_opts(store_opts_t, cmd)->store_nbytes = pd_sample(&curr->pd_val);
                 break;
@@ -149,6 +150,7 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
                 cmd_get_opts(comp_opts_t, cmd)->comp_time_us = pd_sample(&curr->pd_val);
                 break;
             case LOAD:
+                *cmd_get_opts(load_opts_t, cmd) = curr->load;
                 cmd_get_opts(load_opts_t, cmd)->offset = pd_sample(&curr->pd_val2);
                 cmd_get_opts(load_opts_t, cmd)->load_nbytes = pd_sample(&curr->pd_val);
                 break;
@@ -210,7 +212,7 @@ void ccmd_log(ccmd_t* q) {
 
         switch (curr->cmd) {
             case STORE:
-                sprintf(opts, "%sb", pd_str(&curr->pd_val));
+                sprintf(opts, "%sb,%s", pd_str(&curr->pd_val), curr->store.sync ? "sync" : "nosync");
                 break;
             case COMPUTE:
                 sprintf(opts, "%sus", pd_str(&curr->pd_val));

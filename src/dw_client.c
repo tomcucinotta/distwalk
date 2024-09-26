@@ -406,7 +406,7 @@ static struct argp_option argp_client_options[] = {
     { "rfn",                RATE_FILENAME,          "path/to/file.dat", OPTION_ALIAS},
     { "comp-time",          COMP_TIME,              "usec|prob:field=val[,field=val]",            0, "Per-request processing time"},
     { "store-offset",       STORE_OFFSET,           "nbytes|prob:field=val[,field=val]",          0, "Per-store file offset"},
-    { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val]",          0, "Per-store data payload size"},
+    { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val][,nosync]",0, "Per-store data payload size"},
     { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
     { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
@@ -490,11 +490,27 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case STORE_OFFSET: {
         assert(pd_parse(&store_offset_pd, arg));
         break; }
-    case STORE_DATA: {
-        pd_spec_t val;
-        assert(pd_parse(&val, arg));
-        ccmd_add(ccmd, STORE, &val);
-        ccmd_last_action(ccmd)->pd_val2 = store_offset_pd;
+    case STORE_DATA: {        
+        uint8_t sync = 1;
+        char* reserve;
+        char *tok = strtok_r(arg, ",", &reserve);
+        while (tok != NULL) {
+            if (strncmp(tok, "nosync", 6) == 0) {
+                sync = 0;
+            } else if (strncmp(tok, "sync", 4) == 0) {
+                sync = 1;
+            } else {
+                pd_spec_t val;
+                assert(pd_parse(&val, arg));
+                ccmd_add(ccmd, STORE, &val);
+                ccmd_last_action(ccmd)->pd_val2 = store_offset_pd;
+            }
+
+            tok = strtok_r(NULL, ",", &reserve);
+        }
+
+        ccmd_last_action(ccmd)->store.sync = sync;
+
         break; }
     case LOAD_DATA: {
         pd_spec_t val;

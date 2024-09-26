@@ -32,6 +32,7 @@ typedef struct {
 typedef struct {
     uint32_t offset;
     uint32_t store_nbytes;
+    uint8_t sync;
 } store_opts_t;
 
 typedef struct {
