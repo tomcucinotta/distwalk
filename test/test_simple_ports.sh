@@ -6,3 +6,4 @@ node_bg -b tcp://:7894
 ! client
 client --to=tcp://127.0.0.1:7894
 ! client --to=127.0.0.0
+client --to=:7894
