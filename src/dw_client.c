@@ -254,8 +254,8 @@ void *thread_receiver(void *data) {
             thr_data.conn_id = conn_id;
             thr_data.first_pkt_id = i,
             thr_data.num_send_pkts = pkts_per_session;
-            assert(pthread_create(&sender[thread_id], NULL, thread_sender,
-                                  (void *)&thr_data) == 0);
+            sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
+                                  (void *)&thr_data));
         }
 
         /*---- Read the message from the server into the buffer ----*/
@@ -437,6 +437,14 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     struct argp_client_arguments *arguments = state->input;
 
     switch(key) {
+    case ARGP_KEY_INIT: // Default values
+        strcpy(arguments->clienthostport, "0.0.0.0:0");
+        strcpy(arguments->nodehostport, DEFAULT_ADDR ":" DEFAULT_PORT);
+
+        arguments->num_sessions = 1;
+        arguments->num_threads = 1;
+        arguments->last_resp_size = pd_build_fixed(default_resp_size);
+        break;
     case HELP:
         argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
         break;
@@ -641,6 +649,51 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         no_delay = atoi(arg);
         assert(no_delay == 0 || no_delay == 1);
         break;
+    case ARGP_KEY_END: // post-parsing validity checks
+        addr_parse(arguments->clienthostport, &myaddr);
+        addr_parse(arguments->nodehostport, &serveraddr);
+
+        if (!use_period && !ramp_fname && (ramp_delta_rate <= 0 || ramp_step_secs <= 0 || ramp_num_steps <= 0)) {
+            ccmd_destroy(&ccmd);
+            argp_failure(state, 1, 0, "ramp-up parameters must all be positive integers, if ramp file is not specified");
+        }
+
+        if (ramp_step_secs != 0) {
+            if (ramp_fname != NULL) {
+                check(ramp_delta_rate == 0);
+                FILE *ramp_fid = fopen(ramp_fname, "r");
+                check(ramp_fid != NULL);
+                int cnt = 0;
+                for (ramp_num_steps = 0; !feof(ramp_fid);) {
+                    unsigned int r;
+                    int read_fields = fscanf(ramp_fid, "%u", &r);
+                    if (read_fields == 1) {
+                        check(ramp_num_steps < MAX_RATES);
+                        rates[ramp_num_steps] = r;
+                        cnt += r * ramp_step_secs;
+                        ramp_num_steps++;
+                    }
+                }
+                fclose(ramp_fid);
+                send_period_us_pd.val = 1000000.0 / rates[0];
+                if (num_pkts == 0 || num_pkts > cnt) num_pkts = cnt;
+            } else {
+                num_pkts = 0;
+                int r = 1000000 / send_period_us_pd.val;
+                for (int s = 0; s < ramp_num_steps; s++) {
+                    num_pkts += r * ramp_step_secs;
+                    r += ramp_delta_rate;
+                }
+            }
+        }
+
+        num_pkts = (num_pkts + arguments->num_sessions - 1) / arguments->num_sessions * arguments->num_sessions;
+        pkts_per_session = num_pkts / arguments->num_sessions;
+        if (num_pkts > MAX_PKTS || (use_per_session_output && pkts_per_session > MAX_PKTS)) {
+            ccmd_destroy(&ccmd);
+            argp_failure(state, 1, 0, "num_pkts: %ld > MAX_PKTS: %d, Overflow!", num_pkts, MAX_PKTS);
+        }
+        break;
     default:
         return ARGP_ERR_UNKNOWN;
     }
@@ -699,22 +752,14 @@ int script_parse(char *fname, struct argp_state *state) {
 int main(int argc, char *argv[]) {
     static struct argp argp = { argp_client_options, argp_client_parse_opt, 0, "Distwalk Client -- the client program \
                                                                                 \v NOTES: Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)" };
-    struct argp_client_arguments input_args;
-    
-    strcpy(input_args.clienthostport, "0.0.0.0:0");
-    strcpy(input_args.nodehostport, DEFAULT_ADDR ":" DEFAULT_PORT);
-
-    input_args.num_sessions = 1;
-    input_args.num_threads = 1;
-    input_args.last_resp_size = pd_build_fixed(default_resp_size);
     check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
-
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
 
     ccmd_init(&ccmd);
     conn_init();
     req_init();
 
+    struct argp_client_arguments input_args;
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
     
     // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
@@ -726,44 +771,6 @@ int main(int argc, char *argv[]) {
         pd_spec_t val = pd_build_fixed(default_compute_us);
         ccmd_add(ccmd, COMPUTE, &val);
     }
-
-    if (ramp_step_secs != 0) {
-        if (ramp_fname != NULL) {
-            check(ramp_delta_rate == 0);
-            FILE *ramp_fid = fopen(ramp_fname, "r");
-            check(ramp_fid != NULL);
-            int cnt = 0;
-            for (ramp_num_steps = 0; !feof(ramp_fid);) {
-                unsigned int r;
-                int read_fields = fscanf(ramp_fid, "%u", &r);
-                if (read_fields == 1) {
-                    check(ramp_num_steps < MAX_RATES);
-                    rates[ramp_num_steps] = r;
-                    cnt += r * ramp_step_secs;
-                    ramp_num_steps++;
-                }
-            }
-            fclose(ramp_fid);
-            send_period_us_pd.val = 1000000.0 / rates[0];
-            if (num_pkts == 0 || num_pkts > cnt) num_pkts = cnt;
-        } else {
-            num_pkts = 0;
-            int r = 1000000 / send_period_us_pd.val;
-            for (int s = 0; s < ramp_num_steps; s++) {
-                num_pkts += r * ramp_step_secs;
-                r += ramp_delta_rate;
-            }
-        }
-    }
-
-    addr_parse(input_args.nodehostport, &serveraddr);
-    addr_parse(input_args.clienthostport, &myaddr);
-
-    num_pkts = (num_pkts + input_args.num_sessions - 1) / input_args.num_sessions * input_args.num_sessions;
-    pkts_per_session = num_pkts / input_args.num_sessions;
-
-    assert(num_pkts <= MAX_PKTS ||
-           (use_per_session_output && pkts_per_session <= MAX_PKTS));
 
     printf("Configuration:\n");
     printf("  clienthost=%s\n", input_args.clienthostport);
@@ -807,8 +814,8 @@ int main(int argc, char *argv[]) {
     clock_gettime(clk_id, &ts_start);
 
     for (int i = 0; i < input_args.num_threads; i++)
-        assert(pthread_create(&receiver[i], NULL, thread_receiver,
-                              (void *)(unsigned long)i) == 0);
+        sys_check(pthread_create(&receiver[i], NULL, thread_receiver,
+                              (void *)(unsigned long)i));
 
     for (int i = 0; i < input_args.num_threads; i++)
         pthread_join(receiver[i], NULL);
