@@ -592,8 +592,8 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         }
 
         // TODO: customize forward-reply pkt size
-        ccmd_add(ccmd, REPLY, &val);
-        ccmd_last_reply(ccmd)->resp.n_ack = n_ack;
+        ccmd_node_t* reply_node = ccmd_add(ccmd, REPLY, &val);
+        reply_node->resp.n_ack = n_ack;
         break; }
     case SEND_REQUEST_SIZE:
         assert(pd_parse(&send_pkt_size_pd, arg));
