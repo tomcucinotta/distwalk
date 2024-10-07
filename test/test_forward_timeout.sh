@@ -22,4 +22,12 @@ sleep 1
 
 grep -q "received message: message (req_id: 0, req_size: 512, num: 0, status: 0)" $tmp
 
+
+kill_all SIGINT
+
+node_bg -b :7891
+node_bg -b :7892
+
+client --to :7891 -C 100 -F :7892 -C 200 -F :7893 -C 300 | grep -q "received message: message (req_id: 0, req_size: 512, num: 0, status: -1)"
+
 rm $tmp
