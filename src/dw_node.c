@@ -167,6 +167,7 @@ int safe_write(int fd, unsigned char *buf, size_t len) {
 }
 
 int safe_read(int fd, unsigned char *buf, size_t len) {
+    size_t len_on_last_seek = 0;
     while (len > 0) {
         int received;
         if ((received = read(fd, buf, len)) < 0) {
@@ -175,7 +176,10 @@ int safe_read(int fd, unsigned char *buf, size_t len) {
         }
 
         if (received == 0) {
+            if (len_on_last_seek > 0 && len_on_last_seek == len)
+                break;
             lseek(fd, 0, SEEK_SET);
+            len_on_last_seek = len;
             continue;
         }
 
@@ -487,6 +491,8 @@ void load(storage_info_t* storage_info, unsigned char* buf, load_opts_t *load_op
     while (read_bytes < total_bytes) {
         bytes = (total_bytes - read_bytes > BUF_SIZE) ? BUF_SIZE : (total_bytes - read_bytes);
         check(safe_read(storage_info->storage_fd, buf, bytes) != -1);
+        if (bytes == 0)
+            break;
 
         read_bytes += bytes;
     }
