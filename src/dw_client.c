@@ -144,37 +144,35 @@ void *thread_sender(void *data) {
             break;
         }
 
-        if (use_period) {
-            unsigned long period_ns = pd_sample(&send_period_us_pd) * 1000.0;
-            dw_log("period_ns=%lu\n", period_ns);
-            struct timespec ts_delta =
-                (struct timespec) { period_ns / 1000000000, period_ns % 1000000000 };
+        unsigned long period_ns = pd_sample(&send_period_us_pd) * 1000.0;
+        dw_log("period_ns=%lu\n", period_ns);
+        struct timespec ts_delta =
+            (struct timespec) { period_ns / 1000000000, period_ns % 1000000000 };
 
-            ts_now = ts_add(ts_now, ts_delta);
+        ts_now = ts_add(ts_now, ts_delta);
 
-            if (use_wait_spinning) {
-                struct timespec ts;
-                do {
-                    clock_gettime(clk_id, &ts);
-                } while (ts_leq(ts, ts_now));
-            } else {
-                sys_check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
-            }
+        if (use_wait_spinning) {
+            struct timespec ts;
+            do {
+                clock_gettime(clk_id, &ts);
+            } while (ts_leq(ts, ts_now));
         } else {
-            if (ramp_step_secs != 0 && pkt_id > 0) {
-                int step =
-                    usecs_send[thread_id][idx(pkt_id)] / 1000000 / ramp_step_secs;
-                int old_rate = 1000000.0 / send_period_us_pd.val;
-                int rate;
-                if (ramp_fname != NULL)
-                    rate = rates[(step < ramp_num_steps) ? step
-                                                        : (ramp_num_steps - 1)];
-                else
-                    rate = rate_start + step * ramp_delta_rate;
-                send_period_us_pd.val = 1000000.0 / rate;
-                if (old_rate != rate)
-                    dw_log("old_rate: %d, rate: %d\n", old_rate, rate);
-            }
+            sys_check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
+        }
+        if (ramp_step_secs != 0 && pkt_id > 0) {
+            int step =
+                usecs_send[thread_id][idx(pkt_id)] / 1000000 / ramp_step_secs;
+            int rate;
+            if (ramp_fname != NULL)
+                rate = rates[(step < ramp_num_steps) ? step
+                                                    : (ramp_num_steps - 1)];
+            else
+                rate = rate_start + step * ramp_delta_rate;
+            send_period_us_pd.val = 1000000.0 / rate;
+
+            int old_rate = 1000000.0 / send_period_us_pd.val;
+            if (old_rate != rate)
+                dw_log("old_rate: %d, rate: %d\n", old_rate, rate);
         }
     }
 
