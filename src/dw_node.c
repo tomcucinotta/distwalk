@@ -426,7 +426,7 @@ void store(storage_info_t* storage_info, unsigned char* buf, store_opts_t *store
 
     // generate the data to be stored
     if (storage_info->use_odirect) total_bytes = (total_bytes + blk_size - 1) / blk_size * blk_size;
-    dw_log("STORE: storing %lu bytes from %u offset\n", total_bytes, offset);
+    dw_log("STORE: storing %lu bytes from %d offset\n", total_bytes, (int) offset);
 
     if (offset != -1) {
         if (lseek(storage_info->storage_fd, offset, SEEK_SET) < 0) {
@@ -468,7 +468,7 @@ void load(storage_info_t* storage_info, unsigned char* buf, load_opts_t *load_op
     size_t total_bytes = load_opts->load_nbytes;
     uint32_t offset = load_opts->offset;
 
-    dw_log("LOAD: loading %lu bytes from %u offset\n", total_bytes, offset);
+    dw_log("LOAD: loading %lu bytes from %d offset\n", total_bytes, (int) offset);
     if (offset != -1) {
         if (lseek(storage_info->storage_fd, offset, SEEK_SET) < 0) {
             perror("lseek() failed");
@@ -1107,6 +1107,7 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         int flags = O_RDWR | O_CREAT | O_TRUNC;
         if (storage_worker_info.storage_info.use_odirect) flags |= O_DIRECT;
         sys_check(storage_worker_info.storage_info.storage_fd = open(storage_worker_info.storage_info.storage_path, flags, S_IRUSR | S_IWUSR));
+        sys_check(fallocate(storage_worker_info.storage_info.storage_fd, 0, 0, BUF_SIZE));
         break;
     case SYNC:
         arguments->periodic_sync_msec = atoi(arg);
