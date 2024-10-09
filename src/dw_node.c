@@ -1109,11 +1109,6 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
             exit(EXIT_FAILURE);
         }
         strcpy(storage_worker_info.storage_info.storage_path, arg);
-
-        int flags = O_RDWR | O_CREAT | O_TRUNC;
-        if (storage_worker_info.storage_info.use_odirect) flags |= O_DIRECT;
-        sys_check(storage_worker_info.storage_info.storage_fd = open(storage_worker_info.storage_info.storage_path, flags, S_IRUSR | S_IWUSR));
-        sys_check(fallocate(storage_worker_info.storage_info.storage_fd, 0, 0, BUF_SIZE));
         break;
     case SYNC:
         arguments->periodic_sync_msec = atoi(arg);
@@ -1218,8 +1213,11 @@ int main(int argc, char *argv[]) {
     input_args.num_threads = 1;
     input_args.no_delay = 1;
     input_args.sched_attrs = (struct sched_attr) { .size = sizeof(struct sched_attr), .sched_policy = SCHED_OTHER, .sched_flags = 0 };
-    
-    storage_worker_info.storage_info.storage_path[0] = '\0';
+
+    char *home_path = getenv("HOME");
+    check(home_path != NULL && strlen(home_path) + 10 < sizeof(storage_worker_info.storage_info));
+    strcpy(storage_worker_info.storage_info.storage_path, getenv("HOME"));
+    strcat(storage_worker_info.storage_info.storage_path, "/.dw_store");
     storage_worker_info.storage_info.storage_fd = -1;
 
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
@@ -1280,6 +1278,12 @@ int main(int argc, char *argv[]) {
 
     // Open storage file, if any
     if (storage_worker_info.storage_info.storage_path[0] != '\0') {
+        int flags = O_RDWR | O_CREAT | O_TRUNC;
+        if (storage_worker_info.storage_info.use_odirect)
+            flags |= O_DIRECT;
+        sys_check(storage_worker_info.storage_info.storage_fd = open(storage_worker_info.storage_info.storage_path, flags, S_IRUSR | S_IWUSR));
+        sys_check(fallocate(storage_worker_info.storage_info.storage_fd, 0, 0, BUF_SIZE));
+
         struct stat s;
         sys_check(fstat(storage_worker_info.storage_info.storage_fd, &s));
         blk_size = s.st_blksize;
