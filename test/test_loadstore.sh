@@ -6,8 +6,8 @@ TMP=$(mktemp /tmp/dw-store-XXX.dat)
 trace_log=/tmp/dw-log.txt
 
 node_bg -s $TMP
-client -S 65536
-[ $(du -b $TMP | cut -f1) -eq 65536 ]
+client -S 32000000
+[ $(du -b $TMP | cut -f1) -eq 32000000 ]
 
 kill_all SIGINT
 

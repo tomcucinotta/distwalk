@@ -5,9 +5,9 @@
 TMP=$(mktemp /tmp/dw-store-XXX.dat)
 
 node_bg -s $TMP --odirect
-client -S 65536
-[ $(du -b $TMP | cut -f1) -eq 65536 ]
+client -S 33554432
+[ $(du -b $TMP | cut -f1) -eq 33554432 ]
 
-client -L 65536
+client -L 33554432
 
 rm $TMP
