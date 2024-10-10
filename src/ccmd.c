@@ -212,7 +212,7 @@ void ccmd_log(ccmd_t* q) {
 
         switch (curr->cmd) {
             case STORE:
-                sprintf(opts, "%sb,%s", pd_str(&curr->pd_val), curr->store.sync ? "sync" : "nosync");
+                sprintf(opts, "%sb,%s", pd_str(&curr->pd_val), curr->store.wait_sync ? "sync" : "nosync");
                 break;
             case COMPUTE:
                 sprintf(opts, "%sus", pd_str(&curr->pd_val));

@@ -428,10 +428,12 @@ void compute_for(unsigned long usecs) {
 // (Essential, since O_DIRECT bypasses the page caches)
 unsigned long blk_size = 0;
 
-void store(storage_info_t* storage_info, unsigned char* buf, store_opts_t *store_opts) {
+void store(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store_opts) {
+    storage_info_t* storage_info = &(infos->storage_info);
+
     size_t total_bytes = store_opts->store_nbytes;
     uint32_t offset = store_opts->offset;
-    uint8_t sync = store_opts->sync;
+    uint8_t wait_sync = store_opts->wait_sync;
 
     // Round-up total_bytes to the nearest multiple of blk_size when using O_DIRECT
     if (storage_info->use_odirect) {
@@ -463,8 +465,15 @@ void store(storage_info_t* storage_info, unsigned char* buf, store_opts_t *store
     }
     storage_info->storage_offset += total_bytes;
 
-    if (sync) {
-        fsync(storage_info->storage_fd);
+    if (wait_sync) { // wait for periodic timer to be triggered
+        if (infos->periodic_sync_msec > 0) {
+            uint64_t val;
+            if (read(infos->timerfd, &val, sizeof(uint64_t)) < 0) {
+                perror("periodic sync read()");
+            }
+        } else {
+            fsync(storage_info->storage_fd);
+        }
     }
 
     if (storage_info->storage_offset > storage_info->storage_eof) {
@@ -476,7 +485,9 @@ void store(storage_info_t* storage_info, unsigned char* buf, store_opts_t *store
     }
 }
 
-void load(storage_info_t* storage_info, unsigned char* buf, load_opts_t *load_opts) {
+void load(storage_worker_info_t *infos, unsigned char* buf, load_opts_t *load_opts) {
+    storage_info_t* storage_info = &(infos->storage_info);
+
     size_t total_bytes = load_opts->load_nbytes;
     uint32_t offset = load_opts->offset;
 
@@ -865,9 +876,9 @@ void* storage_worker(void* args) {
                 dw_log("STORAGE cmd from conn_id %d\n", req_id);
 
                 if (storage_cmd->cmd == STORE) {
-                    store(&(infos->storage_info), infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd));
+                    store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd));
                 } else if (storage_cmd->cmd == LOAD) {
-                    load(&(infos->storage_info), infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd));
+                    load(infos, infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd));
                 } else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");
                     continue;

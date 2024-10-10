@@ -515,7 +515,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             tok = strtok_r(NULL, ",", &reserve);
         }
 
-        ccmd_last_action(ccmd)->store.sync = sync;
+        ccmd_last_action(ccmd)->store.wait_sync = sync;
 
         break; }
     case LOAD_DATA: {
