@@ -421,6 +421,10 @@ void compute_for(unsigned long usecs) {
     } while (ts_sub_us(ts_end, ts_beg) < usecs);
 }
 
+// Needed to perform writes with O_DIRECT and ensure that:
+// 1) the store buffer is aligned
+// 2) the write is divisible by the block size
+// (Essential, since O_DIRECT bypasses the page caches)
 unsigned long blk_size = 0;
 
 void store(storage_info_t* storage_info, unsigned char* buf, store_opts_t *store_opts) {
@@ -428,8 +432,11 @@ void store(storage_info_t* storage_info, unsigned char* buf, store_opts_t *store
     uint32_t offset = store_opts->offset;
     uint8_t sync = store_opts->sync;
 
-    // generate the data to be stored
-    if (storage_info->use_odirect) total_bytes = (total_bytes + blk_size - 1) / blk_size * blk_size;
+    // Round-up total_bytes to the nearest multiple of blk_size when using O_DIRECT
+    if (storage_info->use_odirect) {
+        total_bytes = (total_bytes + blk_size - 1) / blk_size * blk_size;
+        offset = (offset + blk_size - 1) / blk_size * blk_size;
+    }
     dw_log("STORE: storing %lu bytes from %d offset\n", total_bytes, (int) offset);
 
     if (offset != -1) {
@@ -1290,8 +1297,12 @@ int main(int argc, char *argv[]) {
         dw_log("blk_size = %lu\n", blk_size);
 
         storage_worker_info.terminationfd = signalfd(-1, &term_sigmask, 0);
-        storage_worker_info.store_buf = malloc(BUF_SIZE);
 
+        if (storage_worker_info.storage_info.use_odirect) { // block-aligned buffer
+            sys_check(posix_memalign((void**) &storage_worker_info.store_buf, blk_size, BUF_SIZE));
+        } else {
+            storage_worker_info.store_buf = malloc(BUF_SIZE);
+        }
         for (int i = 0; i < input_args.num_threads; i++) {
             // conn_worker -> storage_worker
             if (pipe(fds[i]) == -1) {
