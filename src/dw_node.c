@@ -90,7 +90,6 @@ typedef struct {
     int store_replyfd; // read
 
     int worker_id;
-    int use_thread_affinity;
     int core_id; // core pinning
     struct sched_attr sched_attrs;
 
@@ -117,6 +116,8 @@ typedef struct {
     // communication with conn worker
     int storefd[MAX_THREADS]; // read
     int store_replyfd[MAX_THREADS]; //write
+
+    int core_id; // core pinning
 
     storage_info_t storage_info;
     unsigned char *store_buf;
@@ -757,6 +758,11 @@ void* storage_worker(void* args) {
     sprintf(thread_name, "storagew");
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
+    if (infos->core_id >= 0) {
+        sys_check(aff_pin_to(infos->core_id));
+        dw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
+    }
+
     int epollfd;
     struct epoll_event ev, events[MAX_EVENTS];
 
@@ -884,7 +890,7 @@ void* conn_worker(void* args) {
     sprintf(thread_name, "connw-%d", infos->worker_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
-    if (infos->use_thread_affinity) {
+    if (infos->core_id >= 0) {
         sys_check(aff_pin_to(infos->core_id));
         dw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
     }
@@ -1342,7 +1348,6 @@ int main(int argc, char *argv[]) {
         conn_worker_infos[i].terminationfd = signalfd(-1, &term_sigmask, 0);
         conn_worker_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
         conn_worker_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
-        conn_worker_infos[i].use_thread_affinity = input_args.use_thread_affinity;
         conn_worker_infos[i].sched_attrs = input_args.sched_attrs;
         
         if (i == 0) {
@@ -1356,6 +1361,8 @@ int main(int argc, char *argv[]) {
             conn_worker_infos[i].core_id = core_it;
 
             aff_it_next(&core_it, &mask, nproc);
+        } else {
+            conn_worker_infos[i].core_id = -1;
         }
 
         conn_worker_infos[i].worker_id = i;
@@ -1375,6 +1382,12 @@ int main(int argc, char *argv[]) {
 
     // Init storage thread
     if (storage_worker_info.storage_info.storage_path[0] != '\0') {
+        if (input_args.use_thread_affinity) {
+            storage_worker_info.core_id = core_it;
+            aff_it_next(&core_it, &mask, nproc);
+        } else {
+            storage_worker_info.core_id = -1;
+        }
         sys_check(pthread_create(&storer, NULL, storage_worker, (void *)&storage_worker_info));
     }
 
