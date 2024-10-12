@@ -5,6 +5,7 @@ COL_GRN='\e[0;31m'
 COL_DEF='\e[m'
 
 rm -rf *.gcda *.gcov log_tests.txt gcov/ ../src/*.gcda ../src/gcov/
+trap 'exit' SIGINT SIGTERM
 
 #cp ../src/dw_client ../src/dw_client_debug ../src/dw_client_tsan ../src/dw_node ../src/dw_node_debug ../src/dw_node_tsan .
 

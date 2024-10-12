@@ -12,7 +12,6 @@ DEBUG_PROGRAMS=dw_client_debug dw_node_debug
 MAIN_PROGRAMS=dw_client dw_node
 
 TOOLS=bash gcovr
-TOOLS_CHECKER:=$(foreach exec,$(TOOLS),$(if $(shell which $(exec)),,$(error "No $(exec) in PATH. Please install it")))
 
 main: $(MAIN_PROGRAMS)
 debug: $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
@@ -21,6 +20,7 @@ tests: $(TEST_PROGRAMS)
 all: main debug tests
 
 run-tests: all
+	$(foreach exec,$(TOOLS),$(if $(shell which $(exec)),,$(error "No $(exec) in PATH. Please install it")))
 	cd ../test && ./run-tests.sh
 
 doc:
