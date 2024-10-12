@@ -440,7 +440,6 @@ void store(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store
         total_bytes = (total_bytes + blk_size - 1) / blk_size * blk_size;
         offset = (offset + blk_size - 1) / blk_size * blk_size;
     }
-    dw_log("STORE: storing %lu bytes from %d offset\n", total_bytes, (int) offset);
 
     if (offset != -1) {
         if (lseek(storage_info->storage_fd, offset, SEEK_SET) < 0) {
@@ -453,7 +452,10 @@ void store(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store
             lseek(storage_info->storage_fd, 0, SEEK_SET);
             storage_info->storage_offset = 0;
         }
-    }
+    }  
+
+    dw_log("STORE: storing %lu bytes from %d offset\n", total_bytes, (int) storage_info->storage_offset);
+
 
     size_t stored_bytes = 0;
     size_t bytes = 0;
