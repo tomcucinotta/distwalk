@@ -811,14 +811,20 @@ int main(int argc, char *argv[]) {
     // Remember in ts_start the abs start time of the experiment
     clock_gettime(clk_id, &ts_start);
 
-    for (int i = 0; i < input_args.num_threads; i++)
-        sys_check(pthread_create(&receiver[i], NULL, thread_receiver,
-                              (void *)(unsigned long)i));
+    // Run
+    if (input_args.num_threads == 1) {
+        thread_receiver((void*) (unsigned long) 0);
+    } else {
+        // Init worker threads
+        for (int i = 0; i < input_args.num_threads; i++) {
+            sys_check(pthread_create(&receiver[i], NULL, thread_receiver, (void *)(unsigned long) i));
+        }
 
-    for (int i = 0; i < input_args.num_threads; i++)
-        pthread_join(receiver[i], NULL);
+        for (int i = 0; i < input_args.num_threads; i++)
+            pthread_join(receiver[i], NULL);
 
-    dw_log("Joined sender and receiver threads, exiting\n");
+        dw_log("Joined sender and receiver threads, exiting\n");
+    }
 
     for (int i = 0; i < input_args.num_threads; i++) {
         free(usecs_send[i]);
