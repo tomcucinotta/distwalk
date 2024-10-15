@@ -1,0 +1,12 @@
+nodes:
+  hosts:
+    ravenclaw: 
+      ansible_user: randreoli
+    treebeard:
+      ansible_user: randreoli
+    cplex3:
+      ansible_user: randreoli
+clients:
+  hosts:
+    theoden:
+      ansible_user: randreoli

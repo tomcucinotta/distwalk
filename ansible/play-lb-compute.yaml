@@ -1,0 +1,21 @@
+- import_playbook: dw-startup.yaml
+
+- name: Setup DistWalk clients
+  hosts: clients
+  tasks:
+    - name: Run DistWalk workload
+      command: /tmp/dw_src/dw_client --to pcroom1:7891 -C unif:min=1000,max=100000 -r 50 -n 400 --ns 5
+      register: out
+
+    - name: Delete previous .log and .csv files
+      shell: rm -rf /tmp/*.{log,csv}
+      delegate_to: localhost
+
+    - name: Print output to file
+      copy:
+        content: "{{ out.stdout }}"
+        dest: "/tmp/play-lb-compute-{{ ansible_hostname }}-c{{ num_client }}-n{{ num_node }}.log"
+      delegate_to: localhost
+  vars:
+    num_client: "{{ ansible_play_hosts | length }}"
+    num_node:   "{{ groups['nodes'] | length }}"

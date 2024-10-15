@@ -1,0 +1,18 @@
+- import_playbook: dw-startup.yaml
+
+- name: Setup DistWalk clients
+  hosts: clients
+  tasks:
+    - name: Run workload (wc=1)
+      command: /tmp/dw_src/dw_client --to pcroom17 -C 1000 -F pcroom18,pcroom19,pcroom20,nack=1 -C 1000 -S 10000 -C 100 -n 1
+      register: out1
+
+    - name: Run workload (wc=3)
+      command: /tmp/dw_src/dw_client --to pcroom17 -C 1000 -F pcroom18,pcroom19,pcroom20,nack=3 -C 1000 -S 10000 -C 100 -n 1
+      register: out2
+
+    - name: Get result (wc=1)
+      debug: var=out1.stdout
+
+    - name: Get result (wc=3)
+      debug: var=out2.stdout

@@ -1,0 +1,8 @@
+nodes:
+  hosts:
+    ravenclaw: 
+      ansible_user: randreoli
+clients:
+  hosts:
+    treebeard:
+      ansible_user: randreoli

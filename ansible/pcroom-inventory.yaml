@@ -1,0 +1,22 @@
+servers:
+  hosts:
+    pcroom1:
+      ansible_user: adm-pcroom
+    pcroom2:
+      ansible_user: adm-pcroom
+    pcroom13:
+      ansible_user: adm-pcroom
+    pcroom14:
+      ansible_user: adm-pcroom
+    pcroom15:
+      ansible_user: adm-pcroom
+    pcroom16:
+      ansible_user: adm-pcroom
+    pcroom17:
+      ansible_user: adm-pcroom
+    pcroom18:
+      ansible_user: adm-pcroom
+    pcroom19:
+      ansible_user: adm-pcroom
+    pcroom20:
+      ansible_user: adm-pcroom

@@ -1,0 +1,16 @@
+clients:
+  hosts:
+    pcroom1: 
+      ansible_user: adm-pcroom
+
+# NOTE: these are accessible only from pcroom1 as control node
+nodes:
+  hosts:
+    pcroom17:
+      ansible_user: adm-pcroom
+    pcroom18:
+      ansible_user: adm-pcroom
+    pcroom19:
+      ansible_user: adm-pcroom
+    pcroom20:
+      ansible_user: adm-pcroom

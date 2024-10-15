@@ -1,0 +1,36 @@
+loadbalancer:
+  hosts:
+    pcroom1:
+      ansible_user: adm-pcroom
+
+nodes:
+  hosts:
+    pcroom14:
+    pcroom15:
+    pcroom16:
+    pcroom17:
+    pcroom18:
+    pcroom19:
+    pcroom20:
+  vars:
+    ansible_user: adm-pcroom
+
+interactive_clients:
+  hosts:
+    pcroom10:
+    pcroom11:
+    pcroom12:
+    pcroom13:
+  vars:
+    ansible_user: adm-pcroom
+
+batch_clients:
+  hosts:
+    pcroom9:
+  vars:
+    ansible_user: adm-pcroom
+ 
+clients:
+  children:
+    interactive_clients:
+    batch_clients:

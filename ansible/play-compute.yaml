@@ -1,0 +1,11 @@
+- import_playbook: dw-startup.yaml
+
+- name: Setup DistWalk clients
+  hosts: clients
+  tasks:
+    - name: Run workload
+      command: /tmp/dw_src/dw_client --to pcroom1:7891 -C 100000
+      register: out
+    
+    - name: Get result
+      debug: var=out.stdout

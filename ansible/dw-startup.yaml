@@ -1,0 +1,85 @@
+- name: Common setup
+  hosts: all
+  tasks:
+    - name: Install gcc-10
+      apt:
+        name: gcc-10
+        state: present
+      become: yes
+    - name: Install gcc-10 alternative
+      command: update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10
+      become: yes
+
+    - name: Transfer DistWalk source files
+      synchronize:
+        src: ../src/
+        dest: /tmp/dw_src/
+        rsync_opts:
+          - "--chmod=F755"
+          - "--include='*.h'"
+          - "--include='*.c'"
+          - "--include='Makefile'"
+          - "--exclude='*'" # exclude all other files
+
+    - name: Compile DistWalk
+      make:
+        chdir: /tmp/dw_src/
+        target: all
+
+    #- name: Kill running dw_node on same machine
+    #  shell: kill -2 `pidof dw_node`
+    #  ignore_errors: true
+
+    #- name: Kill running dw_client on same machine
+    #  shell: kill -2 `pidof dw_node`
+    #  ignore_errors: true
+
+- name: Setup DistWalk nodes
+  hosts: nodes
+  become: yes
+  tasks:
+   - name: Transfer DistWalk service file
+     template:
+       src: services/node.service
+       dest: /etc/systemd/system/node.service
+       owner: root
+       group: root
+
+   - name: Install DistWalk node service
+     systemd:
+       name: node.service
+       state: restarted
+       daemon_reload: yes
+   - name: Check if dw_node ready
+     command: lsof -i :7891
+     register: port_check
+     retries: 10
+     delay: 1
+     until: port_check.rc == 0
+
+- name: Setup DistWalk clients
+  hosts: clients
+  become: yes
+  tasks:
+   - name: Ensure local DistWalk node service is stopped
+     systemd:
+       name: node.service
+       enabled: no
+       state: stopped
+     register: node_service_stop
+     failed_when: 
+       - node_service_stop.failed == true
+       - '"Could not find the requested service" not in node_service_stop.msg'
+   - name: Ensure local DistWalk client service is stopped
+     systemd:
+       name: client.service
+       enabled: no
+       state: stopped
+     register: client_service_stop
+     failed_when:
+       - client_service_stop.failed == true
+       - '"Could not find the requested service" not in client_service_stop.msg'
+   - name: Ensure nodes are reachable
+     command: /tmp/dw_src/dw_client --to "{{ item }}"
+     timeout: 5
+     with_items: "{{ groups['nodes'] }}"

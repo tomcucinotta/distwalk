@@ -1,0 +1,55 @@
+- hosts: all
+  tasks:
+    - name: Install ipvs
+      apt: 
+        name: ipvsadm
+        state: present
+      become: yes
+
+- hosts: loadbalancer
+  tasks:
+    - name: Clear previous virtual service 
+      command: ipvsadm -D -t "{{ ansible_hostname }}":7891
+      become: yes
+      ignore_errors: true
+
+    - name: Create virtual service (i.e., RR load balancer)
+      command: ipvsadm -A -t "{{ ansible_hostname }}":7891 -s rr
+      become: yes
+
+    - name: Connect real services
+      command: ipvsadm -a -t "{{ansible_hostname}}":7891 -r "{{ item }}":7891 -m
+      with_items: "{{ groups['nodes'] }}"
+      become: yes
+
+    - name: Check, and eventually add DNAT post-routing rule   
+      block:
+        - name: Check if DNAT post-routing rule exists
+          command: iptables -t nat -C POSTROUTING -o wlp2s0 -j MASQUERADE
+          become: yes
+      rescue:
+        - name: Add DNAT post-routing rule
+          command: iptables -t nat -A POSTROUTING -o wlp2s0 -j MASQUERADE
+          become: yes
+
+#- hosts: clients
+#  become: yes
+#  tasks:
+#   - name: Transfer SSH Tunneling service file
+#     template:
+#       src: ssh-tunnel.service
+#       dest: /etc/systemd/system/ssh-tunnel.service
+#       owner: root
+#       group: root
+#
+#   - name: Install SSH Tunneling service
+#     systemd:
+#       state: restarted
+#       name: ssh-tunnel.service
+#       daemon_reload: yes
+#   - name: Check if SSH Tunneling ready
+#     command: lsof -i :7891
+#     register: port_check
+#     retries: 10
+#     delay: 1
+#     until: port_check.rc == 0

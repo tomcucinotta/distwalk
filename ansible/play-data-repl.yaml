@@ -1,0 +1,75 @@
+#- import_playbook: dw-startup.yaml
+#- import_playbook: play-lb-teardown.yaml
+
+- name: Setup DistWalk clients
+  hosts: pcroom1
+  vars:
+    - rate: 5
+    - num_pkt: 30
+  tasks:
+    - name: Run workload on single-system (no nack)
+      command: /tmp/dw_src/dw_client --to pcroom1 -S 10000,sync -r "{{ rate }}" -n "{{ num_pkt }}"
+      register: out1
+    - name: Print output to file
+      copy:
+        content: "{{out1.stdout}}"
+        dest: /tmp/play-data-repl-n1-nostress.log
+      delegate_to: localhost
+
+
+    - name: Run workload on 2-node distributed system (nack=1 only)
+      command: /tmp/dw_src/dw_client --to pcroom1 -F pcroom17,nack=1 -S 10000,sync -r "{{ rate }}" -n "{{ num_pkt }}"
+      register: out2
+    - name: Print output to file
+      copy:
+        content: "{{out2.stdout}}"
+        dest: /tmp/play-data-repl-n2-nostress.log
+      delegate_to: localhost
+
+
+    - name: Run workload on 3-node distributed system (nack=1)
+      command: /tmp/dw_src/dw_client --to pcroom1 -F pcroom15,pcroom17,nack=1 -S 10000,sync -r "{{ rate }}" -n "{{ num_pkt }}"
+      register: out3
+    - name: Print output to file
+      copy:
+        content: "{{out3.stdout}}"
+        dest: /tmp/play-data-repl-n3-nack1-nostress.log
+      delegate_to: localhost
+
+    - name: Run workload on 3-node distributed system (nack=2)
+      command: /tmp/dw_src/dw_client --to pcroom1 -F pcroom15,pcroom17,nack=2 -S 10000,sync -r "{{ rate }}" -n "{{ num_pkt }}"
+      register: out4
+    - name: Print output to file
+      copy:
+        content: "{{out4.stdout}}"
+        dest: /tmp/play-data-repl-n3-nack2-nostress.log
+      delegate_to: localhost
+
+
+    - name: Run workload on 4-node distributed system (nack=1)
+      command: /tmp/dw_src/dw_client --to pcroom1 -F pcroom15,pcroom17,pcroom18,nack=1 -S 10000,sync -r "{{ rate }}" -n "{{ num_pkt }}"
+      register: out5
+    - name: Print output to file
+      copy:
+        content: "{{out5.stdout}}"
+        dest: /tmp/play-data-repl-n4-nack1-nostress.log
+      delegate_to: localhost
+
+    - name: Run workload on 4-node distributed system (nack=2)
+      command: /tmp/dw_src/dw_client --to pcroom1 -F pcroom15,pcroom17,pcroom18,nack=2 -S 10000,sync -r "{{ rate }}" -n "{{ num_pkt }}"
+      register: out6
+    - name: Print output to file
+      copy:
+        content: "{{out6.stdout}}"
+        dest: /tmp/play-data-repl-n4-nack2-nostress.log
+      delegate_to: localhost
+
+    - name: Run workload on 4-node distributed system (nack=3)
+      command: /tmp/dw_src/dw_client --to pcroom1 -F pcroom15,pcroom17,pcroom18,nack=3 -S 10000,sync -r "{{ rate }}" -n "{{ num_pkt }}"
+      register: out7
+    - name: Print output to file
+      copy:
+        content: "{{out7.stdout}}"
+        dest: /tmp/play-data-repl-n4-nack3-nostress.log
+      delegate_to: localhost
+

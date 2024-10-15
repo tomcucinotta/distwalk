@@ -1,0 +1,20 @@
+# Copy this in /etc/systemd/system to configure SSH tunneling to the load balancer gateway
+
+[Unit]
+Description=SSH Tunneling service
+After=network.target network-online.target remote-fs.target
+
+[Service]
+Type=simple
+RemainAfterExit=yes
+User=adm-pcroom
+
+#ExecStartPre=ssh-keygen -R pcroom1
+ExecStart=ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -f pcroom1 -L 7891:pcroom1:7891 -N
+ExecStop=/bin/kill -s SIGINT -$MAINPID > /dev/null
+
+TimeoutSec=300
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

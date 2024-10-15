@@ -1,0 +1,20 @@
+# Copy this in /etc/systemd/system to configure dw_node as a systemd service
+
+[Unit]
+Description=DistWalk node service
+After=network.target network-online.target remote-fs.target
+
+[Service]
+Type=simple
+RemainAfterExit=yes
+User=%u
+
+#ExecStartPre=/bin/kill -s SIGINT `pidof dw_node` > /dev/null
+ExecStart=/tmp/dw_src/dw_node -b "%H"
+ExecStop=/bin/kill -s SIGINT -$MAINPID > /dev/null
+
+TimeoutSec=300
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

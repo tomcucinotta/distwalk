@@ -1,0 +1,24 @@
+- import_playbook: dw-startup.yaml
+
+- name: Setup DistWalk clients
+  hosts: clients
+  tasks:
+    - name: Run workload (Compute)
+      command: /tmp/dw_src/dw_client --to pcroom17 -C 10000 -F pcroom18 -C 10000 -r 10 -n 50
+      register: out1
+
+    - name: Run workload (Store)
+      command: /tmp/dw_src/dw_client --to pcroom17 -S 10000 -F pcroom18 -S 10000 -r 10 -n 50
+      register: out2
+
+    - name: Print output to file (Compute)
+      copy:
+        content: "{{out1.stdout}}"
+        dest: /tmp/virt-compute.log
+      delegate_to: localhost
+
+    - name: Print output to file (Store)
+      copy:
+        content: "{{out2.stdout}}"
+        dest: /tmp/virt-store.log
+      delegate_to: localhost

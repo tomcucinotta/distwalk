@@ -1,0 +1,70 @@
+- import_playbook: dw-startup.yaml
+
+- name: Setup DistWalk clients
+  hosts: interactive_clients
+  become: yes
+  tasks:
+   - name: Transfer DistWalk service file
+     template:
+       src: services/interactive-client.service
+       dest: /etc/systemd/system/client.service
+       owner: root
+       group: root
+
+- name: Setup DistWalk batch clients
+  hosts: batch_clients
+  become: yes
+  tasks:
+   - name: Transfer DistWalk service file
+     template:
+       src: services/batch-client.service
+       dest: /etc/systemd/system/client.service
+       owner: root
+       group: root
+
+- name: Install DistWalk client service
+  hosts: clients
+  become: yes
+  tasks:
+   - systemd:
+       name: client.service
+       state: restarted
+       daemon_reload: yes
+
+- name: Wait for DistWalk client service termination
+  hosts: clients
+  become: yes
+  tasks:
+   - systemd:
+       name: client.service
+     register: service_state
+     until: 'service_state.status.ActiveState == "active" and service_state.status.SubState == "exited"'
+     retries: 600
+     delay: 10
+
+- name: Retrieve load balancing strategy
+  hosts: loadbalancer
+  become: yes
+  tasks:
+    - shell: ipvsadm -S | awk '/^-A/ && /:7891/ {print $5}'
+      register: lb
+
+- name: Gather output 
+  hosts: clients
+  tasks:
+    - name: Delete previous .log and .csv files
+      shell: rm -rf /tmp/*.{log,csv}
+      delegate_to: localhost
+
+    - name: Get log since last client.service invokation
+      shell: journalctl -u client.service _SYSTEMD_INVOCATION_ID=`systemctl show -p InvocationID --value client.service`
+      register: out
+
+    - name: Print output to file
+      copy:
+        content: "{{ out.stdout }}"
+        dest: "/tmp/play-lb-compute-{{ ansible_hostname }}-c{{ num_client }}-n{{ num_node }}-{{ hostvars[groups['loadbalancer'][0]].lb.stdout }}.log"
+      delegate_to: localhost
+  vars:
+    num_client: "{{ ansible_play_hosts | length }}"
+    num_node:   "{{ groups['nodes'] | length }}"
