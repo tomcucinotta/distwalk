@@ -56,14 +56,8 @@ done
 echo "Full results in /tmp/dw-client-accept-mode-eval-*.dat"
 tail -n -10 /tmp/dw-client-accept-mode-eval-*.dat
 
-echo ""
-echo "Name,Tid,Voluntary-ctx-switches,Non-voluntary-ctx-switches"
-for tid in `ls /proc/$NODEPID/task/`; do
-    name=$(awk '/^Name:/ { print $2 }' /proc/$NODEPID/task/$tid/status)
-    voluntary=$(awk '/^voluntary_ctxt_switches:/ { print $2 }' /proc/$NODEPID/task/$tid/status)
-    nonvoluntary=$(awk '/^nonvoluntary_ctxt_switches:/ { print $2 }' /proc/$NODEPID/task/$tid/status)
-    echo $name,$tid,$voluntary,$nonvoluntary
-done
+../script/ctx-switches.sh $NODEPID &> dw-client-accept-mode-eval-ctx_switches_nt$(printf "%02d" $i)_am$am.csv
+
 #awk '/^Name:|^voluntary_ctxt_switches:|^nonvoluntary_ctxt_switches:/ { print $1, $2 }' /proc/$NODEPID/task/*/status
 
 cleanup $NODEPID

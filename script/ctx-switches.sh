@@ -7,7 +7,11 @@ if [ -z "$1" ]; then
 fi
 PID=$1
 
+#awk '/^Name:|^voluntary_ctxt_switches:|^nonvoluntary_ctxt_switches:/ { printf "%s %s, ", $1,$2 }' /proc/$PID/task/*/status
+awk '/^Name:/ { if (NR > 1) printf "\n"; printf "%s %s, ", $1, $2 } /^voluntary_ctxt_switches:/ { printf "%s %s, ", $1, $2 } /^nonvoluntary_ctxt_switches:/ { printf "%s %s, ", $1, $2 }' /proc/$PID/task/*/status
 
+
+exit 0
 echo "Name,Tid,Voluntary-ctx-switches,Non-voluntary-ctx-switches"
 for tid in `ls /proc/$PID/task/`; do
     name=$(awk '/^Name:/ { print $2 }' /proc/$PID/task/$tid/status)
