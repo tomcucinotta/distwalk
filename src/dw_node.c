@@ -558,7 +558,7 @@ int process_single_message(req_info_t *req, int epollfd, conn_worker_info_t *inf
             // any further cmds[] for replied-to hop, not me
             return 1;
         case STORE:
-        case LOAD:
+        case LOAD: {
             storage_req_t w;
             w.cmd = cmd;
             w.worker_id = infos->worker_id;
@@ -570,7 +570,7 @@ int process_single_message(req_info_t *req, int epollfd, conn_worker_info_t *inf
             }
 
             req->curr_cmd = cmd_next(cmd);
-            return 0;
+            return 0; }
         default:
             fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
             return 0;
