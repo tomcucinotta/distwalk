@@ -1,20 +1,18 @@
 #!/bin/bash
 #set -x
 
-if ! command -v yq &> /dev/null
-then
-	echo "yq not found; install with 'sudo snap install yq' (Make sure /snap/bin is in env!!!)" >&2
+if ! command -v yq &> /dev/null; then
+	echo "yq not found!" >&2
     exit
 fi
 
-if ! command -v jq &> /dev/null
-then
-    echo "jq not found; install with 'sudo apt install jq'" >&2
+if ! command -v jq &> /dev/null; then
+    echo "jq not found!" >&2
     exit
 fi
 
 if [ -z "$1" ]; then
-    echo "Run with '$0 <new-name> '" >&2
+    echo "Run with '$0 <new-name>'" >&2
     exit 1
 fi
 

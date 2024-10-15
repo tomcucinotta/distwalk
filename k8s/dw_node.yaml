@@ -10,7 +10,7 @@ spec:
     image: remoandreoli/distwalk:latest
     imagePullPolicy: Always
     command: ["/bin/sh", "-c"]
-    args: ['./dw_node_debug']
+    args: ['./dw_node']
     ports:
     - containerPort: 7891
 ---

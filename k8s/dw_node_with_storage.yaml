@@ -10,7 +10,7 @@ spec:
     image: remoandreoli/distwalk:latest
     imagePullPolicy: Always
     command: ["/bin/sh", "-c"]
-    args: ['./dw_node_debug -s ./data/data.data']
+    args: ['./dw_node -s ./data/data.data']
     volumeMounts:
     - name: storage
       mountPath: /distwalk/data
