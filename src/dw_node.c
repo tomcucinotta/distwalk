@@ -146,7 +146,7 @@ storage_worker_info_t storage_worker_info;
 //pthread_mutex_t socks_mtx;
 
 int conn_threads = 1;
-
+int no_delay = 1;
 atomic_int next_thread_cnt = 0;
 
 typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
@@ -278,7 +278,6 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, co
 
     int fwd_conn_id = conn_find_existing(addr, fwd.proto);
     if (fwd_conn_id == -1) {
-        int no_delay = 1;
         int clientSocket = 0;
 
         if (fwd.proto == TCP) {
@@ -1071,7 +1070,6 @@ struct argp_node_arguments {
     int use_thread_affinity;
     char* thread_affinity_list;
     int num_threads;
-    int no_delay;
     struct sched_attr sched_attrs;
 };
 
@@ -1089,8 +1087,8 @@ static struct argp_option argp_node_options[] = {
     {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access (bypass read/write OS caches)"},
     {"thread-affinity",   THREAD_AFFINITY,  "auto|cX,cZ[,cA-cD[:step]]",      0,  "Thread-to-core pinning (automatic or user-defined list using taskset syntax)"},
     {"sched-policy",      SCHED_POLICY,     "other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us", 0,  "Scheduling policy (defaults to other)"},
-    {"no-delay",          NO_DELAY,         "n",                              0,  "Set value of TCP_NODELAY socket option [currently not implemented]"},
-    {"nd",                NO_DELAY,         "n", OPTION_ALIAS },
+    {"no-delay",          NO_DELAY,         "0|1",                              0,  "Set value of TCP_NODELAY socket option"},
+    {"nd",                NO_DELAY,         "0|1", OPTION_ALIAS },
     {"help",              HELP,              0,                               0,  "Show this help message", 1 },
     {"usage",             USAGE,             0,                               0,  "Show a short usage message", 1 },
     { 0 }
@@ -1126,8 +1124,9 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
     case BACKLOG_LENGTH:
         listen_backlog = atoi(arg);
         break;
-    case NO_DELAY: // currently not implemented
-        arguments->no_delay = atoi(arg);
+    case NO_DELAY:
+        no_delay = atoi(arg);
+        assert(no_delay == 0 || no_delay == 1);
         break;
     case STORAGE_OPT_ARG:
         if (strlen(arg) >= MAX_STORAGE_PATH_STR) {
@@ -1237,7 +1236,6 @@ int main(int argc, char *argv[]) {
     input_args.use_thread_affinity = 0;
     input_args.thread_affinity_list = NULL;    
     input_args.num_threads = 1;
-    input_args.no_delay = 1;
     input_args.sched_attrs = (struct sched_attr) { .size = sizeof(struct sched_attr), .sched_policy = SCHED_OTHER, .sched_flags = 0 };
 
     char *home_path = getenv("HOME");
