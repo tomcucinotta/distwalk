@@ -11,6 +11,7 @@ typedef enum {
     EXPON,              // exponentially distributed value with average .val
     NORM,               // Normal distribution with average .val and sigma .std
     GAMMA,              // Gamma distribution with average .val and sigma .std (can be specified as k, scale as well)
+    SEQ,                // Linear ramp in range [.min, .max) with step .std
     SFILE               // Samples read from pre-defined column in CSV file
 } pd_type_t;
 

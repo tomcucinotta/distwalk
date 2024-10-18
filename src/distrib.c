@@ -93,6 +93,8 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->prob = NORM;
     else if (strcmp(tok, "gamma") == 0)
         p->prob = GAMMA;
+    else if (strcmp(tok, "seq") == 0)
+        p->prob = SEQ;
     else if (strcmp(tok, "file") == 0)
         p->prob = SFILE;
     else if (sscanf(tok, "%lf", &p->val) == 1)
@@ -110,11 +112,12 @@ int pd_parse(pd_spec_t *p, char *s) {
             || sscanf(tok, "k=%lf", &k) == 1
             || sscanf(tok, "scale=%lf", &scale) == 1
             || sscanf(tok, "avg=%lf", &p->val) == 1
-            || sscanf(tok, "%lf", &p->val) == 1)
+            || sscanf(tok, "%lf", &p->val) == 1
+            || (p->prob == SEQ && sscanf(tok, "step=%lf", &p->std) == 1)
+            || (p->prob == SFILE && sscanf(tok, "col=%d", &col) == 1)
+            )
                 continue;
         if (p->prob == SFILE) {
-            if (sscanf(tok, "col=%d", &col) == 1)
-                continue;
             fname = tok;
             continue;
         }
@@ -129,11 +132,20 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->val = k * scale;
         p->std = sqrt(k) * scale;
     }
+    if (p->prob == SEQ && isnan(p->std))
+        p->std = 1;
+    if (p->prob == SEQ && isnan(p->val)) {
+        if (p->std >= 0)
+            p->val = p->min;
+        else
+            p->val = p->max;
+    }
     check(p->prob != FIXED || !isnan(p->val));
     check(p->prob != UNIF || (!isnan(p->min) && !isnan(p->max)));
     check(p->prob != EXPON || (!isnan(p->val) && isnan(p->std)));
     check(p->prob != NORM || (!isnan(p->val) && !isnan(p->std)));
     check(p->prob != GAMMA || (!isnan(p->val) && !isnan(p->std)));
+    check(p->prob != SEQ || (!isnan(p->min) && !isnan(p->max)));
     return 1;
 }
 
@@ -157,6 +169,14 @@ double pd_sample(pd_spec_t *p) {
         break;
     case GAMMA:
         val = distr_gamma(p->val, p->std);
+        break;
+    case SEQ:
+        val = p->val;
+        p->val += p->std;
+        if (p->val >= p->max)
+            p->val = p->max;
+        else if (p->val <= p->min)
+            p->val = p->min;
         break;
     case SFILE:
         val = p->samples[p->cur_sample++];
@@ -196,6 +216,9 @@ char *pd_str(pd_spec_t *p) {
         k = lrint(p->val / scale);
         sprintf(s, "gamma:%g,k=%d,scale=%g", p->val, k, scale);
         break;
+    case SEQ:
+        sprintf(s, "seq:step=%g", p->std);
+        break;
     case SFILE:
         sprintf(s, "file:num_samples=%d,[0]=%g", p->num_samples, p->samples[0]);
         break;
@@ -203,7 +226,7 @@ char *pd_str(pd_spec_t *p) {
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
         exit(EXIT_FAILURE);
     }
-    if (p->prob != FIXED && !isnan(p->std))
+    if (p->prob != FIXED && p->prob != SEQ && !isnan(p->std))
         sprintf(s + strlen(s), ",std=%g", p->std);
     if (!isnan(p->min))
         sprintf(s + strlen(s), ",min=%g", p->min);
