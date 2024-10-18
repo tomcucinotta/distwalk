@@ -651,7 +651,7 @@ void setnonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
     assert(flags >= 0);
     flags |= O_NONBLOCK;
-    assert(fcntl(fd, F_SETFL, flags) == 0);
+    sys_check(fcntl(fd, F_SETFL, flags));
 }
 
 void handle_timeout(int epollfd, conn_worker_info_t *infos) {
@@ -1126,7 +1126,7 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case NO_DELAY:
         no_delay = atoi(arg);
-        assert(no_delay == 0 || no_delay == 1);
+        check(no_delay == 0 || no_delay == 1);
         break;
     case STORAGE_OPT_ARG:
         if (strlen(arg) >= MAX_STORAGE_PATH_STR) {

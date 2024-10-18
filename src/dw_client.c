@@ -450,18 +450,18 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         argp_state_help(state, state->out_stream, ARGP_HELP_USAGE | ARGP_HELP_EXIT_OK);
         break;
     case BIND_ADDR:
-        assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
+        check(strlen(arg) < MAX_HOSTPORT_STRLEN, "Too long host:port argument to %c option", BIND_ADDR);
         strcpy(arguments->clienthostport, arg);
         break;
     case TO_OPT_ARG:
-        assert(strlen(arg) < MAX_HOSTPORT_STRLEN);
+        check(strlen(arg) < MAX_HOSTPORT_STRLEN, "Too long host:port argument to --to option");
         addr_proto_parse(arg, arguments->nodehostport, &proto);
         break;
     case NUM_PKTS:
         num_pkts = atoi(arg);
         break;
     case PERIOD:
-        assert(pd_parse(&send_period_us_pd, arg));
+        check(pd_parse(&send_period_us_pd, arg), "Wrong period specification");
         break;
     case RATE:
         send_period_us_pd = pd_build_fixed(1000000.0 / atof(arg));
@@ -487,14 +487,14 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break;
     case COMP_TIME: {
         pd_spec_t val;
-        assert(pd_parse(&val, arg));
+        check(pd_parse(&val, arg), "Wrong computation time specification");
         ccmd_add(ccmd, COMPUTE, &val);
         break; }
     case LOAD_OFFSET: {
-        assert(pd_parse(&load_offset_pd, arg));
+        check(pd_parse(&load_offset_pd, arg), "Wrong load-offset specification");
         break; }
     case STORE_OFFSET: {
-        assert(pd_parse(&store_offset_pd, arg));
+        check(pd_parse(&store_offset_pd, arg), "Wrong store-offset specification");
         break; }
     case STORE_DATA: {        
         uint8_t sync = 1;
@@ -507,7 +507,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 sync = 1;
             } else {
                 pd_spec_t val;
-                assert(pd_parse(&val, arg));
+                check(pd_parse(&val, arg), "Wrong store data size specification");
                 ccmd_add(ccmd, STORE, &val);
                 ccmd_last_action(ccmd)->pd_val2 = store_offset_pd;
             }
@@ -520,7 +520,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break; }
     case LOAD_DATA: {
         pd_spec_t val;
-        assert(pd_parse(&val, arg));
+        check(pd_parse(&val, arg), "Wrong load data size specification");
         ccmd_add(ccmd, LOAD, &val);
         ccmd_last_action(ccmd)->pd_val2 = load_offset_pd;
         break; }
@@ -602,18 +602,18 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         reply_node->resp.n_ack = n_ack;
         break; }
     case SEND_REQUEST_SIZE:
-        assert(pd_parse(&send_pkt_size_pd, arg));
+        check(pd_parse(&send_pkt_size_pd, arg), "Wrong send request size specification");
         
-        assert(send_pkt_size_pd.val >= MIN_SEND_SIZE);
-        assert(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE);
+        check(send_pkt_size_pd.val >= MIN_SEND_SIZE, "Too small send request size, minimum is %lu", MIN_SEND_SIZE);
+        check(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE, "Too big send request size, maximum is %d", BUF_SIZE);
         break;
     case RESPONSE_SIZE: {
         //TODO: attach last -rs to original reply
         pd_spec_t val;
-        assert(pd_parse(&val, arg));
+        check(pd_parse(&val, arg), "Wrong response size specification");
         val.min = MIN_REPLY_SIZE;
         val.max = BUF_SIZE;
-        check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max));
+        check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
 
         if (ccmd_last_reply(ccmd)) {
             ccmd_last_reply(ccmd)->pd_val = val;
@@ -645,7 +645,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break;
     case NO_DELAY:
         no_delay = atoi(arg);
-        assert(no_delay == 0 || no_delay == 1);
+        check(no_delay == 0 || no_delay == 1);
         break;
     case ARGP_KEY_END: // post-parsing validity checks
         addr_parse(arguments->clienthostport, &myaddr);
