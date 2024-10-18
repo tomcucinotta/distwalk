@@ -234,3 +234,36 @@ char *pd_str(pd_spec_t *p) {
         sprintf(s + strlen(s), ",max=%g", p->max);
     return s;
 }
+
+int pd_len(pd_spec_t *p) {
+    int rv;
+    switch (p->prob) {
+    case SEQ:
+        rv = (p->max + p->std - p->min) / p->std;
+        break;
+    case SFILE:
+        rv = p->num_samples;
+        break;
+    default:
+        rv = -1;
+    }
+    return rv;
+}
+
+double pd_avg(pd_spec_t *p) {
+    double rv;
+    switch (p->prob) {
+    case SEQ:
+        rv = (p->min + p->max) / 2;
+        break;
+    case SFILE:
+        rv = 0.0;
+        for (int i = 0; i < p->num_samples; i++)
+            rv += p->samples[i];
+        rv /= p->num_samples;
+        break;
+    default:
+        rv = p->val;
+    }
+    return rv;
+}

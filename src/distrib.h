@@ -43,4 +43,11 @@ char *pd_str(pd_spec_t *p);
 // return 1 if probabilistic distribution successfully parsed from s
 int pd_parse(pd_spec_t *p, char *s);
 
+// return natural length of samples that can be extracted from *p,
+// defined only for SEQ and SFILE, or -1 for other pd types
+int pd_len(pd_spec_t *p);
+
+// return average of sequence or distribution generated from *p
+double pd_avg(pd_spec_t *p);
+
 #endif
