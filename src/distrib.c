@@ -55,11 +55,9 @@ void pd_load_file(pd_spec_t *p, char *fname, int col) {
     check(f != NULL, "Could not open file: %s\n", fname);
     int n = 0;
     static char line[256];
-    while (fgets(line, sizeof(line), f))
-        n++;
-    p->samples = malloc(n * sizeof(*p->samples));
-    check(p->samples != NULL, "Could not allocate %lu bytes for file\n", n * sizeof(*p->samples));
-    rewind(f);
+    int n_max = 16;
+    p->samples = malloc(n_max * sizeof(*p->samples));
+    check(p->samples != NULL, "Could not allocate %lu bytes for file\n", n_max * sizeof(*p->samples));
     n = 0;
     while (fgets(line, sizeof(line), f)) {
         char *colstr;
@@ -71,10 +69,20 @@ void pd_load_file(pd_spec_t *p, char *fname, int col) {
         check(c == -1 && colstr != NULL, "Could not find col %d in line %d of file %s: %s\n", col, n, fname, line);
         double val;
         // ignore lines where values were not recognized
-        if (sscanf(colstr, "%lf", &val) == 1)
+        if (sscanf(colstr, "%lf", &val) == 1) {
+            if (n == n_max) {
+                n_max *= 2;
+                p->samples = realloc(p->samples, n_max * sizeof(*p->samples));
+                check(p->samples != NULL, "Could not allocate %lu bytes for file\n", n_max * sizeof(*p->samples));
+            }
             p->samples[n++] = val;
+        }
     }
     fclose(f);
+
+    // make allocated memory tight for the number of actually read samples n
+    p->samples = realloc(p->samples, n * sizeof(*p->samples));
+    check(p->samples != NULL, "Could not realloc memory to %lu bytes for file\n", n * sizeof(*p->samples));
     p->num_samples = n;
     p->cur_sample = 0;
 }
