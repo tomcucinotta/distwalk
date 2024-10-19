@@ -11,7 +11,8 @@ typedef enum {
     EXPON,              // exponentially distributed value with average .val
     NORM,               // Normal distribution with average .val and sigma .std
     GAMMA,              // Gamma distribution with average .val and sigma .std (can be specified as k, scale as well)
-    SEQ,                // Linear ramp in range [.min, .max) with step .std
+    ARITH_SEQ,          // Arithmetic/Linear ramp in range [.min, .max) with step .std
+    GEO_SEQ,            // Geometric ramp in range [.min, .max) with step .std
     SFILE               // Samples read from pre-defined column in CSV file
 } pd_type_t;
 
@@ -44,7 +45,7 @@ char *pd_str(pd_spec_t *p);
 int pd_parse(pd_spec_t *p, char *s);
 
 // return natural length of samples that can be extracted from *p,
-// defined only for SEQ and SFILE, or -1 for other pd types
+// defined only for ARITH_SEQ, GEO_SEQ and SFILE, or -1 for other pd types
 int pd_len(pd_spec_t *p);
 
 // return average of sequence or distribution generated from *p

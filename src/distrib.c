@@ -101,8 +101,10 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->prob = NORM;
     else if (strcmp(tok, "gamma") == 0)
         p->prob = GAMMA;
-    else if (strcmp(tok, "seq") == 0)
-        p->prob = SEQ;
+    else if (strcmp(tok, "aseq") == 0)
+        p->prob = ARITH_SEQ;
+    else if (strcmp(tok, "gseq") == 0)
+        p->prob = GEO_SEQ;
     else if (strcmp(tok, "file") == 0)
         p->prob = SFILE;
     else if (sscanf(tok, "%lf", &p->val) == 1)
@@ -121,7 +123,7 @@ int pd_parse(pd_spec_t *p, char *s) {
             || sscanf(tok, "scale=%lf", &scale) == 1
             || sscanf(tok, "avg=%lf", &p->val) == 1
             || sscanf(tok, "%lf", &p->val) == 1
-            || (p->prob == SEQ && sscanf(tok, "step=%lf", &p->std) == 1)
+            || ((p->prob == ARITH_SEQ || p->prob == GEO_SEQ) && sscanf(tok, "step=%lf", &p->std) == 1)
             || (p->prob == SFILE && sscanf(tok, "col=%d", &col) == 1)
             )
                 continue;
@@ -140,9 +142,11 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->val = k * scale;
         p->std = sqrt(k) * scale;
     }
-    if (p->prob == SEQ && isnan(p->std))
+    if ((p->prob == ARITH_SEQ) && isnan(p->std))
         p->std = 1;
-    if (p->prob == SEQ && isnan(p->val)) {
+    if ((p->prob == GEO_SEQ) && isnan(p->std))
+        p->std = 2;
+    if ((p->prob == ARITH_SEQ || p->prob == GEO_SEQ) && isnan(p->val)) {
         if (p->std >= 0)
             p->val = p->min;
         else
@@ -153,7 +157,8 @@ int pd_parse(pd_spec_t *p, char *s) {
     check(p->prob != EXPON || (!isnan(p->val) && isnan(p->std)));
     check(p->prob != NORM || (!isnan(p->val) && !isnan(p->std)));
     check(p->prob != GAMMA || (!isnan(p->val) && !isnan(p->std)));
-    check(p->prob != SEQ || (!isnan(p->min) && !isnan(p->max)));
+    check(p->prob != ARITH_SEQ || (!isnan(p->min) && !isnan(p->max)));
+    check(p->prob != GEO_SEQ || (!isnan(p->min) && !isnan(p->max)));
     return 1;
 }
 
@@ -178,9 +183,17 @@ double pd_sample(pd_spec_t *p) {
     case GAMMA:
         val = distr_gamma(p->val, p->std);
         break;
-    case SEQ:
+    case ARITH_SEQ:
         val = p->val;
         p->val += p->std;
+        if (p->val >= p->max)
+            p->val = p->max;
+        else if (p->val <= p->min)
+            p->val = p->min;
+        break;
+    case GEO_SEQ:
+        val = p->val;
+        p->val *= p->std;
         if (p->val >= p->max)
             p->val = p->max;
         else if (p->val <= p->min)
@@ -224,7 +237,8 @@ char *pd_str(pd_spec_t *p) {
         k = lrint(p->val / scale);
         sprintf(s, "gamma:%g,k=%d,scale=%g", p->val, k, scale);
         break;
-    case SEQ:
+    case ARITH_SEQ:
+    case GEO_SEQ:
         sprintf(s, "seq:step=%g", p->std);
         break;
     case SFILE:
@@ -234,7 +248,7 @@ char *pd_str(pd_spec_t *p) {
         fprintf(stderr, "Unexpected prob type: %d\n", p->prob);
         exit(EXIT_FAILURE);
     }
-    if (p->prob != FIXED && p->prob != SEQ && !isnan(p->std))
+    if (p->prob != FIXED && p->prob != ARITH_SEQ && p->prob != GEO_SEQ && !isnan(p->std))
         sprintf(s + strlen(s), ",std=%g", p->std);
     if (!isnan(p->min))
         sprintf(s + strlen(s), ",min=%g", p->min);
@@ -246,8 +260,12 @@ char *pd_str(pd_spec_t *p) {
 int pd_len(pd_spec_t *p) {
     int rv;
     switch (p->prob) {
-    case SEQ:
+    case ARITH_SEQ:
         rv = (p->max + p->std - p->min) / p->std;
+        break;
+    case GEO_SEQ:
+        check(log(p->std) > 0);
+        rv = (log(p->max / p->min) / log(p->std)) + 1;
         break;
     case SFILE:
         rv = p->num_samples;
@@ -261,8 +279,11 @@ int pd_len(pd_spec_t *p) {
 double pd_avg(pd_spec_t *p) {
     double rv;
     switch (p->prob) {
-    case SEQ:
+    case ARITH_SEQ:
         rv = (p->min + p->max) / 2;
+        break;
+    case GEO_SEQ:
+        rv = sqrt(p->min * p->max);
         break;
     case SFILE:
         rv = 0.0;
