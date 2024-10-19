@@ -26,14 +26,14 @@
 __thread char thread_name[16];
 
 int use_wait_spinning = 0;
-int use_period = 1;
 
 ccmd_t* ccmd = NULL; // Ordered chain of commands
 
 unsigned int default_compute_us = 1000;
 
 pd_spec_t send_pkt_size_pd = { .prob = FIXED, .val = 1024, .std = NAN, .min = NAN, .max = NAN };
-pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 10000, .std = NAN, .min = NAN, .max = NAN };
+pd_spec_t send_period_us_pd = { .prob = FIXED, .val = 100000, .std = NAN, .min = NAN, .max = NAN };
+pd_spec_t send_rate_pd = { .prob = FIXED, .val = 10, .std = NAN, .min = NAN, .max = NAN };
 pd_spec_t load_offset_pd = { .prob = FIXED, .val = -1, .std = NAN, .min = NAN, .max = NAN };
 pd_spec_t store_offset_pd = { .prob = FIXED, .val = -1, .std = NAN, .min = NAN, .max = NAN };
 
@@ -65,11 +65,7 @@ struct timespec ts_start;
 
 unsigned long num_pkts = 1;
 
-unsigned int rates[MAX_RATES];
-unsigned int ramp_step_secs = 0;   // if non-zero, supersedes num_pkts
-unsigned int ramp_delta_rate = 0;  // added to rate every ramp_secs
-unsigned int ramp_num_steps = 0;   // number of ramp-up steps
-char *ramp_fname = NULL;
+unsigned int ramp_step_secs = 0;   // used with --rate
 
 proto_t proto = TCP;
 
@@ -104,8 +100,6 @@ void *thread_sender(void *data) {
 
     clock_gettime(clk_id, &ts_now);
     pd_init(time(NULL));
-
-    int rate_start = 1000000.0 / send_period_us_pd.val;
 
     message_t *m;
     conn_info_t *conn = conn_get_by_id(p->conn_id);
@@ -144,6 +138,22 @@ void *thread_sender(void *data) {
             break;
         }
 
+        if (ramp_step_secs != 0 && pkt_id > 0) {
+            int step_prev =
+                usecs_send[thread_id][idx(pkt_id - 1)] / 1000000 / ramp_step_secs;
+            int step =
+                usecs_send[thread_id][idx(pkt_id)] / 1000000 / ramp_step_secs;
+            int rate;
+            while (step_prev++ < step) {
+                int old_rate = 1000000.0 / send_period_us_pd.val;
+                rate = pd_sample(&send_rate_pd);
+                send_period_us_pd.val = 1000000.0 / rate;
+                if (rate != old_rate) {
+                    printf("pkt_id: %d, old_rate: %d, rate: %d\n", pkt_id, old_rate, rate);
+                }
+            }
+        }
+
         unsigned long period_ns = pd_sample(&send_period_us_pd) * 1000.0;
         dw_log("period_ns=%lu\n", period_ns);
         struct timespec ts_delta =
@@ -158,21 +168,6 @@ void *thread_sender(void *data) {
             } while (ts_leq(ts, ts_now));
         } else {
             sys_check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
-        }
-        if (ramp_step_secs != 0 && pkt_id > 0) {
-            int step =
-                usecs_send[thread_id][idx(pkt_id)] / 1000000 / ramp_step_secs;
-            int rate;
-            if (ramp_fname != NULL)
-                rate = rates[(step < ramp_num_steps) ? step
-                                                    : (ramp_num_steps - 1)];
-            else
-                rate = rate_start + step * ramp_delta_rate;
-            send_period_us_pd.val = 1000000.0 / rate;
-
-            int old_rate = 1000000.0 / send_period_us_pd.val;
-            if (old_rate != rate)
-                dw_log("old_rate: %d, rate: %d\n", old_rate, rate);
         }
     }
 
@@ -362,10 +357,7 @@ enum argp_client_option_keys {
     BIND_ADDR ='b',
 
     WAIT_SPIN = 0x200,
-    RAMP_STEP_SECS,
-    RAMP_DELTA_RATE,
-    RAMP_NUM_STEPS,
-    RATE_FILENAME,
+    RATE_STEP_SECS,
     SEND_REQUEST_SIZE,
     RESPONSE_SIZE,
     NO_DELAY,
@@ -389,29 +381,23 @@ static struct argp_option argp_client_options[] = {
     // long name, short name, value name, flag, description
     { "bind-addr",          BIND_ADDR,              "host[:port]|:port",                          0, "Set client bindname and bindport"},
     { "to",                 TO_OPT_ARG,             "[tcp|udp:[//]][host][:port]",                0, "Set distwalk target node host, port and protocol"},
-    { "num-pkts",           NUM_PKTS,               "n",                                          0, "Number of packets sent by each thread (across all sessions"},
+    { "num-pkts",           NUM_PKTS,               "n|auto",                                     0, "Number of packets sent by each thread (across all sessions"},
     { "period",             PERIOD,                 "usec|prob:field=val[,field=val]",            0, "Inter-send period for each thread"},
     { "rate",               RATE,                   "npkt",                                       0, "Packet sending rate (in pkts per sec)"},
     { "wait-spin",          WAIT_SPIN,               0,                                           0, "Spin-wait instead of sleeping till next sending time"},
     { "ws",                 WAIT_SPIN,               0,  OPTION_ALIAS },
-    { "ramp-num-steps",     RAMP_NUM_STEPS,         "n",                                          0, "Number of rate-steps"},
-    { "rns",                RAMP_NUM_STEPS,         "n", OPTION_ALIAS},
-    { "ramp-step-secs",     RAMP_STEP_SECS,         "sec",                                        0, "Duration of each rate-step"},
-    { "rss",                RAMP_STEP_SECS,         "n", OPTION_ALIAS},
-    { "ramp-delta-rate",    RAMP_DELTA_RATE,        "n",                                          0, "Rate increment at each rate-step"},
-    { "rdr",                RAMP_DELTA_RATE,        "n", OPTION_ALIAS},
-    { "rate-filename",      RATE_FILENAME,          "path/to/file.dat",                           0, "Load rates from a specified file"},
-    { "rfn",                RATE_FILENAME,          "path/to/file.dat", OPTION_ALIAS},
+    { "rate-step-secs",     RATE_STEP_SECS,         "sec",                                        0, "Duration of each rate-step"},
+    { "rss",                RATE_STEP_SECS,         "n", OPTION_ALIAS},
     { "comp-time",          COMP_TIME,              "usec|prob:field=val[,field=val]",            0, "Per-request processing time"},
     { "store-offset",       STORE_OFFSET,           "nbytes|prob:field=val[,field=val]",          0, "Per-store file offset"},
-    { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val][,nosync]",0, "Per-store data payload size"},
+    { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val][,nosync]", 0, "Per-store data payload size"},
     { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
     { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
-    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,nack=n][,timeout=n][,retry=n]",             0, "Send a number of FORWARD message to the ip:port list, wait for n replies"},
+    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,nack=n][,timeout=n][,retry=n]", 0, "Send a number of FORWARD message to the ip:port list, wait for n replies"},
     { "send-pkt-size",      SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]", OPTION_ALIAS},
-    { "resp-pkt-size",      RESPONSE_SIZE,          "nbytes|prob:field=val[,field=val]",               0, "Set payload size of received responses"},
+    { "resp-pkt-size",      RESPONSE_SIZE,          "nbytes|prob:field=val[,field=val]",          0, "Set payload size of received responses"},
     { "rs",                 RESPONSE_SIZE,          "nbytes|prob:field=val[,field=val]", OPTION_ALIAS},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
@@ -458,32 +444,23 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         addr_proto_parse(arg, arguments->nodehostport, &proto);
         break;
     case NUM_PKTS:
-        num_pkts = atoi(arg);
+        if (strcmp(arg, "auto") == 0)
+            num_pkts = 0;
+        else
+            num_pkts = atoi(arg);
         break;
     case PERIOD:
         check(pd_parse(&send_period_us_pd, arg), "Wrong period specification");
         break;
     case RATE:
-        send_period_us_pd = pd_build_fixed(1000000.0 / atof(arg));
+        check(pd_parse(&send_rate_pd, arg), "Wrong rate specification");
+        send_period_us_pd = pd_build_fixed(1000000.0 / pd_sample(&send_rate_pd));
         break;
     case WAIT_SPIN:
         use_wait_spinning = 1;
         break;
-    case RAMP_NUM_STEPS:
-        ramp_num_steps = atoi(arg);
-        use_period = 0;
-        break;
-    case RAMP_STEP_SECS:
+    case RATE_STEP_SECS:
         ramp_step_secs = atoi(arg);
-        use_period = 0;
-        break;
-    case RAMP_DELTA_RATE:
-        ramp_delta_rate = atoi(arg);
-        use_period = 0;
-        break;
-    case RATE_FILENAME:
-        ramp_fname = arg;
-        use_period = 0;
         break;
     case COMP_TIME: {
         pd_spec_t val;
@@ -651,38 +628,19 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         addr_parse(arguments->clienthostport, &myaddr);
         addr_parse(arguments->nodehostport, &serveraddr);
 
-        if (!use_period && !ramp_fname && (ramp_delta_rate <= 0 || ramp_step_secs <= 0 || ramp_num_steps <= 0)) {
+        if (send_rate_pd.prob != FIXED && ramp_step_secs == 0) {
             ccmd_destroy(&ccmd);
-            argp_failure(state, 1, 0, "ramp-up parameters must all be positive integers, if ramp file is not specified");
+            argp_failure(state, 1, 0, "A non-fixed rate specification needs --rate-step-secs");
         }
 
-        if (ramp_step_secs != 0) {
-            if (ramp_fname != NULL) {
-                check(ramp_delta_rate == 0);
-                FILE *ramp_fid = fopen(ramp_fname, "r");
-                check(ramp_fid != NULL);
-                int cnt = 0;
-                for (ramp_num_steps = 0; !feof(ramp_fid);) {
-                    unsigned int r;
-                    int read_fields = fscanf(ramp_fid, "%u", &r);
-                    if (read_fields == 1) {
-                        check(ramp_num_steps < MAX_RATES);
-                        rates[ramp_num_steps] = r;
-                        cnt += r * ramp_step_secs;
-                        ramp_num_steps++;
-                    }
-                }
-                fclose(ramp_fid);
-                send_period_us_pd.val = 1000000.0 / rates[0];
-                if (num_pkts == 0 || num_pkts > cnt) num_pkts = cnt;
-            } else {
-                num_pkts = 0;
-                int r = 1000000 / send_period_us_pd.val;
-                for (int s = 0; s < ramp_num_steps; s++) {
-                    num_pkts += r * ramp_step_secs;
-                    r += ramp_delta_rate;
-                }
+        if (ramp_step_secs != 0 && num_pkts == 0) {
+            int num_rates = pd_len(&send_rate_pd);
+            if (num_rates == -1) {
+                ccmd_destroy(&ccmd);
+                argp_failure(state, 1, 0, "Wrong rate specification with --num-pkts=auto");
             }
+            double avg_rate = pd_avg(&send_rate_pd);
+            num_pkts = avg_rate * num_rates * ramp_step_secs;
         }
 
         num_pkts = (num_pkts + arguments->num_sessions - 1) / arguments->num_sessions * arguments->num_sessions;
@@ -775,11 +733,10 @@ int main(int argc, char *argv[]) {
     printf("  serverhost=%s\n", input_args.nodehostport);
     printf("  num_threads: %d\n", input_args.num_threads);
     printf("  num_pkts=%lu\n", num_pkts);
-    printf("  rate=%g\n", 1000000.0 / send_period_us_pd.val);
     printf("  period=%sus\n", pd_str(&send_period_us_pd));
     printf("  waitspin=%d\n", use_wait_spinning);
-    printf("  ramp_num_steps=%d, ramp_delta_rate=%d, ramp_step_secs=%d\n",
-           ramp_num_steps, ramp_delta_rate, ramp_step_secs);
+    printf("  rate=%s\n", pd_str(&send_rate_pd));
+    printf("  rate_step_secs=%d\n", ramp_step_secs);
     printf("  pkt_size=%s (+%d for headers)\n", pd_str(&send_pkt_size_pd),
            TCPIP_HEADERS_SIZE);
     printf("  resp_size=%s (+%d with headers)\n", pd_str(&ccmd_last_reply(ccmd)->pd_val),
