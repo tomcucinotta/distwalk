@@ -117,6 +117,7 @@ typedef struct {
     int storefd[MAX_THREADS]; // read
     int store_replyfd[MAX_THREADS]; //write
 
+    pqueue_t* sync_waiting_queue; // worker threads waiting for periodic timer to be triggered
     int core_id; // core pinning
 
     storage_info_t storage_info;
@@ -466,15 +467,8 @@ void store(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store
     }
     storage_info->storage_offset += total_bytes;
 
-    if (wait_sync) { // wait for periodic timer to be triggered
-        if (infos->periodic_sync_msec > 0) {
-            uint64_t val;
-            if (read(infos->timerfd, &val, sizeof(uint64_t)) < 0) {
-                perror("periodic sync read()");
-            }
-        } else {
-            fsync(storage_info->storage_fd);
-        }
+    if (wait_sync && infos->periodic_sync_msec <= 0) { 
+        fsync(storage_info->storage_fd);
     }
 
     if (storage_info->storage_offset > storage_info->storage_eof) {
@@ -765,6 +759,8 @@ void exec_request(int epollfd, const struct epoll_event *p_ev, conn_worker_info_
 
 void* storage_worker(void* args) {
     storage_worker_info_t *infos = (storage_worker_info_t *)args;
+    infos->sync_waiting_queue = pqueue_alloc(MAX_REQS);
+
     volatile int running = 1;
 
     sprintf(thread_name, "storagew");
@@ -856,6 +852,14 @@ void* storage_worker(void* args) {
 
                 fsync(infos->storage_info.storage_fd);
 
+                while (pqueue_size(infos->sync_waiting_queue) > 0) {
+                    int worker_id = pqueue_node_key(pqueue_top(infos->sync_waiting_queue));
+                    int req_id = pqueue_node_data(pqueue_top(infos->sync_waiting_queue)).value;
+
+                    pqueue_pop(infos->sync_waiting_queue);
+                    safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
+                }
+
                 // Too expensive??
                 dw_log("storage sync...\n");
             } else if (type == STORAGE) {
@@ -885,7 +889,12 @@ void* storage_worker(void* args) {
                     continue;
                 }
 
-                safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
+                if (!cmd_get_opts(store_opts_t, storage_cmd)->wait_sync || infos->periodic_sync_msec <= 0) {
+                    safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
+                } else {
+                    data_t data = {.value=req_id};
+                    pqueue_insert(infos->sync_waiting_queue, worker_id, data);
+                }
             } else {
                 fprintf(stderr, "Unknown event in storage server - skipping");
             }
@@ -1428,6 +1437,7 @@ int main(int argc, char *argv[]) {
 
     if (storage_worker_info.storage_info.storage_path[0] != '\0') {
         sys_check(pthread_join(storer, NULL));
+        pqueue_free(storage_worker_info.sync_waiting_queue);
         free(storage_worker_info.store_buf);
     }
 
