@@ -74,13 +74,12 @@ struct sockaddr_in myaddr;
 
 unsigned long pkts_per_session;
 
-pthread_barrier_t barrier;
-
 typedef struct {
     int thread_id;
     int conn_id;
     int first_pkt_id;
     int num_send_pkts;
+    pthread_barrier_t barrier;
 } thread_data_t;
 
 int idx(int pkt_id) {
@@ -111,7 +110,8 @@ void *thread_sender(void *data) {
 #endif
 
     /* Wait for receiver to establish connection */
-    sys_check(pthread_barrier_wait(&barrier));
+    int brv = pthread_barrier_wait(&p->barrier);
+    check(brv == 0 || brv == PTHREAD_BARRIER_SERIAL_THREAD);
 
     for (int i = 0; i < num_send_pkts; i++) {
         m = conn_send_message(conn);
@@ -181,6 +181,47 @@ void *thread_sender(void *data) {
     return 0;
 }
 
+int connect_retry(int thread_id) {
+    int rv = 0;
+    // Try to connect
+    int conn_retry;
+    for(conn_retry = 1; conn_retry <= conn_retry_num; conn_retry++) {
+        /*---- Create the socket. The three arguments are: ----*/
+        /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
+         * this case) */
+        if (proto == TCP) {
+            clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
+
+            sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
+                                 TCP_NODELAY, (void *)&no_delay,
+                                 sizeof(no_delay)));
+        } else {
+            clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM, 0);
+        }
+
+        dw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr), ntohs(myaddr.sin_port));
+        if (ntohs(myaddr.sin_port) != 0) {
+            int val = 1;
+            sys_check(setsockopt(clientSocket[thread_id], SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
+        }
+                
+        /*---- Bind the address struct to the socket ----*/
+        sys_check(bind(clientSocket[thread_id], (struct sockaddr *)&myaddr,
+                       sizeof(myaddr)));
+
+        /*---- Connect the socket to the server using the address struct ----*/
+        dw_log("Connecting to %s:%d (sess_id=%d, retry=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i, conn_retry);
+
+        if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, sizeof(serveraddr))) == 0) {
+            break;
+        } else {
+            close(clientSocket[thread_id]);
+            usleep(conn_retry_period_ms * 1000);
+        }
+    }
+    return rv;
+}
+
 void *thread_receiver(void *data) {
     int thread_id = (int)(unsigned long)data;
 
@@ -192,7 +233,6 @@ void *thread_receiver(void *data) {
 
     for (int i = 0; i < num_pkts; i++) {
         thread_data_t thr_data;
-        int rv;
         if (i % pkts_per_session == 0) {
             /* Pre-allocate conn data structure */
             int conn_id = conn_alloc(clientSocket[thread_id], serveraddr, proto);
@@ -205,45 +245,11 @@ void *thread_receiver(void *data) {
             thr_data.conn_id = conn_id;
             thr_data.first_pkt_id = i,
             thr_data.num_send_pkts = pkts_per_session;
+            check(pthread_barrier_init(&thr_data.barrier, NULL, 2) == 0);
             sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
                                   (void *)&thr_data));
             
-            // Try to connect
-            int conn_retry;
-            for(conn_retry = 1; conn_retry <= conn_retry_num; conn_retry++) {
-                /*---- Create the socket. The three arguments are: ----*/
-                /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
-                * this case) */
-                if (proto == TCP) {
-                    clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
-
-                    sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
-                                    TCP_NODELAY, (void *)&no_delay,
-                                    sizeof(no_delay)));
-                } else {
-                    clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM, 0);
-                }
-
-                dw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr), ntohs(myaddr.sin_port));
-                if (ntohs(myaddr.sin_port) != 0) {
-                    int val = 1;
-                    sys_check(setsockopt(clientSocket[thread_id], SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
-                }
-                
-                /*---- Bind the address struct to the socket ----*/
-                sys_check(bind(clientSocket[thread_id], (struct sockaddr *)&myaddr,
-                            sizeof(myaddr)));
-
-                /*---- Connect the socket to the server using the address struct ----*/
-                dw_log("Connecting to %s:%d (sess_id=%d, retry=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i, conn_retry);
-
-                if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, sizeof(serveraddr))) == 0) {
-                    break;
-                } else {
-                    close(clientSocket[thread_id]);
-                    usleep(conn_retry_period_ms * 1000);
-                }
-            }
+            int rv = connect_retry(thread_id);
 
             // check if connection succeeded
             if (rv != 0) {
@@ -254,7 +260,8 @@ void *thread_receiver(void *data) {
                 exit(EXIT_FAILURE);
             }
 
-            sys_check(pthread_barrier_wait(&barrier));
+            int brv = pthread_barrier_wait(&thr_data.barrier);
+            check(brv == 0 || brv == PTHREAD_BARRIER_SERIAL_THREAD);
         }
 
         /*---- Read the message from the server into the buffer ----*/
@@ -326,6 +333,7 @@ void *thread_receiver(void *data) {
             }
             dw_log("Joining sender thread\n");
             pthread_join(sender[thread_id], NULL);
+            check(pthread_barrier_destroy(&thr_data.barrier) == 0);
         }
     }
 
@@ -771,8 +779,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    sys_check(pthread_barrier_init(&barrier, NULL, input_args.num_threads * 2));
-
     // Remember in ts_start the abs start time of the experiment
     clock_gettime(clk_id, &ts_start);
 
@@ -795,8 +801,7 @@ int main(int argc, char *argv[]) {
         free(usecs_send[i]);
         free(usecs_elapsed[i]);
     }
-    
-    sys_check(pthread_barrier_destroy(&barrier));
+
     ccmd_destroy(&ccmd);
     return 0;
 }
