@@ -149,7 +149,7 @@ void *thread_sender(void *data) {
                 rate = pd_sample(&send_rate_pd);
                 send_period_us_pd.val = 1000000.0 / rate;
                 if (rate != old_rate) {
-                    printf("pkt_id: %d, old_rate: %d, rate: %d\n", pkt_id, old_rate, rate);
+                    dw_log("pkt_id: %d, old_rate: %d, rate: %d\n", pkt_id, old_rate, rate);
                 }
             }
         }
