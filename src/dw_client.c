@@ -181,7 +181,7 @@ void *thread_sender(void *data) {
     return 0;
 }
 
-int connect_retry(int thread_id) {
+int connect_retry(int thread_id, int sess_id) {
     int rv = 0;
     // Try to connect
     int conn_retry;
@@ -210,7 +210,7 @@ int connect_retry(int thread_id) {
                        sizeof(myaddr)));
 
         /*---- Connect the socket to the server using the address struct ----*/
-        dw_log("Connecting to %s:%d (sess_id=%d, retry=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i, conn_retry);
+        dw_log("Connecting to %s:%d (sess_id=%d, retry=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), sess_id, conn_retry);
 
         if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, sizeof(serveraddr))) == 0) {
             break;
@@ -249,7 +249,7 @@ void *thread_receiver(void *data) {
             sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
                                   (void *)&thr_data));
             
-            int rv = connect_retry(thread_id);
+            int rv = connect_retry(thread_id, i / (int)pkts_per_session);
 
             // check if connection succeeded
             if (rv != 0) {
@@ -313,7 +313,6 @@ void *thread_receiver(void *data) {
             conn_free(thr_data.conn_id);
             if (use_per_session_output) {
                 int first_sess_pkt = i - (pkts_per_session - 1);
-                int sess_id = i / pkts_per_session;
                 for (int j = 0; j < pkts_per_session; j++) {
                     int pkt_id = first_sess_pkt + j;
                     // if we abruptly terminated the session, the send timestamp
@@ -324,7 +323,7 @@ void *thread_receiver(void *data) {
                             "%d, sess_id: %d\n",
                             usecs_send[thread_id][idx(pkt_id)],
                             usecs_elapsed[thread_id][idx(pkt_id)], pkt_id,
-                            thread_id, sess_id);
+                            thread_id, i / (int)pkts_per_session);
                 }
                 // make sure we reset the send timestamp and elapsed array to
                 // zeros for the next session
