@@ -176,6 +176,50 @@ void *thread_sender(void *data) {
     return 0;
 }
 
+int connect_retry(int thread_id, int sess_id) {
+    int rv = 0;
+    int conn_retry;
+    for(conn_retry = 1; conn_retry <= conn_retry_num; conn_retry++) {
+        /*---- Create the socket. The three arguments are: ----*/
+        /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
+         * this case) */
+        if (proto == TCP) {
+            clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
+
+            sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
+                                 TCP_NODELAY, (void *)&no_delay,
+                                 sizeof(no_delay)));
+        } else {
+            clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM, 0);
+        }
+
+        dw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
+               ntohs(myaddr.sin_port));
+
+
+        if (ntohs(myaddr.sin_port) != 0) {
+            int val = 1;
+            sys_check(setsockopt(clientSocket[thread_id], SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
+        }
+
+        /*---- Bind the address struct to the socket ----*/
+        sys_check(bind(clientSocket[thread_id], (struct sockaddr *)&myaddr,
+                       sizeof(myaddr)));
+
+        /*---- Connect the socket to the server using the address struct
+         * ----*/
+        dw_log("Connecting to %s:%d (sess_id=%d, retry=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), sess_id, conn_retry);
+
+        if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, sizeof(serveraddr))) == 0) {
+            break;
+        } else {
+            close(clientSocket[thread_id]);
+            usleep(conn_retry_period_ms * 1000);
+        }
+    }
+    return rv;
+}
+
 void *thread_receiver(void *data) {
     int thread_id = (int)(unsigned long)data;
 
@@ -187,54 +231,21 @@ void *thread_receiver(void *data) {
 
     for (int i = 0; i < num_pkts; i++) {
         thread_data_t thr_data;
-        int rv;
         if (i % pkts_per_session == 0) {
-            int conn_retry;
-            for(conn_retry = 1; conn_retry <= conn_retry_num; conn_retry++) {
-                /*---- Create the socket. The three arguments are: ----*/
-                /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
-                * this case) */
-                if (proto == TCP) {
-                    clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
-
-                    sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
-                                    TCP_NODELAY, (void *)&no_delay,
-                                    sizeof(no_delay)));
-                } else {
-                    clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM, 0);
-                }
-
-                dw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
-                    ntohs(myaddr.sin_port));
-
-
-                if (ntohs(myaddr.sin_port) != 0) {
-                    int val = 1;
-                    sys_check(setsockopt(clientSocket[thread_id], SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
-                }
-                
-                /*---- Bind the address struct to the socket ----*/
-                sys_check(bind(clientSocket[thread_id], (struct sockaddr *)&myaddr,
-                            sizeof(myaddr)));
-
-                /*---- Connect the socket to the server using the address struct
-                * ----*/
-                dw_log("Connecting to %s:%d (sess_id=%d, retry=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), i, conn_retry);
-
-                if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, sizeof(serveraddr))) == 0) {
-                    break;
-                } else {
-                    close(clientSocket[thread_id]);
-                    usleep(conn_retry_period_ms * 1000);
-                }
-            }
-
+            struct timespec ts1, ts2;
+            clock_gettime(CLOCK_MONOTONIC, &ts1);
+            int rv = connect_retry(thread_id, i / pkts_per_session);
+            clock_gettime(CLOCK_MONOTONIC, &ts2);
             // check if connection succeeded
             if (rv != 0) {
                 close(clientSocket[thread_id]);
                 fprintf(stderr, "Connection to %s:%d failed: %s\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), strerror(errno));
                 exit(EXIT_FAILURE);
             }
+
+            printf("conn_time: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n",
+                   (ts2.tv_sec-ts1.tv_sec)*1000000+(ts2.tv_nsec-ts1.tv_nsec)/1000,
+                   i, thread_id, i / (int)pkts_per_session);
 
             /* spawn sender once connection is established */
 
