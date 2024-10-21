@@ -127,13 +127,13 @@ inline const void msg_log(message_t* m, char* padding) {
 
         switch (c->cmd) {
         case STORE:
-            sprintf(opts, "%db", cmd_get_opts(store_opts_t, c)->store_nbytes);
+            sprintf(opts, "%ldb", cmd_get_opts(store_opts_t, c)->store_nbytes);
             break;
         case COMPUTE:
             sprintf(opts, "%dus", cmd_get_opts(comp_opts_t, c)->comp_time_us);
             break;
         case LOAD:
-            sprintf(opts, "%db", cmd_get_opts(load_opts_t, c)->load_nbytes);
+            sprintf(opts, "%ldb", cmd_get_opts(load_opts_t, c)->load_nbytes);
             break;
         case MULTI_FORWARD:
         case FORWARD:

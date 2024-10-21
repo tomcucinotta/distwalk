@@ -25,13 +25,13 @@ typedef struct {
 } fwd_opts_t;
 
 typedef struct {
-    uint32_t offset;
-    uint32_t load_nbytes;
+    uint64_t offset;
+    uint64_t load_nbytes;
 } load_opts_t;
 
 typedef struct {
-    uint32_t offset;
-    uint32_t store_nbytes;
+    uint64_t offset;
+    uint64_t store_nbytes;
     uint8_t wait_sync;
 } store_opts_t;
 
