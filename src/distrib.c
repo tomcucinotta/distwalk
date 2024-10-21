@@ -87,6 +87,30 @@ void pd_load_file(pd_spec_t *p, char *fname, int col) {
     p->cur_sample = 0;
 }
 
+int sscanf_unit(const char *str, const char *fmt, double *p_val) {
+    int l = strlen(str);
+    if (l == 0)
+        return 0;
+    int rv = sscanf(str, fmt, p_val);
+    if (rv != 1)
+        return rv;
+    switch (str[l - 1]) {
+    case 'k':
+    case 'K':
+        *p_val *= 1000;
+        break;
+    case 'm':
+    case 'M':
+        *p_val *= 1000000;
+        break;
+    case 'g':
+    case 'G':
+        *p_val *= 1000000000;
+        break;
+    }
+    return rv;
+}
+
 int pd_parse(pd_spec_t *p, char *s) {
     *p = (pd_spec_t) { .prob = FIXED, .val = NAN, .std = NAN, .min = NAN, .max = NAN, .samples = NULL };
     char *tok = strsep(&s, ":");
@@ -107,7 +131,7 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->prob = GEO_SEQ;
     else if (strcmp(tok, "file") == 0)
         p->prob = SFILE;
-    else if (sscanf(tok, "%lf", &p->val) == 1)
+    else if (sscanf_unit(tok, "%lf", &p->val) == 1)
         p->prob = FIXED;
     else {
         fprintf(stderr, "Wrong value/distribution syntax: %s\n", tok);
@@ -116,14 +140,14 @@ int pd_parse(pd_spec_t *p, char *s) {
     double k = NAN, scale = NAN; // for Gamma
     while ((tok = strsep(&s, ",")) != NULL) {
         dw_log("Processing tok: %s\n", tok);
-        if (sscanf(tok, "min=%lf", &p->min) == 1
-            || sscanf(tok, "max=%lf", &p->max) == 1
-            || sscanf(tok, "std=%lf", &p->std) == 1
-            || sscanf(tok, "k=%lf", &k) == 1
-            || sscanf(tok, "scale=%lf", &scale) == 1
-            || sscanf(tok, "avg=%lf", &p->val) == 1
-            || sscanf(tok, "%lf", &p->val) == 1
-            || ((p->prob == ARITH_SEQ || p->prob == GEO_SEQ) && sscanf(tok, "step=%lf", &p->std) == 1)
+        if (sscanf_unit(tok, "min=%lf", &p->min) == 1
+            || sscanf_unit(tok, "max=%lf", &p->max) == 1
+            || sscanf_unit(tok, "std=%lf", &p->std) == 1
+            || sscanf_unit(tok, "k=%lf", &k) == 1
+            || sscanf_unit(tok, "scale=%lf", &scale) == 1
+            || sscanf_unit(tok, "avg=%lf", &p->val) == 1
+            || sscanf_unit(tok, "%lf", &p->val) == 1
+            || ((p->prob == ARITH_SEQ || p->prob == GEO_SEQ) && sscanf_unit(tok, "step=%lf", &p->std) == 1)
             || (p->prob == SFILE && sscanf(tok, "col=%d", &col) == 1)
             )
                 continue;
