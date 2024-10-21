@@ -212,13 +212,15 @@ void ccmd_log(ccmd_t* q) {
 
         switch (curr->cmd) {
             case STORE:
-                sprintf(opts, "%sb,%s", pd_str(&curr->pd_val), curr->store.wait_sync ? "sync" : "nosync");
+                sprintf(opts, "%sb,%s,offset=%s", pd_str(&curr->pd_val),
+                        curr->store.wait_sync ? "sync" : "nosync", pd_str(&curr->pd_val2));
                 break;
             case COMPUTE:
                 sprintf(opts, "%sus", pd_str(&curr->pd_val));
                 break;
             case LOAD:
-                sprintf(opts, "%sb", pd_str(&curr->pd_val));
+                sprintf(opts, "%sb,offset=%s", pd_str(&curr->pd_val),
+                        pd_str(&curr->pd_val2));
                 break;
             case PSKIP:
                 if (curr->pd_val.val < 1.0)

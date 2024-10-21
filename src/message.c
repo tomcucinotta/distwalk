@@ -127,13 +127,16 @@ inline const void msg_log(message_t* m, char* padding) {
 
         switch (c->cmd) {
         case STORE:
-            sprintf(opts, "%ldb", cmd_get_opts(store_opts_t, c)->store_nbytes);
+            sprintf(opts, "%ldb,%s,offset=%ld", cmd_get_opts(store_opts_t, c)->store_nbytes,
+                    cmd_get_opts(store_opts_t, c)->wait_sync ? "sync" : "nosync",
+                    (long)cmd_get_opts(store_opts_t, c)->offset);
             break;
         case COMPUTE:
             sprintf(opts, "%dus", cmd_get_opts(comp_opts_t, c)->comp_time_us);
             break;
         case LOAD:
-            sprintf(opts, "%ldb", cmd_get_opts(load_opts_t, c)->load_nbytes);
+            sprintf(opts, "%ldb,offset=%ld", cmd_get_opts(load_opts_t, c)->load_nbytes,
+                    (long)cmd_get_opts(load_opts_t, c)->offset);
             break;
         case MULTI_FORWARD:
         case FORWARD:

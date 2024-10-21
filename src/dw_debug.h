@@ -3,8 +3,10 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <errno.h>
 #include <sys/prctl.h>
 
 // a weak global variable is ignored when a strong one is detected.
