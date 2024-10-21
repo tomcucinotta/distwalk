@@ -546,7 +546,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         pd_spec_t val = pd_build_fixed(default_resp_size);
 
         int n_ack = 0;
-        int timeout_us = 500000;
+        int timeout_us = 0;
         int retry_num = 0;
         int i = 0;
 
