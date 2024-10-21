@@ -106,7 +106,11 @@ command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip) {
         do {
             if (itr->cmd == FORWARD)
                 nested_fwd++;
-            if (itr->cmd == REPLY)
+            else if (itr->cmd == MULTI_FORWARD) {
+                nested_fwd++;
+                while (cmd_next(itr)->cmd == MULTI_FORWARD)
+                    itr = cmd_next(itr);
+            } else if (itr->cmd == REPLY)
                 nested_fwd--;
             itr = cmd_next(itr);
         } while (itr->cmd != EOM && nested_fwd > 0);
