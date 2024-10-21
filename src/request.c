@@ -38,6 +38,7 @@ req_info_t* req_alloc() {
 
     r->req_id = req_id;
     r->curr_cmd = NULL;
+    r->fwd_replies_left = -1;
     r->next = NULL;
     r->prev = NULL;
 

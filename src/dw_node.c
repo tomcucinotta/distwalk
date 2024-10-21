@@ -193,7 +193,7 @@ int safe_read(int fd, unsigned char *buf, size_t len) {
 }
 
 void insert_timeout(conn_worker_info_t* infos, int req_id, int epollfd, int micros) {
-    data_t data = {.value=req_id};
+    data_t data = {.value = req_id};
     req_info_t *req = req_get_by_id(req_id);
     int new_micros = micros;
 
@@ -266,9 +266,8 @@ void setnonblocking(int fd);
 // remove the first (cmd_id+1) commands from cmds[], and forward the
 // rest to the next hop
 //
-// returns number of forwarded commands as found in m, 0 if a problem occurred,
-// or -1 if command cannot be completed now (asynchronous FORWARD)
-int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, conn_worker_info_t *infos) {
+// returns 1 if forward successfully started, or 0 if a problem occurred
+int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, conn_worker_info_t *infos) {
     fwd_opts_t fwd = *cmd_get_opts(fwd_opts_t, cmd);
 
     struct sockaddr_in addr;
@@ -355,8 +354,23 @@ int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, co
         insert_timeout(infos, req->req_id, epollfd, fwd.timeout);
     }
 
-    req->fwd_replies_left = cmd_get_opts(reply_opts_t, reply_cmd)->n_ack;
+    if (req->fwd_replies_left == -1)
+        req->fwd_replies_left = cmd_get_opts(reply_opts_t, reply_cmd)->n_ack;
 
+    return 1;
+}
+
+// return 1 if OK, 0 if an error occurred in at least one forward operation
+int start_forward(req_info_t *req, message_t *m, command_t *cmd, int epollfd, conn_worker_info_t *infos) {
+    if (cmd->cmd == FORWARD)
+        return single_start_forward(req, m, cmd, epollfd, infos);
+    assert(cmd->cmd == MULTI_FORWARD);
+    do {
+        int rv = single_start_forward(req, m, cmd, epollfd, infos);
+        if (rv == 0)
+            return 0;
+        cmd = cmd_next(cmd);
+    } while (cmd->cmd == MULTI_FORWARD);
     return 1;
 }
 
@@ -535,8 +549,8 @@ int process_single_message(req_info_t *req, int epollfd, conn_worker_info_t *inf
             break;
         case FORWARD:
         case MULTI_FORWARD: {
-            int to_skip = start_forward(req, m, cmd, epollfd, infos);
-            if (to_skip == 0) {
+            int rv = start_forward(req, m, cmd, epollfd, infos);
+            if (rv == 0) {
                 fprintf(stderr, "Error: could not execute FORWARD\n");
                 return -1;
             }
@@ -662,7 +676,12 @@ void handle_timeout(int epollfd, conn_worker_info_t *infos) {
 
     remove_timeout(infos, req_id, epollfd);
 
-    fwd_opts_t *fwd = cmd_get_opts(fwd_opts_t, req->curr_cmd);
+    command_t *p_cmd = req->curr_cmd;
+    // if curr_cmd is no more on MULTI_FORWARD, ignore
+    // TODO: case with 2 independent (non-nested) forwards in same req
+    if (p_cmd->cmd != FORWARD || m->req_id != req_id)
+        return;
+    fwd_opts_t *fwd = cmd_get_opts(fwd_opts_t, p_cmd);
     if (fwd->retries > 0) {
         dw_log("TIMEOUT expired, retry: %d\n", fwd->retries);
         
