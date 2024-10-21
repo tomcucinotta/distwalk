@@ -7,7 +7,14 @@ run test_distrib_debug --help
 run test_distrib_debug -d 20
 run test_distrib_debug -d 20 -n 10
 
-for dist in unif:min=20,max=40 exp:20 exp:20,min=10,max=40 norm:20,std=5 norm:20,std=5,min=10,max=40 gamma:20,k=1,scale=2 gamma:20,k=2,scale=2 seq:min=1000,max=2000 seq:min=1000,max=2000,step=250; do
+run test_distrib_debug -d 15k
+run test_distrib_debug -d 15K
+run test_distrib_debug -d 15m
+run test_distrib_debug -d 15M
+run test_distrib_debug -d 15g
+run test_distrib_debug -d 15G
+
+for dist in unif:min=20,max=40 exp:20 exp:20,min=10,max=40 norm:20,std=5 norm:20,std=5,min=10,max=40 gamma:20,k=1,scale=2 gamma:20,k=2,scale=2 aseq:min=1000,max=2000 aseq:min=1000,max=2000,step=250; do
     run test_distrib_debug -d $dist
 done
 
