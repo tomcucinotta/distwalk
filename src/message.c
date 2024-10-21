@@ -61,28 +61,16 @@ inline command_t* message_first_cmd(message_t *m) {
     return &m->cmds[0];
 }
 
-// copy a message, and its commands starting from cmd until the final REPLY is found
+// copy a message, and its commands starting from cmd until the matching REPLY is found
 // m_dst->req_size should contain the available size
 command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     // copy message header
     m_dst->req_id = m->req_id;
-    int nested_fwd = 0;
-    int i = 0;
     command_t *itr = cmd;
-
-    while (itr->cmd != EOM) {
-        if (itr->cmd == REPLY) {
-            if (nested_fwd == 0)
-                break;
-            else
-                nested_fwd--;
-        } else if (itr->cmd == FORWARD)
-            nested_fwd++;
-        i++;
-        itr = cmd_next(itr);
-    }
-    if (itr->cmd != EOM)
-        itr = cmd_next(itr);
+    while (itr->cmd != EOM && itr->cmd != REPLY)
+        itr = message_skip_cmds(m, cmd, 1);
+    command_t *reply_cmd = itr;
+    itr = cmd_next(itr);
     int cmds_len = ((unsigned char*)itr - (unsigned char*)cmd);
     int skipped_len = ((unsigned char*)cmd - (unsigned char*)message_first_cmd(m));
     if (m_dst->req_size < cmds_len + cmd_type_size(EOM))
@@ -93,7 +81,7 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     end_command->cmd = EOM;
     m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
 
-    return itr;
+    return reply_cmd;
 }
 
 command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip) {
