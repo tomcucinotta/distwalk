@@ -43,6 +43,8 @@ int no_delay = 1;
 int use_per_session_output = 0;
 int conn_retry_num = 1;
 int conn_retry_period_ms = 200;
+int conn_nonblock = 0;
+int conn_times = 0;
 
 #define MAX_THREADS 256
 pthread_t sender[MAX_THREADS];
@@ -184,13 +186,13 @@ int connect_retry(int thread_id, int sess_id) {
         /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
          * this case) */
         if (proto == TCP) {
-            clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM, 0);
+            clientSocket[thread_id] = socket(PF_INET, SOCK_STREAM | (conn_nonblock ? SOCK_NONBLOCK : 0), 0);
 
             sys_check(setsockopt(clientSocket[thread_id], IPPROTO_TCP,
                                  TCP_NODELAY, (void *)&no_delay,
                                  sizeof(no_delay)));
         } else {
-            clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM, 0);
+            clientSocket[thread_id] = socket(PF_INET, SOCK_DGRAM | (conn_nonblock ? SOCK_NONBLOCK : 0), 0);
         }
 
         dw_log("Binding to %s:%d\n", inet_ntoa(myaddr.sin_addr),
@@ -210,7 +212,8 @@ int connect_retry(int thread_id, int sess_id) {
          * ----*/
         dw_log("Connecting to %s:%d (sess_id=%d, retry=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), sess_id, conn_retry);
 
-        if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, sizeof(serveraddr))) == 0) {
+        if ((rv = connect(clientSocket[thread_id], (struct sockaddr *)&serveraddr, sizeof(serveraddr))) == 0 || (rv == -1 && errno == EINPROGRESS)) {
+            rv = 0;
             break;
         } else {
             close(clientSocket[thread_id]);
@@ -233,9 +236,11 @@ void *thread_receiver(void *data) {
         thread_data_t thr_data;
         if (i % pkts_per_session == 0) {
             struct timespec ts1, ts2;
-            clock_gettime(CLOCK_MONOTONIC, &ts1);
+            if (conn_times)
+                clock_gettime(CLOCK_MONOTONIC, &ts1);
             int rv = connect_retry(thread_id, i / pkts_per_session);
-            clock_gettime(CLOCK_MONOTONIC, &ts2);
+            if (conn_times)
+                clock_gettime(CLOCK_MONOTONIC, &ts2);
             // check if connection succeeded
             if (rv != 0) {
                 close(clientSocket[thread_id]);
@@ -243,9 +248,10 @@ void *thread_receiver(void *data) {
                 exit(EXIT_FAILURE);
             }
 
-            printf("conn_time: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n",
-                   (ts2.tv_sec-ts1.tv_sec)*1000000+(ts2.tv_nsec-ts1.tv_nsec)/1000,
-                   i, thread_id, i / (int)pkts_per_session);
+            if (conn_times)
+                printf("conn_time: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n",
+                       (ts2.tv_sec-ts1.tv_sec)*1000000+(ts2.tv_nsec-ts1.tv_nsec)/1000,
+                       i, thread_id, i / (int)pkts_per_session);
 
             /* spawn sender once connection is established */
 
@@ -378,6 +384,8 @@ enum argp_client_option_keys {
     TO_OPT_ARG,
     CONN_RETRY_NUM,
     CONN_RETRY_PERIOD,
+    CONN_TIMES,
+    CONN_NONBLOCK,
 };
 
 struct argp_client_arguments {
@@ -416,6 +424,8 @@ static struct argp_option argp_client_options[] = {
     { "ns",                 NUM_SESSIONS,           "n", OPTION_ALIAS},      
     { "retry-num",          CONN_RETRY_NUM,         "n",                                          0, "Number of connection retries to the (initial) distwalk node in case of failure"},
     { "retry-period",       CONN_RETRY_PERIOD,      "msec",                                       0, "Interval between subsequent connection retries to the (initial) distwalk node"},
+    { "conn-times",         CONN_TIMES,              0,                                           0, "Output also connect() times"},
+    { "non-block",          CONN_NONBLOCK,           0,                                           0, "Set SOCK_NONBLOCK on connect()"},
     { "no-delay",           NO_DELAY,             "0|1",                                          0, "Set value of TCP_NODELAY socket option"},
     { "nd",                 NO_DELAY,             "0|1", OPTION_ALIAS },
     { "per-session-output", PER_SESSION_OUTPUT,       0,                                          0, "Output response times at end of each session (implies some delay between sessions but saves memory)" },
@@ -624,6 +634,12 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case CONN_RETRY_PERIOD:
         conn_retry_period_ms = atoi(arg);
         check(conn_retry_period_ms >= 200);
+        break;
+    case CONN_TIMES:
+        conn_times = 1;
+        break;
+    case CONN_NONBLOCK:
+        conn_nonblock = 1;
         break;
     case PER_SESSION_OUTPUT:
         use_per_session_output = 1;
