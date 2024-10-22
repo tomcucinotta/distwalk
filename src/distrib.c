@@ -146,9 +146,9 @@ int pd_parse(pd_spec_t *p, char *s) {
             || sscanf_unit(tok, "k=%lf", &k) == 1
             || sscanf_unit(tok, "scale=%lf", &scale) == 1
             || sscanf_unit(tok, "avg=%lf", &p->val) == 1
-            || sscanf_unit(tok, "%lf", &p->val) == 1
             || ((p->prob == ARITH_SEQ || p->prob == GEO_SEQ) && sscanf_unit(tok, "step=%lf", &p->std) == 1)
             || (p->prob == SFILE && sscanf(tok, "col=%d", &col) == 1)
+            || sscanf_unit(tok, "%lf", &p->val) == 1
             )
                 continue;
         if (p->prob == SFILE) {
@@ -170,19 +170,19 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->std = 1;
     if ((p->prob == GEO_SEQ) && isnan(p->std))
         p->std = 2;
-    if ((p->prob == ARITH_SEQ || p->prob == GEO_SEQ) && isnan(p->val)) {
-        if (p->std >= 0)
-            p->val = p->min;
-        else
-            p->val = p->max;
-    }
+
+    if (p->prob == ARITH_SEQ && isnan(p->val))
+        p->val = p->std >= 0 ? p->min : p->max;
+    if (p->prob == GEO_SEQ && isnan(p->val))
+        p->val = p->std >= 1 ? p->min : p->max;
+
     check(p->prob != FIXED || !isnan(p->val));
     check(p->prob != UNIF || (!isnan(p->min) && !isnan(p->max)));
     check(p->prob != EXPON || (!isnan(p->val) && isnan(p->std)));
     check(p->prob != NORM || (!isnan(p->val) && !isnan(p->std)));
     check(p->prob != GAMMA || (!isnan(p->val) && !isnan(p->std)));
-    check(p->prob != ARITH_SEQ || (!isnan(p->min) && !isnan(p->max)));
-    check(p->prob != GEO_SEQ || (!isnan(p->min) && !isnan(p->max)));
+    check(p->prob != ARITH_SEQ || (!isnan(p->val) && ( (p->std >= 0 && !isnan(p->max)) || (p->std < 0 && !isnan(p->min)) ) ));
+    check(p->prob != GEO_SEQ || (!isnan(p->val) && ( (p->std >= 1 && !isnan(p->max)) || (p->std < 1 && !isnan(p->min)) ) ));
     return 1;
 }
 
