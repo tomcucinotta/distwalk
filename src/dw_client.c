@@ -45,6 +45,15 @@ int conn_retry_num = 1;
 int conn_retry_period_ms = 200;
 int conn_nonblock = 0;
 int conn_times = 0;
+int staggered_send = 0;
+
+struct argp_client_arguments {
+    int num_sessions;
+    int num_threads;
+    char clienthostport[MAX_HOSTPORT_STRLEN];
+    char nodehostport[MAX_HOSTPORT_STRLEN];
+    pd_spec_t last_resp_size;
+} input_args;
 
 #define MAX_THREADS 256
 pthread_t sender[MAX_THREADS];
@@ -232,6 +241,11 @@ void *thread_receiver(void *data) {
     message_t *m = NULL;
     int recv = 0;
 
+    if (staggered_send) {
+        struct timespec ts_sync = ts_add(ts_start, (struct timespec) { .tv_sec = 0, .tv_nsec = 200000000l + thread_id * send_period_us_pd.val * 1000 / input_args.num_threads });
+        clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_sync, NULL);
+    }
+
     for (int i = 0; i < num_pkts; i++) {
         thread_data_t thr_data;
         if (i % pkts_per_session == 0) {
@@ -386,14 +400,7 @@ enum argp_client_option_keys {
     CONN_RETRY_PERIOD,
     CONN_TIMES,
     CONN_NONBLOCK,
-};
-
-struct argp_client_arguments {
-    int num_sessions;
-    int num_threads;
-    char clienthostport[MAX_HOSTPORT_STRLEN];
-    char nodehostport[MAX_HOSTPORT_STRLEN];
-    pd_spec_t last_resp_size;
+    STAG_SEND
 };
 
 static struct argp_option argp_client_options[] = {
@@ -428,6 +435,7 @@ static struct argp_option argp_client_options[] = {
     { "non-block",          CONN_NONBLOCK,           0,                                           0, "Set SOCK_NONBLOCK on connect()"},
     { "no-delay",           NO_DELAY,             "0|1",                                          0, "Set value of TCP_NODELAY socket option"},
     { "nd",                 NO_DELAY,             "0|1", OPTION_ALIAS },
+    { "stag-send",          STAG_SEND,                0,                                          0, "Enable staggered send among sender threads"},
     { "per-session-output", PER_SESSION_OUTPUT,       0,                                          0, "Output response times at end of each session (implies some delay between sessions but saves memory)" },
     { "pso",                PER_SESSION_OUTPUT,       0, OPTION_ALIAS },
     { "script-filename",    SCRIPT_FILENAME,        "path/to/file",                               0, "Continue reading commands from script file (can be intermixed with regular options)"},
@@ -641,6 +649,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case CONN_NONBLOCK:
         conn_nonblock = 1;
         break;
+    case STAG_SEND:
+        staggered_send = 1;
+        break;
     case PER_SESSION_OUTPUT:
         use_per_session_output = 1;
         break;
@@ -742,7 +753,6 @@ int main(int argc, char *argv[]) {
     conn_init();
     req_init();
 
-    struct argp_client_arguments input_args;
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
     
     // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
