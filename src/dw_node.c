@@ -301,7 +301,7 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
 
         if (fwd.proto == TCP) {
             dw_log("Adding fd %d to dw_poll %p\n", clientSocket, p_poll);
-            check(dw_poll_add(p_poll, clientSocket, DW_POLL_OUT | DW_POLL_1SHOT, i2l(CONNECT, fwd_conn_id)) == 0);
+            check(dw_poll_add(p_poll, clientSocket, DW_POLLOUT | DW_POLLONESHOT, i2l(CONNECT, fwd_conn_id)) == 0);
 
             dw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { addr.sin_addr.s_addr }),
                    ntohs(addr.sin_port));
@@ -656,7 +656,7 @@ int establish_conn(dw_poll_t *p_poll, int conn_id) {
     // this may trigger send_messages() on return, if messages have already been enqueued
     conn_set_status_by_id(conn_id, READY);
 
-    check(dw_poll_mod(p_poll, DW_POLL_IN, conns[conn_id].sock, i2l(SOCKET, conn_id)) == 0);
+    check(dw_poll_mod(p_poll, DW_POLLIN, conns[conn_id].sock, i2l(SOCKET, conn_id)) == 0);
 
     return 1;
 }
@@ -721,24 +721,24 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     if ((type == SOCKET || type == CONNECT) && (conn->sock == -1 || conn->recv_buf == NULL))
         return;
 
-    if (pflags & DW_POLL_ERR) {
+    if (pflags & DW_POLLERR) {
         dw_log("Connection to remote peer refused, conn_id=%d\n", conn_id);
         goto err;
     }
 
-    if (pflags & DW_POLL_IN) {
+    if (pflags & DW_POLLIN) {
         dw_log("calling recv_mesg()\n");
         if (!conn_recv(conn))
             goto err;
     }
-    if ((pflags & DW_POLL_OUT) && (type == CONNECT)) {
+    if ((pflags & DW_POLLOUT) && (type == CONNECT)) {
         dw_log("calling establish_conn()\n");
         if (!establish_conn(p_poll, conn_id))
             goto err;
         infos->active_conns++;
         // we need the send_messages() below to still be tried afterwards
     }
-    if ((pflags & DW_POLL_OUT) && conn->curr_send_size > 0 && conn_get_status(conn) != CONNECTING && conn_get_status(conn) != NOT_INIT) {
+    if ((pflags & DW_POLLOUT) && conn->curr_send_size > 0 && conn_get_status(conn) != CONNECTING && conn_get_status(conn) != NOT_INIT) {
         dw_log("calling send_mesg()\n");
         if (!conn_send(conn))
             goto err;
@@ -752,13 +752,13 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     if (conn->curr_send_size > 0 && conn_get_status(conn) == READY) {
         dw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns->sock, conn_id, conns->curr_send_size);
-        check(dw_poll_mod(p_poll, conns->sock, DW_POLL_IN | DW_POLL_OUT, i2l(SOCKET, conn_id)) == 0);
+        check(dw_poll_mod(p_poll, conns->sock, DW_POLLIN | DW_POLLOUT, i2l(SOCKET, conn_id)) == 0);
         conn_set_status(conn, SENDING);
     }
     if (conn->curr_send_size == 0 && conn_get_status(conn) == SENDING) {
         dw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conn->sock, conn_id, conn->curr_send_size);
-        check(dw_poll_mod(p_poll, conns->sock, DW_POLL_IN, i2l(SOCKET, conn_id)) == 0);
+        check(dw_poll_mod(p_poll, conns->sock, DW_POLLIN, i2l(SOCKET, conn_id)) == 0);
         conn_set_status(conn, READY);
         infos->active_conns++;
     }
@@ -793,12 +793,12 @@ void* storage_worker(void* args) {
 
     // Add conn_worker(s) -> storage_worker communication pipe
     for (int i = 0; i < conn_threads; i++) {
-        if (dw_poll_add(p_poll, infos->storefd[i], DW_POLL_IN, i2l(STORAGE, infos->storefd[i])) != 0)
+        if (dw_poll_add(p_poll, infos->storefd[i], DW_POLLIN, i2l(STORAGE, infos->storefd[i])) != 0)
             perror("dw_epoll_add(): storefd failed");
     }
 
     // Add termination handler
-    if (dw_poll_add(p_poll, terminationfd, DW_POLL_IN, i2l(TERMINATION, terminationfd)) < 0)
+    if (dw_poll_add(p_poll, terminationfd, DW_POLLIN, i2l(TERMINATION, terminationfd)) < 0)
         perror("dw_poll_add(): terminationfd failed");
 
     // Add periodic sync timerfd
@@ -824,7 +824,7 @@ void* storage_worker(void* args) {
             exit(EXIT_FAILURE);
         }
 
-        if (dw_poll_add(p_poll, infos->timerfd, DW_POLL_IN, i2l(TIMER, infos->timerfd)) < 0)
+        if (dw_poll_add(p_poll, infos->timerfd, DW_POLLIN, i2l(TIMER, infos->timerfd)) < 0)
             perror("dw_poll_add(): timerfd failed");
     }
 
@@ -939,22 +939,22 @@ void* conn_worker(void* args) {
             aux = i2l(LISTEN, infos->listen_sock);
         else // UDP
             aux = i2l(SOCKET, conn_id);
-        check(dw_poll_add(&infos->dw_poll, infos->listen_sock, DW_POLL_IN, aux) == 0);
+        check(dw_poll_add(&infos->dw_poll, infos->listen_sock, DW_POLLIN, aux) == 0);
     }
 
     // Add termination fd
-    check(dw_poll_add(&infos->dw_poll, terminationfd, DW_POLL_IN, i2l(TERMINATION, terminationfd)) == 0);
+    check(dw_poll_add(&infos->dw_poll, terminationfd, DW_POLLIN, i2l(TERMINATION, terminationfd)) == 0);
 
     // Add timer fd
-    check(dw_poll_add(&infos->dw_poll, infos->timerfd, DW_POLL_IN, i2l(TIMER, infos->timerfd)) == 0);
+    check(dw_poll_add(&infos->dw_poll, infos->timerfd, DW_POLLIN, i2l(TIMER, infos->timerfd)) == 0);
 
     // Add stat fd
     if (infos->statfd != -1)
-        check(dw_poll_add(&infos->dw_poll, infos->statfd, DW_POLL_IN, i2l(STATS, infos->statfd)) == 0);
+        check(dw_poll_add(&infos->dw_poll, infos->statfd, DW_POLLIN, i2l(STATS, infos->statfd)) == 0);
 
     // Add storage reply fd
     if (infos->storefd != -1)
-        check(dw_poll_add(&infos->dw_poll, infos->store_replyfd, DW_POLL_IN, i2l(STORAGE, infos->store_replyfd)) == 0);
+        check(dw_poll_add(&infos->dw_poll, infos->store_replyfd, DW_POLLIN, i2l(STORAGE, infos->store_replyfd)) == 0);
 
     while (running) {
         dw_log("epoll_wait()ing...\n");
@@ -1001,7 +1001,7 @@ void* conn_worker(void* args) {
 
                 int next_thread_id = accept_mode == AM_PARENT ? (atomic_fetch_add(&next_thread_cnt, 1) % conn_threads) : (infos - conn_worker_infos);
                 // TODO: add a pipe to tell next_thread_id to perform this, unsafe here
-                if (dw_poll_add(&conn_worker_infos[next_thread_id].dw_poll, conn_sock, DW_POLL_IN, i2l(SOCKET, conn_id)) != 0)
+                if (dw_poll_add(&conn_worker_infos[next_thread_id].dw_poll, conn_sock, DW_POLLIN, i2l(SOCKET, conn_id)) != 0)
                         perror("dw_poll() failed");
                 dw_log("conn_id: %d assigned to connw-%d\n", conn_id, conn_worker_infos[next_thread_id].worker_id);
             } else if (type == STORAGE) {
