@@ -184,19 +184,19 @@ int dw_poll_wait(dw_poll_t *p_poll) {
             if (p_poll->u.select_fds.wr_fd[i] > max_fd)
                 max_fd = p_poll->u.select_fds.wr_fd[i];
         }
-        dw_log("calling select(): max_fd=%d\n", max_fd);
+        dw_log("select()ing: max_fd=%d\n", max_fd);
         rv = select(max_fd + 1, &p_poll->u.select_fds.rd_fds, &p_poll->u.select_fds.wr_fds, &p_poll->u.select_fds.ex_fds, NULL);
         // make sure we don't wastefully iterate if select() returned 0 fds ready or error
         p_poll->u.select_fds.iter = rv > 0 ? 0 : p_poll->u.select_fds.n_rd_fd + p_poll->u.select_fds.n_wr_fd;
         break;
     case DW_POLL:
-        dw_log("calling poll(): n_pollfds=%d\n", p_poll->u.poll_fds.n_pollfds);
+        dw_log("poll()ing: n_pollfds=%d\n", p_poll->u.poll_fds.n_pollfds);
         rv = poll(p_poll->u.poll_fds.pollfds, p_poll->u.poll_fds.n_pollfds, -1);
         // make sure we don't wastefully iterate if poll() returned 0 fds ready or error
         p_poll->u.poll_fds.iter = rv > 0 ? 0 : p_poll->u.poll_fds.n_pollfds;
         break;
     case DW_EPOLL:
-        dw_log("calling epoll(): epollfd=%d\n", p_poll->u.epoll_fds.epollfd);
+        dw_log("epoll_wait()ing: epollfd=%d\n", p_poll->u.epoll_fds.epollfd);
         rv = epoll_wait(p_poll->u.epoll_fds.epollfd, p_poll->u.epoll_fds.events, MAX_POLLFD, -1);
         p_poll->u.epoll_fds.iter = 0;
         if (rv >= 0)
