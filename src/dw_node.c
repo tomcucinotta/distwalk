@@ -844,7 +844,7 @@ void* storage_worker(void* args) {
         uint64_t aux;
         event_t type;
         dw_poll_flags pflags;
-        while ((fd = dw_poll_next(p_poll, &pflags, &aux)) != 0) {
+        while ((dw_poll_next(p_poll, &pflags, &aux)) != 0) {
             l2i(aux, (uint32_t*)&type, (uint32_t*) &fd);
 
             if (type == TERMINATION) {
@@ -957,7 +957,6 @@ void* conn_worker(void* args) {
         check(dw_poll_add(&infos->dw_poll, infos->store_replyfd, DW_POLLIN, i2l(STORAGE, infos->store_replyfd)) == 0);
 
     while (running) {
-        dw_log("epoll_wait()ing...\n");
         int nfds = dw_poll_wait(&infos->dw_poll);
         if (nfds == -1) {
             perror("dw_poll_wait()");
@@ -971,12 +970,12 @@ void* conn_worker(void* args) {
         uint64_t aux;
         dw_poll_flags pflags;
         while (dw_poll_next(&infos->dw_poll, &pflags, &aux)) {
-            int fd;
-            event_t type;
-            l2i(aux, &type, (uint32_t*) &fd);
-            dw_log("fd=%d, type=%s\n", fd, get_event_str(type));
+            int event_data;
+            event_t event_type;
+            l2i(aux, &event_type, (uint32_t*) &event_data);
+            dw_log("event_type=%s, event_data=%d (fd or conn_id)\n", get_event_str(event_type), event_data);
 
-            if (type == LISTEN) { // New connection (TCP)
+            if (event_type == LISTEN) { // New connection (TCP)
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);
                 int conn_sock;
@@ -1004,8 +1003,8 @@ void* conn_worker(void* args) {
                 if (dw_poll_add(&conn_worker_infos[next_thread_id].dw_poll, conn_sock, DW_POLLIN, i2l(SOCKET, conn_id)) != 0)
                         perror("dw_poll() failed");
                 dw_log("conn_id: %d assigned to connw-%d\n", conn_id, conn_worker_infos[next_thread_id].worker_id);
-            } else if (type == STORAGE) {
-                check(fd == infos->store_replyfd);
+            } else if (event_type == STORAGE) {
+                check(event_data == infos->store_replyfd);
 
                 int req_id_ACK;
                 if (safe_read(infos->store_replyfd, (unsigned char*) &req_id_ACK, sizeof(req_id_ACK)) < 0) {
@@ -1016,15 +1015,15 @@ void* conn_worker(void* args) {
                 dw_log("STORAGE ACK for req_id %d\n", req_id_ACK);
                 process_messages(req_get_by_id(req_id_ACK), &infos->dw_poll, infos);
                 //exec_request(infos->epollfd, &events[i], infos);
-            } else if (type == TERMINATION) {
+            } else if (event_type == TERMINATION) {
                 // no need to disarm signal, since we are killing the node anyway
                 dw_log("TERMINATION\n");
                 running = 0;
                 break;
-            } else if (type == STATS) {
+            } else if (event_type == STATS) {
                 // disarm signal
                 struct signalfd_siginfo sfdi;
-                if (read(fd, &sfdi, sizeof(struct signalfd_siginfo)) != sizeof(struct signalfd_siginfo)) {
+                if (read(event_data, &sfdi, sizeof(struct signalfd_siginfo)) != sizeof(struct signalfd_siginfo)) {
                     perror("signal read");
                     running = 0;
                     break;
@@ -1047,9 +1046,7 @@ void* conn_worker(void* args) {
 
                 break;
             } else {
-                int conn_id;
-                l2i(aux, (uint32_t*)&type, (uint32_t*) &conn_id);
-                exec_request(&infos->dw_poll, pflags, conn_id, type, infos);
+                exec_request(&infos->dw_poll, pflags, event_data, event_type, infos);
             }
         }
     }
