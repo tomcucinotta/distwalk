@@ -87,7 +87,37 @@ void pd_load_file(pd_spec_t *p, char *fname, int col) {
     p->cur_sample = 0;
 }
 
-int sscanf_unit(const char *str, const char *fmt, double *p_val) {
+int sscanf_time_us(const char *str, const char *fmt, double *p_val) {
+    int l = strlen(str);
+    if (l == 0)
+        return 0;
+    int rv = sscanf(str, fmt, p_val);
+    if (rv != 1)
+        return rv;
+    if (str[l - 1] != 's')
+        return rv;
+    check(l >= 2);
+    switch (str[l - 2]) {
+    case 'n':
+        // convert nanoseconds to microseconds
+        *p_val /= 1000;
+        break;
+    case 'u':
+        // nothing to do: microseconds don't need any conversion
+        break;
+    case 'm':
+        // convert milliseconds to microseconds
+        *p_val *= 1000;
+        break;
+    default:
+        check(str[l-2] >= '0' && str[l-2] <= '9');
+        // seconds to microseconds
+        *p_val *= 1000000;
+    }
+    return rv;
+}
+
+int sscanf_unit(const char *str, const char *fmt, double *p_val, int is_time) {
     int l = strlen(str);
     if (l == 0)
         return 0;
@@ -107,11 +137,14 @@ int sscanf_unit(const char *str, const char *fmt, double *p_val) {
     case 'G':
         *p_val *= 1000000000;
         break;
+    case 's':
+        check(is_time, "Cannot use time suffix 's' here: %s\n", str);
+        return sscanf_time_us(str, fmt, p_val);
     }
     return rv;
 }
 
-int pd_parse(pd_spec_t *p, char *s) {
+int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
     *p = (pd_spec_t) { .prob = FIXED, .val = NAN, .std = NAN, .min = NAN, .max = NAN, .samples = NULL };
     char *tok = strsep(&s, ":");
     int col = 0;        // used by SFILE
@@ -131,7 +164,7 @@ int pd_parse(pd_spec_t *p, char *s) {
         p->prob = GEO_SEQ;
     else if (strcmp(tok, "file") == 0)
         p->prob = SFILE;
-    else if (sscanf_unit(tok, "%lf", &p->val) == 1)
+    else if (sscanf_unit(tok, "%lf", &p->val, is_time) == 1)
         p->prob = FIXED;
     else {
         fprintf(stderr, "Wrong value/distribution syntax: %s\n", tok);
@@ -140,15 +173,15 @@ int pd_parse(pd_spec_t *p, char *s) {
     double k = NAN, scale = NAN; // for Gamma
     while ((tok = strsep(&s, ",")) != NULL) {
         dw_log("Processing tok: %s\n", tok);
-        if (sscanf_unit(tok, "min=%lf", &p->min) == 1
-            || sscanf_unit(tok, "max=%lf", &p->max) == 1
-            || sscanf_unit(tok, "std=%lf", &p->std) == 1
-            || sscanf_unit(tok, "k=%lf", &k) == 1
-            || sscanf_unit(tok, "scale=%lf", &scale) == 1
-            || sscanf_unit(tok, "avg=%lf", &p->val) == 1
-            || ((p->prob == ARITH_SEQ || p->prob == GEO_SEQ) && sscanf_unit(tok, "step=%lf", &p->std) == 1)
+        if (sscanf_unit(tok, "min=%lf", &p->min, is_time) == 1
+            || sscanf_unit(tok, "max=%lf", &p->max, is_time) == 1
+            || sscanf_unit(tok, "std=%lf", &p->std, is_time) == 1
+            || sscanf_unit(tok, "k=%lf", &k, 0) == 1
+            || sscanf_unit(tok, "scale=%lf", &scale, 0) == 1
+            || sscanf_unit(tok, "avg=%lf", &p->val, is_time) == 1
+            || ((p->prob == ARITH_SEQ || p->prob == GEO_SEQ) && sscanf_unit(tok, "step=%lf", &p->std, is_time) == 1)
             || (p->prob == SFILE && sscanf(tok, "col=%d", &col) == 1)
-            || sscanf_unit(tok, "%lf", &p->val) == 1
+            || sscanf_unit(tok, "%lf", &p->val, is_time) == 1
             )
                 continue;
         if (p->prob == SFILE) {
@@ -184,6 +217,21 @@ int pd_parse(pd_spec_t *p, char *s) {
     check(p->prob != ARITH_SEQ || (!isnan(p->val) && ( (p->std >= 0 && !isnan(p->max)) || (p->std < 0 && !isnan(p->min)) ) ));
     check(p->prob != GEO_SEQ || (!isnan(p->val) && ( (p->std >= 1 && !isnan(p->max)) || (p->std < 1 && !isnan(p->min)) ) ));
     return 1;
+}
+
+int pd_parse(pd_spec_t *p, char *s) {
+    return pd_parse_internal(p, s, 0);
+}
+
+int pd_parse_time(pd_spec_t *p, char *s) {
+    return pd_parse_internal(p, s, 1);
+}
+
+int pd_parse_bytes(pd_spec_t *p, char *s) {
+    int l = strlen(s);
+    if (l > 0 && (s[l-1] == 'b' || s[l-1] == 'B'))
+        s[l-1] = 0;
+    return pd_parse(p, s);
 }
 
 double pd_sample(pd_spec_t *p) {

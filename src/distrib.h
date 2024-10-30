@@ -44,6 +44,14 @@ char *pd_str(pd_spec_t *p);
 // return 1 if probabilistic distribution successfully parsed from s
 int pd_parse(pd_spec_t *p, char *s);
 
+// return 1 if probabilistic time distribution successfully parsed from s
+// (understands ns, us, ms, s, stores values in microseconds)
+int pd_parse_time(pd_spec_t *p, char *s);
+
+// return 1 if probabilistic bytes distribution successfully parsed from s
+// (understands b, kb, mb, gb, stores values in bytes)
+int pd_parse_bytes(pd_spec_t *p, char *s);
+
 // return natural length of samples that can be extracted from *p,
 // defined only for ARITH_SEQ, GEO_SEQ and SFILE, or -1 for other pd types
 int pd_len(pd_spec_t *p);

@@ -479,7 +479,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             num_pkts = atoi(arg);
         break;
     case PERIOD:
-        check(pd_parse(&send_period_us_pd, arg), "Wrong period specification");
+        check(pd_parse_time(&send_period_us_pd, arg), "Wrong period specification");
         break;
     case RATE:
         check(pd_parse(&send_rate_pd, arg), "Wrong rate specification");
@@ -493,14 +493,14 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break;
     case COMP_TIME: {
         pd_spec_t val;
-        check(pd_parse(&val, arg), "Wrong computation time specification");
+        check(pd_parse_time(&val, arg), "Wrong computation time specification");
         ccmd_add(ccmd, COMPUTE, &val);
         break; }
     case LOAD_OFFSET: {
-        check(pd_parse(&load_offset_pd, arg), "Wrong load-offset specification");
+        check(pd_parse_bytes(&load_offset_pd, arg), "Wrong load-offset specification");
         break; }
     case STORE_OFFSET: {
-        check(pd_parse(&store_offset_pd, arg), "Wrong store-offset specification");
+        check(pd_parse_bytes(&store_offset_pd, arg), "Wrong store-offset specification");
         break; }
     case STORE_DATA: {        
         uint8_t sync = 1;
@@ -513,7 +513,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 sync = 1;
             } else {
                 pd_spec_t val;
-                check(pd_parse(&val, arg), "Wrong store data size specification");
+                check(pd_parse_bytes(&val, arg), "Wrong store data size specification");
                 ccmd_add(ccmd, STORE, &val);
                 ccmd_last_action(ccmd)->pd_val2 = store_offset_pd;
             }
@@ -526,7 +526,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break; }
     case LOAD_DATA: {
         pd_spec_t val;
-        check(pd_parse(&val, arg), "Wrong load data size specification");
+        check(pd_parse_bytes(&val, arg), "Wrong load data size specification");
         ccmd_add(ccmd, LOAD, &val);
         ccmd_last_action(ccmd)->pd_val2 = load_offset_pd;
         break; }
@@ -608,7 +608,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         reply_node->resp.n_ack = n_ack;
         break; }
     case SEND_REQUEST_SIZE:
-        check(pd_parse(&send_pkt_size_pd, arg), "Wrong send request size specification");
+        check(pd_parse_bytes(&send_pkt_size_pd, arg), "Wrong send request size specification");
         
         check(send_pkt_size_pd.val >= MIN_SEND_SIZE, "Too small send request size, minimum is %lu", MIN_SEND_SIZE);
         check(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE, "Too big send request size, maximum is %d", BUF_SIZE);
@@ -616,7 +616,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case RESPONSE_SIZE: {
         //TODO: attach last -rs to original reply
         pd_spec_t val;
-        check(pd_parse(&val, arg), "Wrong response size specification");
+        check(pd_parse_bytes(&val, arg), "Wrong response size specification");
         val.min = MIN_REPLY_SIZE;
         val.max = BUF_SIZE;
         check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
