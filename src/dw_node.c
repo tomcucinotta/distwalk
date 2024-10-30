@@ -656,7 +656,7 @@ int establish_conn(dw_poll_t *p_poll, int conn_id) {
     // this may trigger send_messages() on return, if messages have already been enqueued
     conn_set_status_by_id(conn_id, READY);
 
-    check(dw_poll_mod(p_poll, DW_POLLIN, conns[conn_id].sock, i2l(SOCKET, conn_id)) == 0);
+    sys_check(dw_poll_mod(p_poll, DW_POLLIN, conns[conn_id].sock, i2l(SOCKET, conn_id)));
 
     return 1;
 }
@@ -752,13 +752,13 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     if (conn->curr_send_size > 0 && conn_get_status(conn) == READY) {
         dw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conns->sock, conn_id, conns->curr_send_size);
-        check(dw_poll_mod(p_poll, conns->sock, DW_POLLIN | DW_POLLOUT, i2l(SOCKET, conn_id)) == 0);
+        sys_check(dw_poll_mod(p_poll, conns->sock, DW_POLLIN | DW_POLLOUT, i2l(SOCKET, conn_id)));
         conn_set_status(conn, SENDING);
     }
     if (conn->curr_send_size == 0 && conn_get_status(conn) == SENDING) {
         dw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
                conn->sock, conn_id, conn->curr_send_size);
-        check(dw_poll_mod(p_poll, conns->sock, DW_POLLIN, i2l(SOCKET, conn_id)) == 0);
+        sys_check(dw_poll_mod(p_poll, conns->sock, DW_POLLIN, i2l(SOCKET, conn_id)));
         conn_set_status(conn, READY);
         infos->active_conns++;
     }
