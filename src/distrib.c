@@ -50,7 +50,7 @@ void pd_init(long int seed) {
     srand48_r(seed, &rnd_buf);
 }
 
-void pd_load_file(pd_spec_t *p, char *fname, int col) {
+void pd_load_file(pd_spec_t *p, char *fname, int col, char *sep) {
     FILE *f = fopen(fname, "r");
     check(f != NULL, "Could not open file: %s\n", fname);
     int n = 0;
@@ -64,7 +64,7 @@ void pd_load_file(pd_spec_t *p, char *fname, int col) {
         char *s = line;
         int c = col;
         do {
-            colstr = strsep(&s, ",");
+            colstr = strsep(&s, sep);
         } while (c-- > 0 && colstr != NULL);
         check(c == -1 && colstr != NULL, "Could not find col %d in line %d of file %s: %s\n", col, n, fname, line);
         double val;
@@ -149,6 +149,7 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
     char *tok = strsep(&s, ":");
     int col = 0;        // used by SFILE
     char *fname = NULL; // used by SFILE
+    char *sep = ",";    // used by SFILE
     check(tok, "Wrong value/distribution syntax\n");
     if (strcmp(tok, "unif") == 0)
         p->prob = UNIF;
@@ -170,7 +171,7 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
         fprintf(stderr, "Wrong value/distribution syntax: %s\n", tok);
         exit(EXIT_FAILURE);
     }
-    double k = NAN, scale = NAN; // for Gamma
+    double k = NAN, scale = NAN; // for gamma:
     while ((tok = strsep(&s, ",")) != NULL) {
         dw_log("Processing tok: %s\n", tok);
         if (sscanf_unit(tok, "min=%lf", &p->min, is_time) == 1
@@ -184,6 +185,11 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
             || sscanf_unit(tok, "%lf", &p->val, is_time) == 1
             )
                 continue;
+        if (p->prob == SFILE && strncmp(tok, "sep=", 4) == 0) {
+            sep = tok + 4;
+            check(strlen(sep) > 0);
+            continue;
+        }
         if (p->prob == SFILE) {
             fname = tok;
             continue;
@@ -193,7 +199,7 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
     }
     if (p->prob == SFILE) {
         check(fname != NULL, "Missing filename for file: value/distribution syntax\n");
-        pd_load_file(p, fname, col);
+        pd_load_file(p, fname, col, sep);
     }
     if (p->prob == GAMMA && !isnan(k) && !isnan(scale)) {
         p->val = k * scale;
