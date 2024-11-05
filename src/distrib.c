@@ -172,6 +172,7 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
         exit(EXIT_FAILURE);
     }
     double k = NAN, scale = NAN; // for gamma:
+    double file_unit_us = 1.0;      // for file:
     while ((tok = strsep(&s, ",")) != NULL) {
         dw_log("Processing tok: %s\n", tok);
         if (sscanf_unit(tok, "min=%lf", &p->min, is_time) == 1
@@ -185,12 +186,30 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
             || sscanf_unit(tok, "%lf", &p->val, is_time) == 1
             )
                 continue;
-        if (p->prob == SFILE && strncmp(tok, "sep=", 4) == 0) {
-            sep = tok + 4;
-            check(strlen(sep) > 0);
-            continue;
-        }
         if (p->prob == SFILE) {
+            if (strncmp(tok, "sep=", 4) == 0) {
+                sep = tok + 4;
+                check(strlen(sep) > 0);
+                continue;
+            } else if (strncmp(tok, "unit=", 5) == 0) {
+                if (strcmp(tok + 5, "k") == 0 || strcmp(tok + 5, "K") == 0)
+                    file_unit_us = 1e3;
+                else if (strcmp(tok + 5, "m") == 0 || strcmp(tok + 5, "M") == 0)
+                    file_unit_us = 1e6;
+                else if (strcmp(tok + 5, "g") == 0 || strcmp(tok + 5, "G") == 0)
+                    file_unit_us = 1e9;
+                else if (is_time && strcmp(tok + 5, "s") == 0)
+                    file_unit_us = 1e6;
+                else if (is_time && strcmp(tok + 5, "ms") == 0)
+                    file_unit_us = 1e3;
+                else if (is_time && strcmp(tok + 5, "us") == 0)
+                    file_unit_us = 1.0;
+                else if (is_time && strcmp(tok + 5, "ns") == 0)
+                    file_unit_us = 1e-3;
+                else
+                    check(0, "Wrong file unit specification: %s\n", tok);
+                continue;
+            }
             fname = tok;
             continue;
         }
@@ -200,6 +219,8 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
     if (p->prob == SFILE) {
         check(fname != NULL, "Missing filename for file: value/distribution syntax\n");
         pd_load_file(p, fname, col, sep);
+        for (int i = 0; i < p->num_samples; i++)
+            p->samples[i] *= file_unit_us;
     }
     if (p->prob == GAMMA && !isnan(k) && !isnan(scale)) {
         p->val = k * scale;
