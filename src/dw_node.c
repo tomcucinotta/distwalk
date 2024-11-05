@@ -307,15 +307,17 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
                    ntohs(addr.sin_port));
 
             int rv = connect(clientSocket, &addr, sizeof(addr));
-            dw_log("connect() returned: %d (errno: %s)\n", rv, strerror(errno));
             if (rv == -1) {
                 if (errno != EAGAIN && errno != EINPROGRESS) {
                     dw_log("unexpected error from connect(): %s\n", strerror(errno));
                     return 0;
                 }
+
+                dw_log("connect(): %s)\n", strerror(errno));
                 // normal case of asynchronous connect
                 conn_set_status_by_id(fwd_conn_id, CONNECTING);
             } else {
+                dw_log("connect(): Ready\n");
                 conn_set_status_by_id(fwd_conn_id, READY);
                 infos->active_conns++;
             }
@@ -656,7 +658,7 @@ int establish_conn(dw_poll_t *p_poll, int conn_id) {
     // this may trigger send_messages() on return, if messages have already been enqueued
     conn_set_status_by_id(conn_id, READY);
 
-    sys_check(dw_poll_mod(p_poll, DW_POLLIN, conns[conn_id].sock, i2l(SOCKET, conn_id)));
+    sys_check(dw_poll_mod(p_poll, conns[conn_id].sock, DW_POLLIN, i2l(SOCKET, conn_id)));
 
     return 1;
 }
