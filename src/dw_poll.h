@@ -8,7 +8,7 @@
 typedef enum { DW_SELECT, DW_POLL, DW_EPOLL } dw_poll_type_t;
 
 // these flags are OR-ed both in input and output to dw_poll_*()
-typedef enum { DW_POLLIN=1, DW_POLLOUT=2, DW_POLLONESHOT=4, DW_POLLERR=8 } dw_poll_flags;
+typedef enum { DW_POLLIN=0x001, DW_POLLOUT=0x004, DW_POLLONESHOT=1u << 30, DW_POLLERR=0x008, DW_POLLHUP=0x010 } dw_poll_flags;
 
 #define MAX_POLLFD 8192
 #define MAX_POLL_EVENTS 16
