@@ -74,8 +74,23 @@ req_info_t* conn_req_add(conn_info_t *conn) {
 }
 
 static void conn_reset(conn_info_t *conn) {
-    for (req_info_t *temp = conn->req_list; temp != NULL; temp = req_free(temp))
-        ;
+    for (int i = 0; i < MAX_CONNS; i++)
+        for (req_info_t *temp = conns[i].req_list; temp != NULL; temp = temp->next) {
+            dw_log("conn_reset(%d): conn: %d, req_id: %d, .conn_id: %d",
+                   conn_get_id_by_ptr(conn), i, temp->req_id, temp->conn_id);
+            if (temp->message_ptr)
+                msg_log(req_get_message(temp), "");
+            else
+                dw_log("\n");
+        }
+    for (req_info_t *temp = conn->req_list; temp != NULL; temp = req_free(temp)) {
+        dw_log("conn_reset(): freeing req_id: %d, conn_id: %d, .conn_id: %d",
+               temp->req_id, conn_get_id_by_ptr(conn), temp->conn_id);
+        if (temp->message_ptr)
+            msg_log(req_get_message(temp), "");
+        else
+            dw_log("\n");
+    }
 }
 
 req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
