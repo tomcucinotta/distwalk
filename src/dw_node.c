@@ -313,7 +313,7 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
                     return 0;
                 }
 
-                dw_log("connect(): %s)\n", strerror(errno));
+                dw_log("connect(): %s\n", strerror(errno));
                 // normal case of asynchronous connect
                 conn_set_status_by_id(fwd_conn_id, CONNECTING);
             } else {
@@ -723,7 +723,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     if ((type == SOCKET || type == CONNECT) && (conn->sock == -1 || conn->recv_buf == NULL))
         return;
 
-    if (pflags & DW_POLLERR) {
+    if (pflags & DW_POLLERR || pflags & DW_POLLHUP) {
         dw_log("Connection to remote peer refused, conn_id=%d\n", conn_id);
         goto err;
     }
