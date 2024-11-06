@@ -203,7 +203,7 @@ void ccmd_log(ccmd_t* q) {
                 break;
             case MULTI_FORWARD:
             case FORWARD:
-                sprintf(opts, "%s://%s:%d,%sb", curr->fwd.proto == TCP ? "tcp" : "udp", inet_ntoa((struct in_addr) {curr->fwd.fwd_host}), ntohs(curr->fwd.fwd_port), pd_str(&curr->pd_val));
+                sprintf(opts, "%s://%s:%d,%sb,retries=%d,timeout=%d", curr->fwd.proto == TCP ? "tcp" : "udp", inet_ntoa((struct in_addr) {curr->fwd.fwd_host}), ntohs(curr->fwd.fwd_port), pd_str(&curr->pd_val), curr->fwd.retries, curr->fwd.timeout);
                 break;
             case REPLY:
                 sprintf(opts, "%sb,%d", pd_str(&curr->pd_val), curr->resp.n_ack);

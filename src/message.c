@@ -132,7 +132,7 @@ inline const void msg_log(message_t* m, char* padding) {
             break;
         case MULTI_FORWARD:
         case FORWARD:
-            sprintf(opts, "%s://%s:%d,%u", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", inet_ntoa((struct in_addr) {cmd_get_opts(fwd_opts_t, c)->fwd_host}), ntohs(cmd_get_opts(fwd_opts_t, c)->fwd_port), cmd_get_opts(fwd_opts_t, c)->pkt_size);
+            sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", inet_ntoa((struct in_addr) {cmd_get_opts(fwd_opts_t, c)->fwd_host}), ntohs(cmd_get_opts(fwd_opts_t, c)->fwd_port), cmd_get_opts(fwd_opts_t, c)->pkt_size, cmd_get_opts(fwd_opts_t, c)->retries, cmd_get_opts(fwd_opts_t, c)->timeout);
             break;
         case REPLY:
             sprintf(opts, "%db,%d", cmd_get_opts(reply_opts_t, c)->resp_size, cmd_get_opts(reply_opts_t, c)->n_ack);
