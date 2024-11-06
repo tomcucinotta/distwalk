@@ -214,20 +214,13 @@ int dw_poll_wait(dw_poll_t *p_poll) {
 int dw_poll_next(dw_poll_t *p_poll, dw_poll_flags *flags, uint64_t *aux) {
     switch (p_poll->poll_type) {
     case DW_SELECT:
-        char c;
-
         while (p_poll->u.select_fds.iter < p_poll->u.select_fds.n_rd_fd && !FD_ISSET(p_poll->u.select_fds.rd_fd[p_poll->u.select_fds.iter], &p_poll->u.select_fds.rd_fds))
             p_poll->u.select_fds.iter++;
         if (p_poll->u.select_fds.iter < p_poll->u.select_fds.n_rd_fd && FD_ISSET(p_poll->u.select_fds.rd_fd[p_poll->u.select_fds.iter], &p_poll->u.select_fds.rd_fds)) {
             *aux = p_poll->u.select_fds.rd_aux[p_poll->u.select_fds.iter];
             *flags = DW_POLLIN;
-            ssize_t rcv = recv(p_poll->u.select_fds.rd_fd[p_poll->u.select_fds.iter], &c, 1, MSG_PEEK);
-            if (rcv == 0)
-                *flags |= DW_POLLHUP;
-            else if (rcv < 0)
-                *flags |= DW_POLLERR;
 
-            if (p_poll->u.select_fds.rd_flags[p_poll->u.select_fds.iter] & DW_POLLONESHOT || rcv <= 0)
+            if (p_poll->u.select_fds.rd_flags[p_poll->u.select_fds.iter] & DW_POLLONESHOT)
                 // item iter replaced with last, so we need to check iter again
                 dw_select_del_rd_pos(p_poll, p_poll->u.select_fds.iter);
             else
