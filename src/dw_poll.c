@@ -1,3 +1,5 @@
+#include <sys/socket.h>
+
 #include "dw_poll.h"
 #include "dw_debug.h"
 
@@ -212,12 +214,20 @@ int dw_poll_wait(dw_poll_t *p_poll) {
 int dw_poll_next(dw_poll_t *p_poll, dw_poll_flags *flags, uint64_t *aux) {
     switch (p_poll->poll_type) {
     case DW_SELECT:
+        char c;
+
         while (p_poll->u.select_fds.iter < p_poll->u.select_fds.n_rd_fd && !FD_ISSET(p_poll->u.select_fds.rd_fd[p_poll->u.select_fds.iter], &p_poll->u.select_fds.rd_fds))
             p_poll->u.select_fds.iter++;
         if (p_poll->u.select_fds.iter < p_poll->u.select_fds.n_rd_fd && FD_ISSET(p_poll->u.select_fds.rd_fd[p_poll->u.select_fds.iter], &p_poll->u.select_fds.rd_fds)) {
-            *flags = DW_POLLIN;
             *aux = p_poll->u.select_fds.rd_aux[p_poll->u.select_fds.iter];
-            if (p_poll->u.select_fds.rd_flags[p_poll->u.select_fds.iter] & DW_POLLONESHOT)
+            *flags = DW_POLLIN;
+            ssize_t rcv = recv(p_poll->u.select_fds.rd_fd[p_poll->u.select_fds.iter], &c, 1, MSG_PEEK);
+            if (rcv == 0)
+                *flags |= DW_POLLHUP;
+            else if (rcv < 0)
+                *flags |= DW_POLLERR;
+
+            if (p_poll->u.select_fds.rd_flags[p_poll->u.select_fds.iter] & DW_POLLONESHOT || rcv <= 0)
                 // item iter replaced with last, so we need to check iter again
                 dw_select_del_rd_pos(p_poll, p_poll->u.select_fds.iter);
             else
@@ -228,8 +238,8 @@ int dw_poll_next(dw_poll_t *p_poll, dw_poll_flags *flags, uint64_t *aux) {
         while (p_poll->u.select_fds.iter < n_rd + p_poll->u.select_fds.n_wr_fd && !FD_ISSET(p_poll->u.select_fds.wr_fd[p_poll->u.select_fds.iter - n_rd], &p_poll->u.select_fds.wr_fds))
             p_poll->u.select_fds.iter++;
         if (p_poll->u.select_fds.iter < n_rd + p_poll->u.select_fds.n_wr_fd && FD_ISSET(p_poll->u.select_fds.wr_fd[p_poll->u.select_fds.iter - n_rd], &p_poll->u.select_fds.wr_fds)) {
-            *flags = DW_POLLOUT;
             *aux = p_poll->u.select_fds.wr_aux[p_poll->u.select_fds.iter - n_rd];
+            *flags = DW_POLLOUT;
             if (p_poll->u.select_fds.wr_flags[p_poll->u.select_fds.iter - n_rd] & DW_POLLONESHOT)
                 // item iter replaced with last, so we need to check iter again
                 dw_select_del_wr_pos(p_poll, p_poll->u.select_fds.iter - n_rd);
@@ -243,8 +253,10 @@ int dw_poll_next(dw_poll_t *p_poll, dw_poll_flags *flags, uint64_t *aux) {
             p_poll->u.poll_fds.iter++;
         if (p_poll->u.poll_fds.iter < p_poll->u.poll_fds.n_pollfds && p_poll->u.poll_fds.pollfds[p_poll->u.poll_fds.iter].revents != 0) {
             *flags = 0;
-            *flags |= (p_poll->u.poll_fds.pollfds[p_poll->u.poll_fds.iter].revents | POLLIN) ? DW_POLLIN : 0;
-            *flags |= (p_poll->u.poll_fds.pollfds[p_poll->u.poll_fds.iter].revents | POLLOUT) ? DW_POLLOUT : 0;
+            *flags |= (p_poll->u.poll_fds.pollfds[p_poll->u.poll_fds.iter].revents & POLLIN) ? DW_POLLIN : 0;
+            *flags |= (p_poll->u.poll_fds.pollfds[p_poll->u.poll_fds.iter].revents & POLLOUT) ? DW_POLLOUT : 0;
+            *flags |= (p_poll->u.poll_fds.pollfds[p_poll->u.poll_fds.iter].revents & POLLERR) ? DW_POLLERR : 0;
+            *flags |= (p_poll->u.poll_fds.pollfds[p_poll->u.poll_fds.iter].revents & POLLHUP) ? DW_POLLHUP : 0;
             *aux = p_poll->u.poll_fds.aux[p_poll->u.poll_fds.iter];
             if (p_poll->u.poll_fds.flags[p_poll->u.poll_fds.iter] & DW_POLLONESHOT)
                 // item i replaced with last, so we need to check i again
@@ -257,8 +269,10 @@ int dw_poll_next(dw_poll_t *p_poll, dw_poll_flags *flags, uint64_t *aux) {
     case DW_EPOLL:
         if (p_poll->u.epoll_fds.iter < p_poll->u.epoll_fds.n_events && p_poll->u.epoll_fds.events[p_poll->u.epoll_fds.iter].events != 0) {
             *flags = 0;
-            *flags |= (p_poll->u.epoll_fds.events[p_poll->u.epoll_fds.iter].events | EPOLLIN) ? DW_POLLIN : 0;
-            *flags |= (p_poll->u.epoll_fds.events[p_poll->u.epoll_fds.iter].events | EPOLLOUT) ? DW_POLLOUT : 0;
+            *flags |= (p_poll->u.epoll_fds.events[p_poll->u.epoll_fds.iter].events & EPOLLIN) ? DW_POLLIN : 0;
+            *flags |= (p_poll->u.epoll_fds.events[p_poll->u.epoll_fds.iter].events & EPOLLOUT) ? DW_POLLOUT : 0;
+            *flags |= (p_poll->u.epoll_fds.events[p_poll->u.epoll_fds.iter].events & EPOLLERR) ? DW_POLLERR : 0;
+            *flags |= (p_poll->u.epoll_fds.events[p_poll->u.epoll_fds.iter].events & EPOLLHUP) ? DW_POLLHUP : 0;
             *aux = p_poll->u.epoll_fds.events[p_poll->u.epoll_fds.iter].data.u64;
             p_poll->u.epoll_fds.iter++;
             return 1;
