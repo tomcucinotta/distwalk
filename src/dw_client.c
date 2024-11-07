@@ -558,16 +558,15 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         int retry_num = 0;
         int i = 0;
 
-        char* reserve;
-        char *tok = strtok_r(arg, ",", &reserve);
-        while (tok != NULL) {
-            if (strncmp(tok, "nack=", 5) == 0) {
-                n_ack = atoi(tok + 5);
-            } else if (strncmp(tok, "timeout=", 8) == 0) {
-                timeout_us = atoi(tok + 8);
-            } else if (strncmp(tok, "retry=", 6) == 0) {
-                retry_num = atoi(tok + 6);
-            } else {
+        char* tok;
+        ccmd_node_t* fwd_itr = NULL;
+        while ((tok = strsep(&arg, ",")) != NULL) {
+            if (sscanf(tok, "nack=%d", &n_ack) == 1 
+                || sscanf(tok, "retry=%d", &retry_num) == 1
+                || sscanf(tok, "retries=%d", &retry_num) == 1
+                || sscanf(tok, "timeout=%d", &timeout_us) == 1)
+                    continue;
+            else {
                 char fwdhostport[MAX_HOSTPORT_STRLEN];
                 proto_t fwd_proto = TCP;
 
@@ -587,15 +586,20 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 ccmd_last_action(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
                 ccmd_last_action(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
                 
-                ccmd_last_action(ccmd)->fwd.timeout = timeout_us;
-                ccmd_last_action(ccmd)->fwd.retries = retry_num;
+                if (i == 0)
+                    fwd_itr = ccmd_last_action(ccmd);
                 ccmd_last_action(ccmd)->fwd.on_fail_skip = 1;
                 ccmd_last_action(ccmd)->fwd.proto = fwd_proto;
 
                 i++;
             }
+        }
 
-            tok = strtok_r(NULL, ",", &reserve);
+        // Configure timeout and retry parameters for each parsed forwad operation
+        while (fwd_itr != NULL && (fwd_itr->cmd == FORWARD || fwd_itr->cmd == MULTI_FORWARD)) {
+            fwd_itr->fwd.timeout = timeout_us;
+            fwd_itr->fwd.retries = retry_num;
+            fwd_itr = fwd_itr->next;
         }
 
         // TODO: allow n_ack 0 when reply messages will be optional 
