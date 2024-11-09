@@ -276,6 +276,7 @@ int pd_parse_bytes(pd_spec_t *p, char *s) {
 double pd_sample(pd_spec_t *p) {
     double val;
     double x;
+    double m2, s2, xavg, xdev;
  retry:
     switch (p->prob) {
     case FIXED:
@@ -292,10 +293,10 @@ double pd_sample(pd_spec_t *p) {
         val = gaussian(p->val, p->std);
         break;
     case LOGNORM:
-        double m2 = p->val * p->val;
-        double s2 = p->std * p->std;
-        double xavg = log(m2 / sqrt(m2 + s2));
-        double xdev = sqrt(log(1.0 + s2 / m2));
+        m2 = p->val * p->val;
+        s2 = p->std * p->std;
+        xavg = log(m2 / sqrt(m2 + s2));
+        xdev = sqrt(log(1.0 + s2 / m2));
         val = exp(gaussian(xavg, xdev));
         break;
     case GAMMA:
