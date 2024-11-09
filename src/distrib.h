@@ -60,4 +60,7 @@ int pd_len(pd_spec_t *p);
 // return average of sequence or distribution generated from *p
 double pd_avg(pd_spec_t *p);
 
+// might be handy independently from pd_*() functions
+int sscanf_unit(const char *str, const char *fmt, double *p_val, int is_time);
+
 #endif
