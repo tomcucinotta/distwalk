@@ -150,6 +150,8 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
     int col = 0;        // used by SFILE
     char *fname = NULL; // used by SFILE
     char *sep = ",";    // used by SFILE
+    double xavg = NAN;  // used by LOGNORM
+    double xstd = NAN;  // used by LOGNORM
     check(tok, "Wrong value/distribution syntax\n");
     if (strcmp(tok, "unif") == 0)
         p->prob = UNIF;
@@ -157,6 +159,8 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
         p->prob = EXPON;
     else if (strcmp(tok, "norm") == 0)
         p->prob = NORM;
+    else if (strcmp(tok, "lognorm") == 0)
+        p->prob = LOGNORM;
     else if (strcmp(tok, "gamma") == 0)
         p->prob = GAMMA;
     else if (strcmp(tok, "aseq") == 0)
@@ -183,6 +187,8 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
             || sscanf_unit(tok, "avg=%lf", &p->val, is_time) == 1
             || ((p->prob == ARITH_SEQ || p->prob == GEO_SEQ) && sscanf_unit(tok, "step=%lf", &p->std, is_time) == 1)
             || (p->prob == SFILE && sscanf(tok, "col=%d", &col) == 1)
+            || (p->prob == LOGNORM && sscanf(tok, "xavg=%lf", &xavg) == 1)
+            || (p->prob == LOGNORM && sscanf(tok, "xstd=%lf", &xstd) == 1)
             || sscanf_unit(tok, "%lf", &p->val, is_time) == 1
             )
                 continue;
@@ -236,10 +242,16 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
     if (p->prob == GEO_SEQ && isnan(p->val))
         p->val = p->std >= 1 ? p->min : p->max;
 
+    if (p->prob == LOGNORM && isnan(p->val) && !isnan(xavg) && !isnan(xstd))
+        p->val = exp(xavg + xstd * xstd / 2.0);
+    if (p->prob == LOGNORM && isnan(p->std) && !isnan(xavg) && !isnan(xstd))
+        p->std = sqrt((exp(xstd * xstd) - 1.0) * exp(2 * xavg + xstd * xstd));
+
     check(p->prob != FIXED || !isnan(p->val));
     check(p->prob != UNIF || (!isnan(p->min) && !isnan(p->max)));
     check(p->prob != EXPON || (!isnan(p->val) && isnan(p->std)));
     check(p->prob != NORM || (!isnan(p->val) && !isnan(p->std)));
+    check(p->prob != LOGNORM || (!isnan(p->val) && !isnan(p->std)));
     check(p->prob != GAMMA || (!isnan(p->val) && !isnan(p->std)));
     check(p->prob != ARITH_SEQ || (!isnan(p->val) && ( (p->std >= 0 && !isnan(p->max)) || (p->std < 0 && !isnan(p->min)) ) ));
     check(p->prob != GEO_SEQ || (!isnan(p->val) && ( (p->std >= 1 && !isnan(p->max)) || (p->std < 1 && !isnan(p->min)) ) ));
@@ -278,6 +290,13 @@ double pd_sample(pd_spec_t *p) {
         break;
     case NORM:
         val = gaussian(p->val, p->std);
+        break;
+    case LOGNORM:
+        double m2 = p->val * p->val;
+        double s2 = p->std * p->std;
+        double xavg = log(m2 / sqrt(m2 + s2));
+        double xdev = sqrt(log(1.0 + s2 / m2));
+        val = exp(gaussian(xavg, xdev));
         break;
     case GAMMA:
         val = distr_gamma(p->val, p->std);
@@ -330,6 +349,9 @@ char *pd_str(pd_spec_t *p) {
         break;
     case NORM:
         sprintf(s, "norm:%g", p->val);
+        break;
+    case LOGNORM:
+        sprintf(s, "lognorm:%g", p->val);
         break;
     case GAMMA:
         scale = p->std * p->std / p->val;

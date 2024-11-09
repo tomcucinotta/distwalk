@@ -10,6 +10,7 @@ typedef enum {
     UNIF,               // uniformly distributed value in range [.min, .max)
     EXPON,              // exponentially distributed value with average .val
     NORM,               // Normal distribution with average .val and sigma .std
+    LOGNORM,            // Log-normal distribution with average .val and sigma .std (xval= and xstd= can be used to specify the supporting normal variable)
     GAMMA,              // Gamma distribution with average .val and sigma .std (can be specified as k, scale as well)
     ARITH_SEQ,          // Arithmetic/Linear ramp in range [.min, .max) with step .std
     GEO_SEQ,            // Geometric ramp in range [.min, .max) with step .std
