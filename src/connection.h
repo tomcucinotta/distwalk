@@ -37,7 +37,7 @@ typedef struct {
     unsigned char *curr_send_buf; // curr ptr in send buffer while SENDING
     unsigned long curr_send_size; // size of leftover data to send
 
-    req_info_t *req_list;
+    req_info_t *req_list;        // request ring buffer
     unsigned int serialize_request;
     pthread_t parent_thread;
     atomic_int busy;             // 1 if conn is allocated, 0 otherwise
