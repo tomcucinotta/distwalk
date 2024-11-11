@@ -51,11 +51,12 @@ typedef struct {
 } command_t;
 #define cmd_get_opts(type, cmd) ((type*)&(cmd->opts[0]))
 
+// Data structure containing the data sent by the DistWalk Client
 // TODO: Here we need all quantities to be network-ordered
 typedef struct {
-    uint32_t req_id;
+    uint32_t req_id;   // Client-side request id
     uint32_t req_size; // Overall message size in bytes, including commands and payload
-    int8_t status;    // 0 success, error otherwise (tipically set by dw_node)
+    int8_t status;     // 0 success, error otherwise (tipically set by dw_node)
     command_t cmds[];  // Series of command_t with variable size
 } message_t;
 
