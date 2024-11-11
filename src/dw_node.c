@@ -773,6 +773,51 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     }
     close_and_forget(p_poll, conn->sock);
     conn_free(conn_id);
+
+    // Close associated connections
+    for (int i = 0; i < MAX_CONNS; i++) {
+        conn_info_t *pending_conn = conn_get_by_id(i);
+        if (pending_conn->sock == -1)
+            continue;
+
+        req_info_t* req_list_head = pending_conn->req_list;
+        req_info_t* tmp = req_list_head;
+        while (tmp != NULL) {
+            message_t* m = req_get_message(tmp);
+            if (tmp->curr_cmd->cmd == FORWARD) {
+                fwd_opts_t fwd = *cmd_get_opts(fwd_opts_t, tmp->curr_cmd);
+
+                if (fwd.timeout > 0) {
+                    break;
+                }
+
+                if (fwd.fwd_host == conn->target.sin_addr.s_addr &&
+                        fwd.fwd_port == conn->target.sin_port) {
+                    
+                    // Go to last REPLY
+                    command_t *itr = tmp->curr_cmd;
+                    while (itr->cmd != EOM && itr->cmd != REPLY)
+                        itr = message_skip_cmds(m, tmp->curr_cmd, 1);
+
+                    if (itr->cmd == EOM) { // brutal
+                        close_and_forget(p_poll, pending_conn->sock);
+                        conn_free(i);
+                    } else { // graceful
+                        tmp->curr_cmd = itr;
+                        m->status = -1;
+                        process_messages(tmp, p_poll, infos);
+                    }
+
+                    break;
+                }
+            }
+
+            tmp = tmp->next;
+            if (tmp == req_list_head) {
+                break;
+            }
+        }
+    }
 }
 
 void* storage_worker(void* args) {
