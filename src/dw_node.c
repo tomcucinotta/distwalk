@@ -383,7 +383,7 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
 
     if (!req) {
         dw_log("Could not match a response to FORWARD, req_id:%d - Dropped\n", req_id);
-        return 1;
+        return -1;
     }
 
     dw_log("Found match with conn_id %d\n", req->conn_id);
@@ -398,7 +398,7 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         return process_messages(req, p_poll, infos);
     }
     
-    return 1;
+    return -1;
 }
 
 // returns 1 if reply sent correctly, 0 otherwise
