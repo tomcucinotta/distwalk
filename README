@@ -41,6 +41,15 @@ two executables are created:
 - src/dw_client: the client program, try typing ./dw_client -h
 - src/dw_node: the server program, try typing ./dw_node -h
 
+For debug/development purposes, compile the executables, from the root folder:
+
+  make debug
+
+two executables are created:
+- src/dw_client_debug: the client program with logging activated
+- src/dw_node_debug: the server program with logging activated
+- src/dw_client_tsan: the client program with logging and thread sanitizer activated
+- src/dw_node_tsan: the server program with logging and thread sanitizer activated
 
 EXAMPLES OF USE
 ----------------------------------------------------------------------
@@ -56,7 +65,7 @@ command:
 then launching on the client the following command, with which we are
 submitting 10 packets at a rate of 1000 pkt/s
 
-[myuser@myclient distwalk/src]$ ./src/dw_client -n 10 -r 1000 -C 1000 -ps 512
+[myuser@myclient distwalk/src]$ ./src/dw_client -n 10 -r 1000 -C 1000 --ps 512
 
 Configuration:
   clienthost=0.0.0.0:0
@@ -89,7 +98,7 @@ The following command spawns 4 threads submitting concurrently
 requests to the same server (each thread submits 5000 requests needing
 a 1ms of processing time each, at a rate of 250 pkt/s):
 
-  [myuser@myclient distwalk/src]$ ./dw_client -nt 4 -n 5000 -r 250 -C 1000
+  [myuser@myclient distwalk/src]$ ./dw_client --nt 4 -n 5000 -r 250 -C 1000
 
 The following command spawns 3 threads, with each of them using 10
 sessions to submit the 5000 packets as in the above command, so each
@@ -97,4 +106,4 @@ session will send 500 requests at a rate of 250 pkt/s (at the end of
 each session, each client thread closes the connection and establishes
 a new connection for the subsequent session)
 
-  [myuser@myclient distwalk/src]$ ./dw_client -nt 3 -ns 10 -n 5000 -r 250 -C 1000
+  [myuser@myclient distwalk/src]$ ./dw_client --nt 3 --ns 10 -n 5000 -r 250 -C 1000
