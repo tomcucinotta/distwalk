@@ -68,7 +68,7 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     m_dst->req_id = m->req_id;
     command_t *itr = cmd;
     while (itr->cmd != EOM && itr->cmd != REPLY)
-        itr = message_skip_cmds(m, cmd, 1);
+        itr = message_skip_cmds(m, itr, 1);
     command_t *reply_cmd = itr;
     itr = cmd_next(itr);
     int cmds_len = ((unsigned char*)itr - (unsigned char*)cmd);
