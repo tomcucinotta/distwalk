@@ -96,6 +96,9 @@ void ccmd_attach_last_reply(ccmd_t* q, pd_spec_t *p_pd_spec) {
 extern __thread struct drand48_data rnd_buf;
 
 ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
+    if (curr->cmd == PSKIP) // edge-case
+        n++;
+
     int prev_was_mfwd = 0;
     while (n-- > 0 && curr) {
         if (curr->cmd == FORWARD || (curr->cmd == MULTI_FORWARD && !prev_was_mfwd)) {

@@ -297,6 +297,38 @@ bool test_ccmd_skip_3() {
     return res;
 }
 
+bool test_ccmd_skip_4() {
+    ccmd_t* ccmd;
+    ccmd_init(&ccmd);
+
+    pd_spec_t val = pd_build_fixed(100);
+    ccmd_add(ccmd, PSKIP, &val);
+
+    val = pd_build_fixed(200);
+    ccmd_add(ccmd, FORWARD, &val);
+
+    val = pd_build_fixed(300);
+    ccmd_add(ccmd, STORE, &val);
+
+    val = pd_build_fixed(400);
+    ccmd_add(ccmd, REPLY, &val);
+
+    val = pd_build_fixed(500);
+    ccmd_add(ccmd, COMPUTE, &val);
+
+    val = pd_build_fixed(600);
+    ccmd_add(ccmd, COMPUTE, &val);
+
+    ccmd_node_t* cmd = ccmd_skip(ccmd->head_actions, 1);
+
+    bool res = false;
+    if (cmd != NULL && cmd->cmd == COMPUTE && cmd->pd_val.val == 500) {
+        res = true;
+    }
+
+    ccmd_destroy(&ccmd);
+    return res;
+}
 
 bool test_ccmd_dump() {
     ccmd_t* ccmd;
@@ -373,6 +405,7 @@ int main() {
     perform_test(test_ccmd_skip_1());
     perform_test(test_ccmd_skip_2());
     perform_test(test_ccmd_skip_3());
+    perform_test(test_ccmd_skip_4());
     perform_test(test_ccmd_dump());
 
     return 0;
