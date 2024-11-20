@@ -97,7 +97,7 @@ int dw_poll_add(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
         pev->events = (flags & DW_POLLIN ? POLLIN : 0)
                       | (flags & DW_POLLOUT ? POLLOUT : 0);
         break;
-    case DW_EPOLL:
+    case DW_EPOLL: {
         struct epoll_event ev = (struct epoll_event) {
             .data.u64 = aux,
             .events = (flags & DW_POLLIN ? EPOLLIN : 0)
@@ -107,7 +107,7 @@ int dw_poll_add(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
 
         if ((rv = epoll_ctl(p_poll->u.epoll_fds.epollfd, EPOLL_CTL_ADD, fd, &ev)) < 0)
             perror("epoll_ctl() failed: ");
-        break;
+        break; }
     default:
         check(0, "Wrong dw_poll_type");
     }
@@ -117,7 +117,7 @@ int dw_poll_add(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
 int dw_poll_mod(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
     int rv = 0;
     switch (p_poll->poll_type) {
-    case DW_SELECT:
+    case DW_SELECT: {
         int i;
         for (i = 0; i < p_poll->u.select_fds.n_rd_fd; i++)
             if (p_poll->u.select_fds.rd_fd[i] == fd)
@@ -134,7 +134,7 @@ int dw_poll_mod(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
             dw_select_del_wr_pos(p_poll, i);
         else if (i == p_poll->u.select_fds.n_wr_fd && (flags & DW_POLLOUT))
             dw_select_add_wr(p_poll, fd, flags, aux);
-        break;
+        break; }
     case DW_POLL:
         if (p_poll->u.poll_fds.n_pollfds == MAX_POLLFD) {
             dw_log("Exhausted number of possible fds in poll()\n");
@@ -150,7 +150,7 @@ int dw_poll_mod(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
             }
         }
         break;
-    case DW_EPOLL:
+    case DW_EPOLL: {
         struct epoll_event ev = {
             .data.u64 = aux,
             .events = (flags & DW_POLLIN ? EPOLLIN : 0) | (flags & DW_POLLOUT ? EPOLLOUT : 0),
@@ -159,7 +159,7 @@ int dw_poll_mod(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
             rv = epoll_ctl(p_poll->u.epoll_fds.epollfd, EPOLL_CTL_MOD, fd, &ev);
         else
             rv = epoll_ctl(p_poll->u.epoll_fds.epollfd, EPOLL_CTL_DEL, fd, NULL);
-        break;
+        break; }
     default:
         check(0, "Wrong dw_poll_type");
     }
