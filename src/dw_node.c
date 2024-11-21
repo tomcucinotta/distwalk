@@ -609,6 +609,11 @@ int obtain_messages(int conn_id, int epollfd, conn_worker_info_t* infos) {
                     dw_log("handle_forward_reply() failed\n");
                     return 0;
             }
+            //TODO: This causes a disconnection right after the forwad-reply concludes.
+            // This should be removed ASAP, since it deteriorates the performance of subsequent forwards to the same node,
+            // However keeping the connection open causes performance deterioration for all the other operations; 
+            // The reason why has yet to be properly investigated
+            return 0;
         } else {
             req_info_t *req = conn_req_add(conn);
             if (req == NULL) {

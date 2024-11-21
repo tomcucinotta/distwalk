@@ -135,6 +135,8 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
                 dw_log("skip: x=%g, prob=%g\n", x, ccmd_itr->pd_val.val);
                 if (x <= ccmd_itr->pd_val.val)
                     ccmd_itr = ccmd_skip(ccmd_itr->next, ccmd_itr->n_skip);
+                else
+                    ccmd_itr = ccmd_itr -> next;
                 continue;
             case MULTI_FORWARD:
             case FORWARD:
