@@ -22,6 +22,7 @@
 #include "timespec.h"
 #include "ccmd.h"
 #include "address_utils.h"
+#include "queue.h"
 
 __thread char thread_name[16];
 
@@ -54,6 +55,8 @@ struct argp_client_arguments {
     char nodehostport[MAX_HOSTPORT_STRLEN];
     pd_spec_t last_resp_size;
 } input_args;
+int nested_fwd_parsing = 0; // used in parsing phase only
+queue_t* deferred_replies; // used for parsing phase only (nack -> pd_val)
 
 #define MAX_THREADS 256
 pthread_t sender[MAX_THREADS];
@@ -259,6 +262,7 @@ void *thread_receiver(void *data) {
             if (rv != 0) {
                 close(clientSocket[thread_id]);
                 fprintf(stderr, "Connection to %s:%d failed: %s\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), strerror(errno));
+                ccmd_destroy(&ccmd);
                 exit(EXIT_FAILURE);
             }
 
@@ -384,13 +388,13 @@ enum argp_client_option_keys {
     LOAD_OFFSET = 0x102,
     SKIP_CMD = 's',
     FORWARD_CMD = 'F',
+    REPLY_CMD = 'R',
     SCRIPT_FILENAME = 'f',
     BIND_ADDR ='b',
 
     WAIT_SPIN = 0x200,
     RATE_STEP_SECS,
     SEND_REQUEST_SIZE,
-    RESPONSE_SIZE,
     NO_DELAY,
     NUM_THREADS,
     NUM_SESSIONS,
@@ -420,11 +424,10 @@ static struct argp_option argp_client_options[] = {
     { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
     { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
-    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,nack=n][,timeout=n][,retry=n]", 0, "Send a number of FORWARD message to the ip:port list, wait for n replies"},
+    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=n][,retry=n]", 0, "Send a number of FORWARD message to the ip:port list"},
     { "send-pkt-size",      SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]", OPTION_ALIAS},
-    { "resp-pkt-size",      RESPONSE_SIZE,          "nbytes|prob:field=val[,field=val]",          0, "Set payload size of received responses"},
-    { "rs",                 RESPONSE_SIZE,          "nbytes|prob:field=val[,field=val]", OPTION_ALIAS},
+    { "reply",              REPLY_CMD,              "[nbytes|prob:field=val[,field=val]][,nack=n]", 0, "Reply with payload size; Optionally wait for n acknowledgments"},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
     { "num-sessions",       NUM_SESSIONS,           "n",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
@@ -457,6 +460,10 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->num_sessions = 1;
         arguments->num_threads = 1;
         arguments->last_resp_size = pd_build_fixed(default_resp_size);
+
+        deferred_replies = queue_alloc(100);
+        data_t data = { .ptr=&(arguments->last_resp_size) }; 
+        queue_enqueue(deferred_replies, 1, data);
         break;
     case HELP:
         argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
@@ -515,20 +522,20 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 pd_spec_t val;
                 check(pd_parse_bytes(&val, arg), "Wrong store data size specification");
                 ccmd_add(ccmd, STORE, &val);
-                ccmd_last_action(ccmd)->pd_val2 = store_offset_pd;
+                ccmd_last(ccmd)->pd_val2 = store_offset_pd;
             }
 
             tok = strtok_r(NULL, ",", &reserve);
         }
 
-        ccmd_last_action(ccmd)->store.wait_sync = sync;
+        ccmd_last(ccmd)->store.wait_sync = sync;
 
         break; }
     case LOAD_DATA: {
         pd_spec_t val;
         check(pd_parse_bytes(&val, arg), "Wrong load data size specification");
         ccmd_add(ccmd, LOAD, &val);
-        ccmd_last_action(ccmd)->pd_val2 = load_offset_pd;
+        ccmd_last(ccmd)->pd_val2 = load_offset_pd;
         break; }
     case SKIP_CMD: {
         pd_spec_t val = pd_build_fixed(1.0);
@@ -553,7 +560,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         command_type_t fwd_type = FORWARD;
         pd_spec_t val = pd_build_fixed(default_resp_size);
 
-        int n_ack = 0;
         int timeout_us = 0;
         int retry_num = 0;
         int i = 0;
@@ -561,8 +567,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         char* tok;
         ccmd_node_t* fwd_itr = NULL;
         while ((tok = strsep(&arg, ",")) != NULL) {
-            if (sscanf(tok, "nack=%d", &n_ack) == 1 
-                || sscanf(tok, "retry=%d", &retry_num) == 1
+            if (sscanf(tok, "retry=%d", &retry_num) == 1
                 || sscanf(tok, "retries=%d", &retry_num) == 1
                 || sscanf(tok, "timeout=%d", &timeout_us) == 1)
                     continue;
@@ -575,7 +580,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
 
                 if (i > 0) {
                     if (i == 1) { // morph previous FORWARD in MULTI_FORWARD
-                        ccmd_last_action(ccmd)->cmd = MULTI_FORWARD;
+                        ccmd_last(ccmd)->cmd = MULTI_FORWARD;
                     }
 
                     fwd_type = MULTI_FORWARD;
@@ -583,33 +588,31 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
 
                 // TODO: customize forward pkt size
                 ccmd_add(ccmd, fwd_type, &val);
-                ccmd_last_action(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
-                ccmd_last_action(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
+                ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
+                ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
                 
+                // keep track of the first MULTI_FORWARD
                 if (i == 0)
-                    fwd_itr = ccmd_last_action(ccmd);
-                ccmd_last_action(ccmd)->fwd.on_fail_skip = 1;
-                ccmd_last_action(ccmd)->fwd.proto = fwd_proto;
+                    fwd_itr = ccmd_last(ccmd);
+                ccmd_last(ccmd)->fwd.on_fail_skip = 1;
+                ccmd_last(ccmd)->fwd.proto = fwd_proto;
 
+                nested_fwd_parsing++;
                 i++;
             }
         }
 
-        // Configure timeout and retry parameters for each parsed forwad operation
+        // Update timeout and retry parameters for each parsed forwad operation
         while (fwd_itr != NULL && (fwd_itr->cmd == FORWARD || fwd_itr->cmd == MULTI_FORWARD)) {
             fwd_itr->fwd.timeout = timeout_us;
             fwd_itr->fwd.retries = retry_num;
             fwd_itr = fwd_itr->next;
         }
+        
+        // Reserve a forward reply command
+        data_t data = { .ptr=&val }; 
+        queue_enqueue(deferred_replies, i, data);
 
-        // TODO: allow n_ack 0 when reply messages will be optional 
-        if (n_ack == 0 || (n_ack > 0 && n_ack > i)) {
-            n_ack = i;
-        }
-
-        // TODO: customize forward-reply pkt size
-        ccmd_node_t* reply_node = ccmd_add(ccmd, REPLY, &val);
-        reply_node->resp.n_ack = n_ack;
         break; }
     case SEND_REQUEST_SIZE:
         check(pd_parse_bytes(&send_pkt_size_pd, arg), "Wrong send request size specification");
@@ -617,18 +620,43 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         check(send_pkt_size_pd.val >= MIN_SEND_SIZE, "Too small send request size, minimum is %lu", MIN_SEND_SIZE);
         check(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE, "Too big send request size, maximum is %d", BUF_SIZE);
         break;
-    case RESPONSE_SIZE: {
-        //TODO: attach last -rs to original reply
+    case REPLY_CMD: {
         pd_spec_t val;
-        check(pd_parse_bytes(&val, arg), "Wrong response size specification");
-        val.min = MIN_REPLY_SIZE;
-        val.max = BUF_SIZE;
-        check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
+        int nack = 1;
 
-        if (ccmd_last_reply(ccmd)) {
-            ccmd_last_reply(ccmd)->pd_val = val;
-        } else {
-            arguments->last_resp_size = val;
+        char *tok;
+        while ((tok = strsep(&arg, ",")) != NULL) {
+            if (sscanf(tok, "nack=%d", &nack) == 1) {
+                continue;
+            } else {
+                check(pd_parse_bytes(&val, tok), "Wrong response size specification");
+                val.min = MIN_REPLY_SIZE;
+                val.max = BUF_SIZE;
+                check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
+            }
+        }
+
+        // Update deferred reply
+        int deferred_nack = queue_node_key(queue_tail(deferred_replies));
+        pd_spec_t* deferred_val = queue_node_data(queue_tail(deferred_replies)).ptr;
+        deferred_val->val = val.val;
+        deferred_val->min = val.min;
+        deferred_val->max = val.max;
+        deferred_val->std = val.std;
+        deferred_val->prob = val.prob;
+
+        if (nack == 0) // TODO: allow n_ack 0 when reply messages will be optional 
+            nack = 1;
+        if (nack > 0 && nack < deferred_nack)
+            queue_tail(deferred_replies)->key = nack;
+
+        // Use a reserved reply
+        if (nested_fwd_parsing > 0) {
+            ccmd_add(ccmd, REPLY, queue_node_data(queue_tail(deferred_replies)).ptr);
+            ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(deferred_replies));
+
+            queue_dequeue_tail(deferred_replies);
+            nested_fwd_parsing = 0;
         }
         break; }
     case NUM_THREADS:
@@ -691,6 +719,24 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             ccmd_destroy(&ccmd);
             argp_failure(state, 1, 0, "num_pkts: %ld > MAX_PKTS: %d, Overflow!", num_pkts, MAX_PKTS);
         }
+
+
+        // default ccmd
+        if (!ccmd_last(ccmd)) {
+            pd_spec_t val = pd_build_fixed(default_compute_us);
+            ccmd_add(ccmd, COMPUTE, &val);
+        }
+
+        // Exhaust remaining deferred replies
+        while(queue_size(deferred_replies) > 0) {
+            ccmd_add(ccmd, REPLY, queue_node_data(queue_tail(deferred_replies)).ptr);
+            ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(deferred_replies));
+
+            queue_dequeue_tail(deferred_replies);
+        } 
+
+        nested_fwd_parsing = 0;
+        queue_free(deferred_replies);
         break;
     default:
         return ARGP_ERR_UNKNOWN;
@@ -758,16 +804,6 @@ int main(int argc, char *argv[]) {
     req_init();
 
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
-    
-    // TODO: trunc pkt/resp size to BUF_SIZE when using the --exp- variants.
-    // TODO: should be optional
-    ccmd_attach_last_reply(ccmd, &input_args.last_resp_size);
-    ccmd_last_reply(ccmd)->resp.n_ack = 1;
-
-    if (!ccmd_last_action(ccmd)) {
-        pd_spec_t val = pd_build_fixed(default_compute_us);
-        ccmd_add(ccmd, COMPUTE, &val);
-    }
 
     printf("Configuration:\n");
     printf("  clienthost=%s\n", input_args.clienthostport);
@@ -780,7 +816,7 @@ int main(int argc, char *argv[]) {
     printf("  rate_step_secs=%d\n", ramp_step_secs);
     printf("  pkt_size=%s (+%d for headers)\n", pd_str(&send_pkt_size_pd),
            TCPIP_HEADERS_SIZE);
-    printf("  resp_size=%s (+%d with headers)\n", pd_str(&ccmd_last_reply(ccmd)->pd_val),
+    printf("  resp_size=%s (+%d with headers)\n", pd_str(&ccmd_last(ccmd)->pd_val),
            TCPIP_HEADERS_SIZE);
     printf("  min packet size due to header: send=%lu, reply=%lu\n",
            MIN_SEND_SIZE, MIN_REPLY_SIZE);

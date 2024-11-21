@@ -12,13 +12,10 @@ void ccmd_init(ccmd_t** q) {
     *q = malloc(sizeof(ccmd_t));
 
     (*q)->num = 0;
-    (*q)->last_reply_called = 0;
+    (*q)->last_reply = 0;
 
-    (*q)->head_actions = NULL;
-    (*q)->tail_actions = NULL;
-
-    (*q)->head_replies = NULL;
-    (*q)->tail_replies = NULL;
+    (*q)->head = NULL;
+    (*q)->tail = NULL;
 }
 
 ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
@@ -31,71 +28,46 @@ ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     new_node->cmd = cmd;
     new_node->pd_val = *p_pd_spec;
 
-    if (new_node->cmd != REPLY){ // FIFO
-        if (!q->head_actions) {
-            q->head_actions = new_node;
-            q->tail_actions = new_node;
-        }
-        else {
-            q->tail_actions->next = new_node;
-            q->tail_actions = new_node;
-        }
-
-        new_node->next = q->head_replies;
+    if (!q->head) {
+        q->head = new_node;
+        q->tail = q->head;
+    } else {
+        q->tail->next = new_node;
+        q->tail = q->tail->next;
     }
-    else { //LIFO
-        if (!q->head_replies) {
-            q->tail_replies = new_node;
-        }
-
-        new_node->next = q->head_replies;
-        q->head_replies = new_node;
-
-        if (q->tail_actions) {
-            q->tail_actions->next = new_node;
-        }
-    }
-
+    
     q->num++;
-
     return new_node;
-}
-
-// No LIFO for last reply of the command chain
-void ccmd_attach_last_reply(ccmd_t* q, pd_spec_t *p_pd_spec) {
-    if (!q) {
-        printf("ccmd_attach_last_reply() error - Initialize queue first\n");
-        exit(EXIT_FAILURE);
-    }
-
-    if (q->last_reply_called) {
-        printf("ccmd_attach_last_reply() warning - you already called it, skipping...\n");
-        return;
-    }
-
-    if (!q->head_replies) {
-        ccmd_add(q, REPLY, p_pd_spec);
-    }
-    else {
-        ccmd_node_t* new_node = calloc(1, sizeof(ccmd_node_t));
-        new_node->next = NULL;
-        new_node->cmd = REPLY;
-        new_node->pd_val = *p_pd_spec;
-
-        ccmd_node_t* tmp = q->tail_replies;
-        q->tail_replies = new_node;
-        tmp->next = new_node;
-        new_node->next = NULL;
-
-        q->num++;
-    }
-
-    q->last_reply_called = 1;
 }
 
 extern __thread struct drand48_data rnd_buf;
 
-ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
+ccmd_node_t* ccmd_skip(ccmd_node_t* node, int to_skip) {
+    int skipped = to_skip;
+    ccmd_node_t *itr = node;
+
+    while (itr && skipped > 0) {
+        int nested_fwd = 0;
+
+        do {
+            if (itr->cmd == FORWARD)
+                nested_fwd++;
+            else if (itr->cmd == MULTI_FORWARD) {
+                nested_fwd++;
+                while (itr->next->cmd == MULTI_FORWARD)
+                    itr = itr->next;
+            } else if (itr->cmd == REPLY)
+                nested_fwd--;
+            itr = itr->next;
+        } while (itr && nested_fwd > 0);
+
+        skipped--;
+    }
+
+    return itr;
+}
+
+/* ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
     int prev_was_mfwd = 0;
     while (n-- > 0 && curr) {
         if (curr->cmd == FORWARD || (curr->cmd == MULTI_FORWARD && !prev_was_mfwd)) {
@@ -121,67 +93,66 @@ ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
     }
 
     return curr;
-}
+}*/
 
 // returns 1 if the message has been succesfully copied, 0 if there is not enough space (saved in req_size field)
 int ccmd_dump(ccmd_t* q, message_t* m) {
     check(q, "ccmd_dump() error - Initialize queue first");
     check(m, "ccmd_dump() error - NullPointer message_t*");
 
-    ccmd_node_t* curr = q->head_actions;
+    ccmd_node_t* ccmd_itr = q->head;
 
     double x = 0;
-    command_t *cmd = message_first_cmd(m);
+    command_t *m_cmd_itr = message_first_cmd(m);
 
-    while (curr) {
-        cmd->cmd = curr->cmd;
+    while (ccmd_itr) {
+        m_cmd_itr->cmd = ccmd_itr->cmd;
 
-        if(m->req_size < cmd_type_size(curr->cmd))
+        if(m->req_size < cmd_type_size(ccmd_itr->cmd))
             return -1;
-        m->req_size -= cmd_type_size(curr->cmd);
+        m->req_size -= cmd_type_size(ccmd_itr->cmd);
 
-        switch (curr->cmd) {
+        switch (ccmd_itr->cmd) {
             case STORE:
-                *cmd_get_opts(store_opts_t, cmd) = curr->store;
-                cmd_get_opts(store_opts_t, cmd)->offset = pd_sample(&curr->pd_val2);
-                cmd_get_opts(store_opts_t, cmd)->store_nbytes = pd_sample(&curr->pd_val);
+                *cmd_get_opts(store_opts_t, m_cmd_itr) = ccmd_itr->store;
+                cmd_get_opts(store_opts_t, m_cmd_itr)->offset = pd_sample(&ccmd_itr->pd_val2);
+                cmd_get_opts(store_opts_t, m_cmd_itr)->store_nbytes = pd_sample(&ccmd_itr->pd_val);
                 break;
             case COMPUTE:
-                cmd_get_opts(comp_opts_t, cmd)->comp_time_us = pd_sample(&curr->pd_val);
+                cmd_get_opts(comp_opts_t, m_cmd_itr)->comp_time_us = pd_sample(&ccmd_itr->pd_val);
                 break;
             case LOAD:
-                *cmd_get_opts(load_opts_t, cmd) = curr->load;
-                cmd_get_opts(load_opts_t, cmd)->offset = pd_sample(&curr->pd_val2);
-                cmd_get_opts(load_opts_t, cmd)->load_nbytes = pd_sample(&curr->pd_val);
+                *cmd_get_opts(load_opts_t, m_cmd_itr) = ccmd_itr->load;
+                cmd_get_opts(load_opts_t, m_cmd_itr)->offset = pd_sample(&ccmd_itr->pd_val2);
+                cmd_get_opts(load_opts_t, m_cmd_itr)->load_nbytes = pd_sample(&ccmd_itr->pd_val);
                 break;
             case REPLY: 
-                *cmd_get_opts(reply_opts_t, cmd) = curr->resp;
-                cmd_get_opts(reply_opts_t, cmd)->resp_size = pd_sample(&curr->pd_val);
+                *cmd_get_opts(reply_opts_t, m_cmd_itr) = ccmd_itr->resp;
+                cmd_get_opts(reply_opts_t, m_cmd_itr)->resp_size = pd_sample(&ccmd_itr->pd_val);
                 break;
             case PSKIP:
                 drand48_r(&rnd_buf, &x);
-                dw_log("skip: x=%g, prob=%g\n", x, curr->pd_val.val);
-                if (x <= curr->pd_val.val)
-                    curr = ccmd_skip(curr, curr->n_skip);
-                curr = curr->next;
+                dw_log("skip: x=%g, prob=%g\n", x, ccmd_itr->pd_val.val);
+                if (x <= ccmd_itr->pd_val.val)
+                    ccmd_itr = ccmd_skip(ccmd_itr->next, ccmd_itr->n_skip);
                 continue;
             case MULTI_FORWARD:
             case FORWARD:
-                *cmd_get_opts(fwd_opts_t, cmd) = curr->fwd;
-                cmd_get_opts(fwd_opts_t, cmd)->pkt_size = pd_sample(&curr->pd_val);
+                *cmd_get_opts(fwd_opts_t, m_cmd_itr) = ccmd_itr->fwd;
+                cmd_get_opts(fwd_opts_t, m_cmd_itr)->pkt_size = pd_sample(&ccmd_itr->pd_val);
                 break;
             default: 
                 fprintf(stderr, "ccmd_dump() - Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
-        cmd = cmd_next(cmd);
+        m_cmd_itr = cmd_next(m_cmd_itr);
         //printf("%s\n", get_command_name(curr->cmd));
-        curr = curr->next;
+        ccmd_itr = ccmd_itr->next;
     }
     if(m->req_size < cmd_type_size(EOM))
             return -1;
     m->req_size -= cmd_type_size(EOM);
-    cmd->cmd = EOM;
+    m_cmd_itr->cmd = EOM;
 
     return 1;
 }
@@ -189,7 +160,7 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
 void ccmd_destroy(ccmd_t** q) {
     check(q, "ccmd_destroy() error - Initialize queue first");
 
-    ccmd_node_t* curr = (*q)->head_actions;
+    ccmd_node_t* curr = (*q)->head;
     ccmd_node_t* tmp = NULL;
     while (curr) {
         tmp = curr->next;
@@ -205,7 +176,7 @@ void ccmd_log(ccmd_t* q) {
     check(q, "ccmd_log() error - Initialize queue first");
     printf("ccmd ");
 
-    ccmd_node_t* curr = q->head_actions;
+    ccmd_node_t* curr = q->head;
 
     while (curr) {
         char opts[64] = "";

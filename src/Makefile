@@ -30,9 +30,9 @@ clean:
 	rm -f *.o *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
 	rm -rf html latex gcov
 
-dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o connection.o request.o message.o address_utils.o
-dw_client_debug: dw_client_debug.o ccmd_debug.o distrib_debug.o thread_affinity_debug.o connection_debug.o request_debug.o message_debug.o address_utils_debug.o
-dw_client_tsan: dw_client_tsan.o ccmd_tsan.o dw_client_tsan.o distrib_tsan.o thread_affinity_tsan.o connection.o request.o message.o address_utils_tsan.o
+dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o queue.o connection.o request.o message.o address_utils.o
+dw_client_debug: dw_client_debug.o ccmd_debug.o distrib_debug.o thread_affinity_debug.o queue_debug.o connection_debug.o request_debug.o message_debug.o address_utils_debug.o
+dw_client_tsan: dw_client_tsan.o ccmd_tsan.o dw_client_tsan.o distrib_tsan.o thread_affinity_tsan.o queue.o connection.o request.o message.o address_utils_tsan.o
 dw_node: dw_node.o thread_affinity.o priority_queue.o request.o connection.o message.o address_utils.o
 dw_node_debug: dw_node_debug.o thread_affinity_debug.o priority_queue_debug.o request_debug.o connection_debug.o message_debug.o address_utils_debug.o
 dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request.o connection.o message.o address_utils_tsan.o

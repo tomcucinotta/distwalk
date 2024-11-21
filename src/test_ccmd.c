@@ -29,9 +29,9 @@ bool test_ccmd_add_1() {
     
     bool res = false;
     if (ccmd->num == 1                           && 
-        ccmd->head_actions == ccmd->tail_actions &&
-        ccmd->head_actions->cmd == COMPUTE       &&
-        ccmd->head_actions->pd_val.val == 100) {
+        ccmd->head == ccmd->tail &&
+        ccmd->head->cmd == COMPUTE       &&
+        ccmd->head->pd_val.val == 100) {
         res = true;
     }
 
@@ -50,11 +50,11 @@ bool test_ccmd_add_2() {
     ccmd_add(ccmd, STORE, &val);
 
     bool res = false;
-    if (ccmd->num == 2                        &&
-        ccmd->head_actions->cmd == COMPUTE    &&
-        ccmd->head_actions->pd_val.val == 100 && 
-        ccmd->tail_actions->cmd == STORE      && 
-        ccmd->tail_actions->pd_val.val == 200) {
+    if (ccmd->num == 2                &&
+        ccmd->head->cmd == COMPUTE    &&
+        ccmd->head->pd_val.val == 100 && 
+        ccmd->tail->cmd == STORE      && 
+        ccmd->tail->pd_val.val == 200) {
         res = true;
     }
 
@@ -71,10 +71,9 @@ bool test_ccmd_add_3() {
 
     bool res = false;
     if (ccmd->num == 1                           &&
-        ccmd->head_actions == ccmd->tail_actions &&
-        ccmd->head_replies == ccmd->tail_replies &&
-        ccmd->head_replies->cmd == REPLY         &&
-        ccmd->head_replies->pd_val.val == 100) {
+        ccmd->head == ccmd->tail &&
+        ccmd->head->cmd == REPLY         &&
+        ccmd->head->pd_val.val == 100) {
         res = true;
     }
 
@@ -94,11 +93,11 @@ bool test_ccmd_add_4() {
 
     bool res = false;
     if (ccmd->num == 2                           &&
-        ccmd->head_actions != ccmd->head_replies &&
-        ccmd->head_actions->cmd == COMPUTE       &&
-        ccmd->head_actions->pd_val.val == 100    && 
-        ccmd->head_replies->cmd == REPLY         && 
-        ccmd->head_replies->pd_val.val == 200) {
+        ccmd->head != ccmd->tail &&
+        ccmd->head->cmd == COMPUTE       &&
+        ccmd->head->pd_val.val == 100    && 
+        ccmd->tail->cmd == REPLY         && 
+        ccmd->tail->pd_val.val == 200) {
         res = true;
     }
 
@@ -106,7 +105,9 @@ bool test_ccmd_add_4() {
     return res;
 }
 
-bool test_ccmd_last_action() {
+bool test_ccmd_last() {
+    bool res = false;
+
     ccmd_t* ccmd;
     ccmd_init(&ccmd);
 
@@ -121,12 +122,13 @@ bool test_ccmd_last_action() {
 
     val = pd_build_fixed(400);
     ccmd_add(ccmd, LOAD, &val);
+    if (ccmd_last(ccmd)->cmd == LOAD && ccmd_last(ccmd)->pd_val.val == 400) {
+        res = true;
+    }
 
     val = pd_build_fixed(500);
     ccmd_add(ccmd, REPLY, &val);
-
-    bool res = false;
-    if (ccmd_last_action(ccmd)->cmd == LOAD && ccmd_last_action(ccmd)->pd_val.val == 400) {
+        if (ccmd_last(ccmd)->cmd == REPLY && ccmd_last(ccmd)->pd_val.val == 500) {
         res = true;
     }
 
@@ -154,8 +156,8 @@ bool test_ccmd_last_reply() {
     ccmd_add(ccmd, REPLY, &val);
 
     bool res = false;
-    if (ccmd_last_reply(ccmd)->cmd == REPLY &&
-        ccmd_last_reply(ccmd)->pd_val.val == 300) {
+    if (ccmd_last(ccmd)->cmd == REPLY   &&
+        ccmd_last(ccmd)->pd_val.val == 500) {
         res = true;
     }
 
@@ -174,12 +176,12 @@ bool test_ccmd_attach_last_reply_1() {
     ccmd_add(ccmd, COMPUTE, &val);
 
     val = pd_build_fixed(300);
-    ccmd_attach_last_reply(ccmd, &val);
+    ccmd_add(ccmd, REPLY, &val);
 
     bool res = false;
     if (ccmd->num == 3                    &&
-        ccmd->head_replies->cmd == REPLY  && 
-        ccmd->head_replies->pd_val.val == 300) {
+        ccmd->tail->cmd == REPLY  && 
+        ccmd->tail->pd_val.val == 300) {
         res = true;
     }
 
@@ -201,12 +203,11 @@ bool test_ccmd_attach_last_reply_2() {
     ccmd_add(ccmd, REPLY, &val);
 
     val = pd_build_fixed(400);
-    ccmd_attach_last_reply(ccmd, &val);
+    ccmd_add(ccmd, REPLY, &val);
 
     bool res = false;
     if (ccmd->num == 4                        &&
-        ccmd->head_replies->pd_val.val == 300 &&
-        ccmd->tail_replies->pd_val.val == 400) {
+        ccmd->tail->pd_val.val == 400) {
         res = true;
     }
 
@@ -228,9 +229,9 @@ bool test_ccmd_skip_1() {
     ccmd_add(ccmd, REPLY, &val);
 
     val = pd_build_fixed(400);
-    ccmd_attach_last_reply(ccmd, &val);
+    ccmd_add(ccmd, REPLY, &val);
 
-    ccmd_node_t* cmd = ccmd_skip(ccmd->head_actions, 2);
+    ccmd_node_t* cmd = ccmd_skip(ccmd->head, 2);
 
     bool res = false;
     if (cmd->cmd == REPLY && cmd->pd_val.val == 300) {
@@ -254,7 +255,7 @@ bool test_ccmd_skip_2() {
     val = pd_build_fixed(300);
     ccmd_add(ccmd, REPLY, &val);
 
-    ccmd_node_t* cmd = ccmd_skip(ccmd->head_actions, 10);
+    ccmd_node_t* cmd = ccmd_skip(ccmd->head, 10);
 
     bool res = false;
     if (cmd == NULL) {
@@ -265,8 +266,40 @@ bool test_ccmd_skip_2() {
     return res;
 }
 
-
 bool test_ccmd_skip_3() {
+    ccmd_t* ccmd;
+    ccmd_init(&ccmd);
+
+    pd_spec_t val = pd_build_fixed(100);
+    ccmd_add(ccmd, STORE, &val);
+
+    val = pd_build_fixed(200);
+    ccmd_add(ccmd, FORWARD, &val);
+
+    val = pd_build_fixed(300);
+    ccmd_add(ccmd, STORE, &val);
+
+    val = pd_build_fixed(400);
+    ccmd_add(ccmd, REPLY, &val);
+
+    val = pd_build_fixed(500);
+    ccmd_add(ccmd, COMPUTE, &val);
+
+    val = pd_build_fixed(600);
+    ccmd_add(ccmd, COMPUTE, &val);
+
+    ccmd_node_t* cmd = ccmd_skip(ccmd->head, 1);
+
+    bool res = false;
+    if (cmd != NULL && cmd->cmd == FORWARD && cmd->pd_val.val == 200) {
+        res = true;
+    }
+
+    ccmd_destroy(&ccmd);
+    return res;
+}
+
+bool test_ccmd_skip_4() {
     ccmd_t* ccmd;
     ccmd_init(&ccmd);
 
@@ -277,26 +310,28 @@ bool test_ccmd_skip_3() {
     ccmd_add(ccmd, STORE, &val);
 
     val = pd_build_fixed(300);
-    ccmd_add(ccmd, REPLY, &val);
+    ccmd_add(ccmd, LOAD, &val);
 
     val = pd_build_fixed(400);
-    ccmd_add(ccmd, COMPUTE, &val);
+    ccmd_add(ccmd, REPLY, &val);
 
     val = pd_build_fixed(500);
     ccmd_add(ccmd, COMPUTE, &val);
 
+    val = pd_build_fixed(600);
+    ccmd_add(ccmd, COMPUTE, &val);
 
-    ccmd_node_t* cmd = ccmd_skip(ccmd->head_actions, 1);
+
+    ccmd_node_t* cmd = ccmd_skip(ccmd->head, 1);
 
     bool res = false;
-    if (cmd != NULL && cmd->cmd == COMPUTE && cmd->pd_val.val == 400) {
+    if (cmd != NULL && cmd->cmd == COMPUTE && cmd->pd_val.val == 500) {
         res = true;
     }
 
     ccmd_destroy(&ccmd);
     return res;
 }
-
 
 bool test_ccmd_dump() {
     ccmd_t* ccmd;
@@ -310,8 +345,26 @@ bool test_ccmd_dump() {
 
     val = pd_build_fixed(300);
     ccmd_add(ccmd, PSKIP, &val);
+    ccmd_last(ccmd)->n_skip = 2;
 
     val = pd_build_fixed(400);
+    ccmd_add(ccmd, LOAD, &val);
+
+    
+    val = pd_build_fixed(500);
+    ccmd_add(ccmd, FORWARD, &val);
+    
+    val = pd_build_fixed(600);
+    ccmd_add(ccmd, STORE, &val);
+
+    val = pd_build_fixed(700);
+    ccmd_add(ccmd, LOAD, &val);
+
+    val = pd_build_fixed(800);
+    ccmd_add(ccmd, REPLY, &val);
+
+
+    val = pd_build_fixed(900);
     ccmd_add(ccmd, REPLY, &val);
 
     unsigned char *send_buf = malloc(BUF_SIZE);
@@ -335,13 +388,7 @@ bool test_ccmd_dump() {
     }
 
     c = cmd_next(c);
-    if (c->cmd != PSKIP) {
-        res = false;
-        goto err;
-    }
-
-    c = cmd_next(c);
-    if (c->cmd != REPLY) {
+    if (c->cmd != REPLY && cmd_get_opts(reply_opts_t, c)->resp_size == 900) {
         res = false;
         goto err;
     }
@@ -366,13 +413,14 @@ int main() {
     perform_test(test_ccmd_add_2());
     perform_test(test_ccmd_add_3());
     perform_test(test_ccmd_add_4());
-    perform_test(test_ccmd_last_action());
+    perform_test(test_ccmd_last());
     perform_test(test_ccmd_last_reply());
     perform_test(test_ccmd_attach_last_reply_1());
     perform_test(test_ccmd_attach_last_reply_2());
     perform_test(test_ccmd_skip_1());
     perform_test(test_ccmd_skip_2());
     perform_test(test_ccmd_skip_3());
+    perform_test(test_ccmd_skip_4());
     perform_test(test_ccmd_dump());
 
     return 0;
