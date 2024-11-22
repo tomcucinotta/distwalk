@@ -18,7 +18,7 @@ struct req_info_t {
     int fwd_replies_left;
     unsigned char *message_ptr;
     command_t *curr_cmd;
-    pqueue_node_t *timeout_node;
+    node_t *timeout_node;
     req_info_t *prev, *next;
 };
 

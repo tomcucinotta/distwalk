@@ -6,11 +6,11 @@
 
 #define N 100
 
-bool check2(pqueue_t *queue, int arr[N], pqueue_node_t *nodes[N]) {
+bool check2(pqueue_t *queue, int arr[N], node_t *nodes[N]) {
 	int temp_arr[N], n = pqueue_size(queue);
 
 	for (int i = 0; i < n; i++) {
-		pqueue_node_t *top = pqueue_top(queue);
+		node_t *top = pqueue_top(queue);
 
 		int min_value = 10000000, min_index = 0;
 		for (int j = 0; j < n - i; j++) {
@@ -39,7 +39,7 @@ bool check2(pqueue_t *queue, int arr[N], pqueue_node_t *nodes[N]) {
 
 bool check_pqueue() {
 	pqueue_t *queue = pqueue_alloc(N);
-	pqueue_node_t *nodes[N];
+	node_t *nodes[N];
 	int arr[N];
 	int n = 0, insert = 0, remove = 0, checks = 0;
 

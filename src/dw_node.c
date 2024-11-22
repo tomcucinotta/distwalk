@@ -224,7 +224,7 @@ int remove_timeout(conn_worker_info_t* infos, int req_id, int epollfd) {
     if (!req || !req->timeout_node)
         return -1;
 
-    pqueue_node_t *top = pqueue_top(infos->timeout_queue);
+    node_t *top = pqueue_top(infos->timeout_queue);
     struct itimerspec timerspec = {0};
     int time_elapsed, req_timeout;
     bool is_top = (top == req->timeout_node);
