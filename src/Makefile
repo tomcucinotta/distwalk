@@ -13,11 +13,10 @@ MAIN_PROGRAMS=dw_client dw_node
 
 TOOLS=bash gcovr
 
+all: main debug tests
 main: $(MAIN_PROGRAMS)
 debug: $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
 tests: $(TEST_PROGRAMS)
-
-all: main debug tests
 
 run-tests: all
 	$(foreach exec,$(TOOLS),$(if $(shell which $(exec)),,$(error "No $(exec) in PATH. Please install it")))
