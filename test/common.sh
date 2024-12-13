@@ -21,6 +21,10 @@ export GCOV_PREFIX_STRIP=$(pwd | sed -e 's#/##' | tr "/" "\n" | wc -l)
 
 id=0
 
+check_executable() {
+    command -v ../src/$1 >/dev/null 2>&1 || { echo >&2 "Executable '$1' missing --  Aborting."; return -1; }
+}
+
 run() {
     outdir=gcov/prog-$id
     mkdir -p $outdir
@@ -29,26 +33,31 @@ run() {
 }
 
 client() {
+    check_executable dw_client_debug || { exit -1; }
     run dw_client_debug "$@"
     id=$[$id+1]
 }
 
 client_bg() {
+    check_executable dw_client_debug || { exit -1; }
     run dw_client_debug "$@" &
     id=$[$id+1]
 }
 
 strace_client() {
+    check_executable dw_client_debug || { exit -1; }
     run strace -f dw_client_debug "$@"
     id=$[$id+1]
 }
 
 node() {
+    check_executable dw_node_debug || { exit -1; }
     run dw_node_debug "$@"
     id=$[$id+1]
 }
 
 node_bg() {
+    check_executable dw_node_debug || { exit -1; }
     inc=1
     if [ "$1" == "--wait-bind-num" ]; then
         inc=$2
@@ -69,6 +78,7 @@ node_bg() {
 }
 
 strace_node_bg() {
+    check_executable dw_node_debug || { exit -1; }
     inc=1
     if [ "$1" == "--wait-bind-num" ]; then
         inc=$2

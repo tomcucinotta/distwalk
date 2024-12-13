@@ -9,7 +9,14 @@ trap 'exit' SIGINT SIGTERM
 
 #cp ../src/dw_client ../src/dw_client_debug ../src/dw_client_tsan ../src/dw_node ../src/dw_node_debug ../src/dw_node_tsan .
 
-for test in $(find ../src/ -name 'test_*' -executable | grep -v '~$') $(ls test_*.sh); do
+TESTS=
+if [ $# -gt 0 ]; then
+    TESTS=( $@ )
+else
+    TESTS=( $(find ../src/ -name 'test_*' -executable | grep -v '~$') $(ls test_*.sh) )
+fi
+
+for test in "${TESTS[@]}"; do
     echo -n "TEST $test: "
     echo -e "\n\nTEST $test:\n" >> log_tests.txt
     if bash -c ./$test >> log_tests.txt 2>&1; then
