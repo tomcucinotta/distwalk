@@ -81,7 +81,7 @@ const char* get_event_str(event_t event) {
 typedef struct {
     int listen_sock;
     int timerfd;        // special timerfd to handle forward timeouts
-    int statfd;          // special signalfd to print statistics
+    int statfd;         // special signalfd to print statistics
     dw_poll_t dw_poll;
 
     pqueue_t *timeout_queue;
@@ -1473,6 +1473,9 @@ int main(int argc, char *argv[]) {
         conn_worker_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
         conn_worker_infos[i].sched_attrs = input_args.sched_attrs;
         
+        // TODO: Consider using a dedicated thread for statistics to avoid the edge-case
+        //       where a single-threaded node is executing a long COMPUTE, thus
+        //       preventing signals to be processed on time
         if (i == 0) {
             conn_worker_infos[i].statfd = signalfd(-1, &stat_sigmask, 0);
         } else {
