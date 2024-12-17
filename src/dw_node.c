@@ -54,6 +54,7 @@ typedef enum {
     TIMER,
     CONNECT,
     SOCKET,
+    DISPATCH,
     STATS,
     TERMINATION,
     EVENT_NUMBER
@@ -66,6 +67,7 @@ const char* get_event_str(event_t event) {
         "TIMER",
         "CONNECT",
         "SOCKET",
+        "DISPATCH",
         "STATS",
         "TERMINATION"
     };
@@ -84,6 +86,10 @@ typedef struct {
 
     pqueue_t *timeout_queue;
     int time_elapsed;
+
+    // communication between parent and children conn workers (AM_PARENT only)
+    // 0 is used for writing (parent), 1 for reading (child)
+    int dispatchfd[2];
 
     // communication with storage
     int storefd; // write
@@ -1003,6 +1009,11 @@ void* conn_worker(void* args) {
     if (infos->storefd != -1)
         check(dw_poll_add(&infos->dw_poll, infos->store_replyfd, DW_POLLIN, i2l(STORAGE, infos->store_replyfd)) == 0);
 
+    // Add parent communication fd
+    if (accept_mode == AM_PARENT) {
+        check(dw_poll_add(&infos->dw_poll, infos->dispatchfd[1], DW_POLLIN, i2l(DISPATCH, infos->dispatchfd[1])) == 0);
+    }
+
     while (running) {
         int nfds = dw_poll_wait(&infos->dw_poll);
         if (nfds == -1) {
@@ -1044,12 +1055,19 @@ void* conn_worker(void* args) {
 
                 conn_set_status_by_id(conn_id, READY);
                 infos->active_conns++;
-
+                
                 int next_thread_id = accept_mode == AM_PARENT ? (atomic_fetch_add(&next_thread_cnt, 1) % conn_threads) : (infos - conn_worker_infos);
-                // TODO: add a pipe to tell next_thread_id to perform this, unsafe here
-                if (dw_poll_add(&conn_worker_infos[next_thread_id].dw_poll, conn_sock, DW_POLLIN, i2l(SOCKET, conn_id)) != 0)
+                if (accept_mode == AM_PARENT && infos->dw_poll.poll_type != DW_EPOLL) { // NOTE: in AM_PARENT mode, only the parent worker thread will reach here
+                    int rv = write(conn_worker_infos[next_thread_id].dispatchfd[0], (unsigned char*) &conn_id, sizeof(conn_id));
+                    if (rv == -1)
+                        perror("sock dispatch write():");
+                    if (rv < sizeof(conn_id))
+                        fprintf(stderr, "sock dispatch write(): message too long\n");
+                } else {
+                    if (dw_poll_add(&conn_worker_infos[next_thread_id].dw_poll, conn_sock, DW_POLLIN, i2l(SOCKET, conn_id)) != 0)
                         perror("dw_poll() failed");
-                dw_log("conn_id: %d assigned to connw-%d\n", conn_id, conn_worker_infos[next_thread_id].worker_id);
+                }
+                dw_log("conn_id: %d assigned to connw-%d\n", conn_id, next_thread_id);
             } else if (event_type == STORAGE) {
                 check(event_data == infos->store_replyfd);
 
@@ -1062,6 +1080,23 @@ void* conn_worker(void* args) {
                 dw_log("STORAGE ACK for req_id %d\n", req_id_ACK);
                 process_messages(req_get_by_id(req_id_ACK), &infos->dw_poll, infos);
                 //exec_request(infos->epollfd, &events[i], infos);
+            } else if (event_type == DISPATCH) {
+                check(event_data == infos->dispatchfd[1]);
+
+                int conn_id;
+                int rv = read(event_data, (unsigned char*) &conn_id, sizeof(conn_id));
+                if (rv == -1) {
+                    perror("sock dispatch read():");
+                    continue;
+                }
+                if (rv < sizeof(conn_id)) {
+                    fprintf(stderr, "sock dispatch write(): message too long\n");
+                    continue;
+                }
+
+                conn_info_t *conn = conn_get_by_id(conn_id);
+                if (dw_poll_add(&infos->dw_poll, conn->sock, DW_POLLIN, i2l(SOCKET, conn_id)) != 0)
+                    perror("dw_poll() failed");
             } else if (event_type == TERMINATION) {
                 // no need to disarm signal, since we are killing the node anyway
                 dw_log("TERMINATION\n");
@@ -1291,6 +1326,15 @@ void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct so
     } else if (accept_mode == AM_PARENT) {
         conn_worker_infos[i].listen_sock = -1;
     }
+
+    // Auxiliary communication medium
+    if (accept_mode == AM_PARENT) {
+        sys_check(socketpair(AF_LOCAL, SOCK_STREAM, 0, conn_worker_infos[i].dispatchfd));
+
+    } else {
+        conn_worker_infos[i].dispatchfd[0] = -1;
+        conn_worker_infos[i].dispatchfd[1] = -1;
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -1512,6 +1556,9 @@ int main(int argc, char *argv[]) {
 
             close(conn_worker_infos[i].store_replyfd);
             close(storage_worker_info.store_replyfd[i]);
+
+            close(conn_worker_infos[i].dispatchfd[0]);
+            close(conn_worker_infos[i].dispatchfd[1]);
         }
     }
 
