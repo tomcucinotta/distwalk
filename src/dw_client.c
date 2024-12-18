@@ -610,7 +610,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         }
         
         // Reserve a forward reply command
-        data_t data = { .ptr=&val }; 
+        data_t data = { .ptr=&arguments->last_resp_size }; 
         queue_enqueue(deferred_replies, i, data);
 
         break; }
