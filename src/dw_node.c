@@ -124,9 +124,9 @@ typedef struct {
 } storage_worker_info_t;
 
 typedef struct {
-    command_t *cmd;
     int worker_id;
     int req_id;
+    command_t *cmd;
 } storage_req_t;
 
 pthread_t workers[MAX_THREADS];
@@ -566,15 +566,21 @@ int process_single_message(req_info_t *req, int epollfd, conn_worker_info_t *inf
         case STORE:
         case LOAD: {
             storage_req_t w;
-            w.cmd = cmd;
             w.worker_id = infos->worker_id;
             w.req_id = req->req_id;
+
+            // Deep-copy command to avoid data-race with conn worker
+            int cmds_len = ((unsigned char*)cmd_next(cmd) - (unsigned char*)cmd);
+            w.cmd = calloc(1, cmds_len);
+            memcpy(w.cmd, cmd, cmds_len);
 
             if (write(infos->storefd, &w, sizeof(w)) < 0) {
                 perror("storage worker write() failed");
                 return -1;
             }
 
+            if (cmd->cmd == STORE && !cmd_get_opts(store_opts_t, cmd)->wait_sync)
+                break;
             req->curr_cmd = cmd_next(cmd);
             return 0; }
         default:
@@ -902,22 +908,24 @@ void* storage_worker(void* args) {
                 req_id = w.req_id;
 
                 dw_log("STORAGE cmd from conn_id %d\n", req_id);
-
+                
                 if (storage_cmd->cmd == STORE) {
                     store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd));
+                    if (cmd_get_opts(store_opts_t, storage_cmd)->wait_sync) { 
+                        if (infos->periodic_sync_msec <= 0) {
+                            safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
+                        } else {
+                            data_t data = {.value=req_id};
+                            pqueue_insert(infos->sync_waiting_queue, worker_id, data);
+                        }
+                    }
                 } else if (storage_cmd->cmd == LOAD) {
                     load(infos, infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd));
+                    safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
                 } else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");
-                    continue;
                 }
-
-                if (!cmd_get_opts(store_opts_t, storage_cmd)->wait_sync || infos->periodic_sync_msec <= 0) {
-                    safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
-                } else {
-                    data_t data = {.value=req_id};
-                    pqueue_insert(infos->sync_waiting_queue, worker_id, data);
-                }
+                free(storage_cmd);
             } else {
                 fprintf(stderr, "Unknown event in storage server - skipping");
             }
@@ -1349,7 +1357,7 @@ int main(int argc, char *argv[]) {
         if (storage_worker_info.storage_info.use_odirect) { // block-aligned buffer
             sys_check(posix_memalign((void**) &storage_worker_info.store_buf, blk_size, BUF_SIZE));
         } else {
-            storage_worker_info.store_buf = malloc(BUF_SIZE);
+            storage_worker_info.store_buf = calloc(1, BUF_SIZE);
         }
         for (int i = 0; i < input_args.num_threads; i++) {
             // conn_worker -> storage_worker
