@@ -575,6 +575,8 @@ int process_single_message(req_info_t *req, int epollfd, conn_worker_info_t *inf
                 return -1;
             }
 
+            if (!cmd_get_opts(store_opts_t, cmd)->wait_sync)
+                break;
             req->curr_cmd = cmd_next(cmd);
             return 0; }
         default:
@@ -902,7 +904,8 @@ void* storage_worker(void* args) {
                 req_id = w.req_id;
 
                 dw_log("STORAGE cmd from conn_id %d\n", req_id);
-
+                int wait_sync = cmd_get_opts(store_opts_t, storage_cmd)->wait_sync;
+                
                 if (storage_cmd->cmd == STORE) {
                     store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd));
                 } else if (storage_cmd->cmd == LOAD) {
@@ -912,11 +915,13 @@ void* storage_worker(void* args) {
                     continue;
                 }
 
-                if (!cmd_get_opts(store_opts_t, storage_cmd)->wait_sync || infos->periodic_sync_msec <= 0) {
-                    safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
-                } else {
-                    data_t data = {.value=req_id};
-                    pqueue_insert(infos->sync_waiting_queue, worker_id, data);
+                if (wait_sync) { 
+                    if (infos->periodic_sync_msec <= 0) {
+                        safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
+                    } else {
+                        data_t data = {.value=req_id};
+                        pqueue_insert(infos->sync_waiting_queue, worker_id, data);
+                    }
                 }
             } else {
                 fprintf(stderr, "Unknown event in storage server - skipping");
@@ -1349,7 +1354,7 @@ int main(int argc, char *argv[]) {
         if (storage_worker_info.storage_info.use_odirect) { // block-aligned buffer
             sys_check(posix_memalign((void**) &storage_worker_info.store_buf, blk_size, BUF_SIZE));
         } else {
-            storage_worker_info.store_buf = malloc(BUF_SIZE);
+            storage_worker_info.store_buf = calloc(BUF_SIZE, sizeof(unsigned char));
         }
         for (int i = 0; i < input_args.num_threads; i++) {
             // conn_worker -> storage_worker
