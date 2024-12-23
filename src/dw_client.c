@@ -425,9 +425,8 @@ static struct argp_option argp_client_options[] = {
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
     { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
     { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=n][,retry=n]", 0, "Send a number of FORWARD message to the ip:port list"},
-    { "send-pkt-size",      SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests"},
-    { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]", OPTION_ALIAS},
-    { "reply",              REPLY_CMD,              "[nbytes|prob:field=val[,field=val]][,nack=n]", 0, "Reply with payload size; Optionally wait for n acknowledgments"},
+    { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests"},
+    { "rs",                 REPLY_CMD,              "nbytes|prob:field=val[,field=val][,nack=n]", OPTION_ARG_OPTIONAL, "Add a Reply command; Optionally specify payload size and number of acknowledgments"},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
     { "num-sessions",       NUM_SESSIONS,           "n",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
@@ -558,7 +557,8 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case FORWARD_CMD: {
         struct sockaddr_in fwd_addr;
         command_type_t fwd_type = FORWARD;
-        pd_spec_t val = pd_build_fixed(default_resp_size);
+        pd_spec_t fwd_val = pd_build_fixed(default_resp_size);
+        pd_spec_t repl_val = pd_build_fixed(default_resp_size);
 
         int timeout_us = 2000000;
         int retry_num = 0;
@@ -587,7 +587,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 }
 
                 // TODO: customize forward pkt size
-                ccmd_add(ccmd, fwd_type, &val);
+                ccmd_add(ccmd, fwd_type, &fwd_val);
                 ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
                 ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
                 
@@ -610,7 +610,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         }
         
         // Reserve a forward reply command
-        data_t data = { .ptr=&arguments->last_resp_size }; 
+        data_t data = { .ptr=&repl_val }; 
         queue_enqueue(deferred_replies, i, data);
 
         break; }
@@ -621,18 +621,27 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         check(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE, "Too big send request size, maximum is %d", BUF_SIZE);
         break;
     case REPLY_CMD: {
+        if (queue_size(ccmd) <= 0) { // edge-case
+            pd_spec_t val = pd_build_fixed(default_compute_us);
+            ccmd_add(ccmd, COMPUTE, &val);
+        }
+
         pd_spec_t val;
         int nack = 1;
 
-        char *tok;
-        while ((tok = strsep(&arg, ",")) != NULL) {
-            if (sscanf(tok, "nack=%d", &nack) == 1) {
-                continue;
-            } else {
-                check(pd_parse_bytes(&val, tok), "Wrong response size specification");
-                val.min = MIN_REPLY_SIZE;
-                val.max = BUF_SIZE;
-                check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
+        if (arg == NULL)
+            val = pd_build_fixed(default_resp_size);
+        else {
+            char *tok;
+            while ((tok = strsep(&arg, ",")) != NULL) {
+                if (sscanf(tok, "nack=%d", &nack) == 1) {
+                    continue;
+                } else {
+                    check(pd_parse_bytes(&val, tok), "Wrong response size specification");
+                    val.min = MIN_REPLY_SIZE;
+                    val.max = BUF_SIZE;
+                    check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
+                }
             }
         }
 
@@ -732,8 +741,13 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             ccmd_add(ccmd, REPLY, queue_node_data(queue_tail(deferred_replies)).ptr);
             ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(deferred_replies));
 
-            queue_dequeue_tail(deferred_replies);
-        } 
+            queue_dequeue_tail(arguments->reserved_fwd_replies);
+            arguments->last_reserved_used = ccmd_last(ccmd);
+            arguments->fwd_scope--;
+        }
+        
+        check(queue_size(arguments->reserved_fwd_replies) == 0);
+        queue_free(arguments->reserved_fwd_replies);
 
         nested_fwd_parsing = 0;
         queue_free(deferred_replies);

@@ -26,7 +26,7 @@ for ((i=0; i<10; i++)); do
 done
 
 for ((i=0; i<100; i++)); do
-    (client -n 1000 -C 100 -p 1000 --send-pkt-size=$[ 4 * 1024 * 1024 ] || true) &
+    (client -n 1000 -C 100 -p 1000 --ps=$[ 4 * 1024 * 1024 ] || true) &
     while ! kill -SIGINT $(pidof dw_client_debug); do
           echo "Retrying kill of dw_client_debug..."
     done
