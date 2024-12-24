@@ -1,37 +1,33 @@
 #include <stdio.h>
 #include <stdbool.h>
 
+#include "queue.h"
 #include "ccmd.h"
 #include "message.h"
 #include "dw_debug.h"
-bool test_ccmd_init_destroy() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
 
-    if (ccmd == NULL || sizeof(*ccmd) != sizeof(ccmd_t)) {
+bool test_ccmd_init_destroy() {
+    queue_t* ccmd = queue_alloc(2);
+    if (!ccmd || sizeof(*ccmd) != sizeof(queue_t))
         return false;
-    }
 
     ccmd_destroy(&ccmd);
-    if (ccmd == NULL) {
-        return true;
-    }
-
-    return false;
+    if (ccmd) 
+        return false;
+    return true;
 }
 
 bool test_ccmd_add_1() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(1);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, COMPUTE, &val);
-    
+
     bool res = false;
-    if (ccmd->num == 1                           && 
-        ccmd->head == ccmd->tail &&
-        ccmd->head->cmd == COMPUTE       &&
-        ccmd->head->pd_val.val == 100) {
+    if (queue_size(ccmd) == 1                           
+        && ccmd->head == ccmd->tail
+        && ccmd_last(ccmd)->cmd == COMPUTE    
+        && ccmd_last(ccmd)->pd_val.val == 100) {
         res = true;
     }
 
@@ -40,8 +36,7 @@ bool test_ccmd_add_1() {
 }
 
 bool test_ccmd_add_2() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(2);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, COMPUTE, &val);
@@ -50,11 +45,11 @@ bool test_ccmd_add_2() {
     ccmd_add(ccmd, STORE, &val);
 
     bool res = false;
-    if (ccmd->num == 2                &&
-        ccmd->head->cmd == COMPUTE    &&
-        ccmd->head->pd_val.val == 100 && 
-        ccmd->tail->cmd == STORE      && 
-        ccmd->tail->pd_val.val == 200) {
+    if (queue_size(ccmd) == 2                
+        && ccmd_first(ccmd)->cmd == COMPUTE    
+        && ccmd_first(ccmd)->pd_val.val == 100 
+        && ccmd_last(ccmd)->cmd == STORE
+        && ccmd_last(ccmd)->pd_val.val == 200) {
         res = true;
     }
 
@@ -63,17 +58,16 @@ bool test_ccmd_add_2() {
 }
 
 bool test_ccmd_add_3() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(2);
     
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, REPLY, &val);
 
     bool res = false;
-    if (ccmd->num == 1                           &&
-        ccmd->head == ccmd->tail &&
-        ccmd->head->cmd == REPLY         &&
-        ccmd->head->pd_val.val == 100) {
+    if (queue_size(ccmd) == 1
+        && ccmd->head == ccmd->tail
+        && queue_head(ccmd)->key == REPLY
+        && ccmd_first(ccmd)->pd_val.val == 100) {
         res = true;
     }
 
@@ -82,8 +76,7 @@ bool test_ccmd_add_3() {
 }
 
 bool test_ccmd_add_4() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(2);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, COMPUTE, &val);
@@ -92,12 +85,12 @@ bool test_ccmd_add_4() {
     ccmd_add(ccmd, REPLY, &val);
 
     bool res = false;
-    if (ccmd->num == 2                           &&
-        ccmd->head != ccmd->tail &&
-        ccmd->head->cmd == COMPUTE       &&
-        ccmd->head->pd_val.val == 100    && 
-        ccmd->tail->cmd == REPLY         && 
-        ccmd->tail->pd_val.val == 200) {
+    if (queue_size(ccmd) == 2
+        && ccmd->head != ccmd->tail 
+        && queue_head(ccmd)->key == COMPUTE
+        && ccmd_first(ccmd)->pd_val.val == 100
+        && queue_tail(ccmd)->key == REPLY
+        && ccmd_last(ccmd)->pd_val.val == 200) {
         res = true;
     }
 
@@ -108,8 +101,7 @@ bool test_ccmd_add_4() {
 bool test_ccmd_last() {
     bool res = false;
 
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(5);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, COMPUTE, &val);
@@ -137,8 +129,7 @@ bool test_ccmd_last() {
 }
 
 bool test_ccmd_last_reply() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(5);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, FORWARD, &val);
@@ -156,8 +147,8 @@ bool test_ccmd_last_reply() {
     ccmd_add(ccmd, REPLY, &val);
 
     bool res = false;
-    if (ccmd_last(ccmd)->cmd == REPLY   &&
-        ccmd_last(ccmd)->pd_val.val == 500) {
+    if (ccmd_last(ccmd)->cmd == REPLY
+        && ccmd_last(ccmd)->pd_val.val == 500) {
         res = true;
     }
 
@@ -166,8 +157,7 @@ bool test_ccmd_last_reply() {
 }
 
 bool test_ccmd_attach_last_reply_1() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(3);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, COMPUTE, &val);
@@ -179,9 +169,9 @@ bool test_ccmd_attach_last_reply_1() {
     ccmd_add(ccmd, REPLY, &val);
 
     bool res = false;
-    if (ccmd->num == 3                    &&
-        ccmd->tail->cmd == REPLY  && 
-        ccmd->tail->pd_val.val == 300) {
+    if (queue_size(ccmd) == 3 
+        && queue_tail(ccmd)->key == REPLY 
+        && ccmd_last(ccmd)->pd_val.val == 300) {
         res = true;
     }
 
@@ -190,8 +180,7 @@ bool test_ccmd_attach_last_reply_1() {
 }
 
 bool test_ccmd_attach_last_reply_2() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(4);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, COMPUTE, &val);
@@ -206,8 +195,8 @@ bool test_ccmd_attach_last_reply_2() {
     ccmd_add(ccmd, REPLY, &val);
 
     bool res = false;
-    if (ccmd->num == 4                        &&
-        ccmd->tail->pd_val.val == 400) {
+    if (queue_size(ccmd) == 4
+        && ccmd_last(ccmd)->pd_val.val == 400) {
         res = true;
     }
 
@@ -216,8 +205,7 @@ bool test_ccmd_attach_last_reply_2() {
 }
 
 bool test_ccmd_skip_1() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(4);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, COMPUTE, &val);
@@ -230,8 +218,8 @@ bool test_ccmd_skip_1() {
 
     val = pd_build_fixed(400);
     ccmd_add(ccmd, REPLY, &val);
-
-    ccmd_node_t* cmd = ccmd_skip(ccmd->head, 2);
+    
+    ccmd_node_t* cmd = ccmd_skip(ccmd_first(ccmd), 2);
 
     bool res = false;
     if (cmd->cmd == REPLY && cmd->pd_val.val == 300) {
@@ -243,8 +231,7 @@ bool test_ccmd_skip_1() {
 }
 
 bool test_ccmd_skip_2() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(4);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, COMPUTE, &val);
@@ -255,7 +242,7 @@ bool test_ccmd_skip_2() {
     val = pd_build_fixed(300);
     ccmd_add(ccmd, REPLY, &val);
 
-    ccmd_node_t* cmd = ccmd_skip(ccmd->head, 10);
+    ccmd_node_t* cmd = ccmd_skip((ccmd_node_t*) queue_node_data(queue_head(ccmd)).ptr, 10);
 
     bool res = false;
     if (cmd == NULL) {
@@ -267,15 +254,14 @@ bool test_ccmd_skip_2() {
 }
 
 bool test_ccmd_skip_3() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(6);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, STORE, &val);
 
     val = pd_build_fixed(200);
     ccmd_add(ccmd, FORWARD, &val);
-
+    
     val = pd_build_fixed(300);
     ccmd_add(ccmd, STORE, &val);
 
@@ -288,7 +274,7 @@ bool test_ccmd_skip_3() {
     val = pd_build_fixed(600);
     ccmd_add(ccmd, COMPUTE, &val);
 
-    ccmd_node_t* cmd = ccmd_skip(ccmd->head, 1);
+    ccmd_node_t* cmd = ccmd_skip((ccmd_node_t*) queue_node_data(queue_head(ccmd)).ptr, 1);
 
     bool res = false;
     if (cmd != NULL && cmd->cmd == FORWARD && cmd->pd_val.val == 200) {
@@ -300,8 +286,7 @@ bool test_ccmd_skip_3() {
 }
 
 bool test_ccmd_skip_4() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(6);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, FORWARD, &val);
@@ -321,8 +306,7 @@ bool test_ccmd_skip_4() {
     val = pd_build_fixed(600);
     ccmd_add(ccmd, COMPUTE, &val);
 
-
-    ccmd_node_t* cmd = ccmd_skip(ccmd->head, 1);
+    ccmd_node_t* cmd = ccmd_skip((ccmd_node_t*) queue_node_data(queue_head(ccmd)).ptr, 1);
 
     bool res = false;
     if (cmd != NULL && cmd->cmd == COMPUTE && cmd->pd_val.val == 500) {
@@ -334,8 +318,7 @@ bool test_ccmd_skip_4() {
 }
 
 bool test_ccmd_dump() {
-    ccmd_t* ccmd;
-    ccmd_init(&ccmd);
+    queue_t* ccmd = queue_alloc(9);
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, STORE, &val);
@@ -422,6 +405,5 @@ int main() {
     perform_test(test_ccmd_skip_3());
     perform_test(test_ccmd_skip_4());
     perform_test(test_ccmd_dump());
-
     return 0;
 }

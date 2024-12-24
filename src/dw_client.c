@@ -28,7 +28,7 @@ __thread char thread_name[16];
 
 int use_wait_spinning = 0;
 
-ccmd_t* ccmd = NULL; // Ordered chain of commands
+queue_t* ccmd; // chain of commands
 
 unsigned int default_compute_us = 1000;
 
@@ -53,10 +53,14 @@ struct argp_client_arguments {
     int num_threads;
     char clienthostport[MAX_HOSTPORT_STRLEN];
     char nodehostport[MAX_HOSTPORT_STRLEN];
+
+    // parsing phase
     pd_spec_t last_resp_size;
+
+    queue_t* reserved_fwd_replies; // nack -> pd_val
+    ccmd_node_t* last_reserved_used;
+    int fwd_scope;
 } input_args;
-int nested_fwd_parsing = 0; // used in parsing phase only
-queue_t* deferred_replies; // used for parsing phase only (nack -> pd_val)
 
 #define MAX_THREADS 256
 pthread_t sender[MAX_THREADS];
@@ -460,9 +464,11 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->num_threads = 1;
         arguments->last_resp_size = pd_build_fixed(default_resp_size);
 
-        deferred_replies = queue_alloc(100);
-        data_t data = { .ptr=&(arguments->last_resp_size) }; 
-        queue_enqueue(deferred_replies, 1, data);
+        arguments->reserved_fwd_replies = queue_alloc(100);
+        arguments->last_reserved_used = NULL;
+        arguments->fwd_scope = 0;
+
+        ccmd = queue_alloc(100);
         break;
     case HELP:
         argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
@@ -551,8 +557,8 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             }
         }
         check(n_skip != -1, "--skip needs a positive integer as arg\n");
-        ccmd_node_t *p = ccmd_add(ccmd, PSKIP, &val);
-        p->n_skip = n_skip;
+        ccmd_add(ccmd, PSKIP, &val);
+        ccmd_last(ccmd)->n_skip = n_skip;
         break; }
     case FORWARD_CMD: {
         struct sockaddr_in fwd_addr;
@@ -591,17 +597,16 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
                 ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
                 
-                // keep track of the first MULTI_FORWARD
-                if (i == 0)
+                if (i == 0) // keep track of the first MULTI_FORWARD
                     fwd_itr = ccmd_last(ccmd);
                 ccmd_last(ccmd)->fwd.on_fail_skip = 1;
                 ccmd_last(ccmd)->fwd.proto = fwd_proto;
-
-                nested_fwd_parsing++;
                 i++;
             }
         }
 
+        arguments->fwd_scope++;
+        
         // Update timeout and retry parameters for each parsed forwad operation
         while (fwd_itr != NULL && (fwd_itr->cmd == FORWARD || fwd_itr->cmd == MULTI_FORWARD)) {
             fwd_itr->fwd.timeout = timeout_us;
@@ -611,7 +616,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         
         // Reserve a forward reply command
         data_t data = { .ptr=&repl_val }; 
-        queue_enqueue(deferred_replies, i, data);
+        queue_enqueue(arguments->reserved_fwd_replies, i, data);
 
         break; }
     case SEND_REQUEST_SIZE:
@@ -644,29 +649,36 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 }
             }
         }
+        if (nack == 0) // TODO: allow n_ack 0 when reply messages will be optional 
+            nack = 1;
 
-        // Update deferred reply
-        int deferred_nack = queue_node_key(queue_tail(deferred_replies));
-        pd_spec_t* deferred_val = queue_node_data(queue_tail(deferred_replies)).ptr;
+        if (arguments->fwd_scope <= 0) {
+            if (ccmd_last(ccmd)->cmd == REPLY && ccmd_last(ccmd) != arguments->last_reserved_used) // update last chained reply
+                ccmd_last(ccmd)->pd_val = val;
+            else // intra-chain reply
+                ccmd_add(ccmd, REPLY, &val);
+            ccmd_last(ccmd)->resp.n_ack = nack;
+            break;
+        }
+
+        // Update deferred reply's pd_val and nack value
+        int deferred_nack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
+        pd_spec_t* deferred_val = queue_node_data(queue_tail(arguments->reserved_fwd_replies)).ptr;
         deferred_val->val = val.val;
         deferred_val->min = val.min;
         deferred_val->max = val.max;
         deferred_val->std = val.std;
         deferred_val->prob = val.prob;
-
-        if (nack == 0) // TODO: allow n_ack 0 when reply messages will be optional 
-            nack = 1;
         if (nack > 0 && nack < deferred_nack)
-            queue_tail(deferred_replies)->key = nack;
+            queue_tail(arguments->reserved_fwd_replies)->key = nack;
 
         // Use a reserved reply
-        if (nested_fwd_parsing > 0) {
-            ccmd_add(ccmd, REPLY, queue_node_data(queue_tail(deferred_replies)).ptr);
-            ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(deferred_replies));
-
-            queue_dequeue_tail(deferred_replies);
-            nested_fwd_parsing = 0;
-        }
+        ccmd_add(ccmd, REPLY, queue_node_data(queue_tail(arguments->reserved_fwd_replies)).ptr);
+        ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
+        queue_dequeue_tail(arguments->reserved_fwd_replies);
+        
+        arguments->last_reserved_used = ccmd_last(ccmd);
+        arguments->fwd_scope--;
         break; }
     case NUM_THREADS:
         arguments->num_threads = atoi(arg);
@@ -729,28 +741,29 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             argp_failure(state, 1, 0, "num_pkts: %ld > MAX_PKTS: %d, Overflow!", num_pkts, MAX_PKTS);
         }
 
-
         // default ccmd
-        if (!ccmd_last(ccmd)) {
+        if (queue_size(ccmd) <= 0) {
             pd_spec_t val = pd_build_fixed(default_compute_us);
             ccmd_add(ccmd, COMPUTE, &val);
         }
 
         // Exhaust remaining deferred replies
-        while(queue_size(deferred_replies) > 0) {
-            ccmd_add(ccmd, REPLY, queue_node_data(queue_tail(deferred_replies)).ptr);
-            ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(deferred_replies));
+        while(queue_size(arguments->reserved_fwd_replies) > 0 && arguments->fwd_scope > 0) {
+            ccmd_add(ccmd, REPLY, queue_node_data(queue_tail(arguments->reserved_fwd_replies)).ptr);
+            ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
 
             queue_dequeue_tail(arguments->reserved_fwd_replies);
             arguments->last_reserved_used = ccmd_last(ccmd);
             arguments->fwd_scope--;
         }
-        
+
         check(queue_size(arguments->reserved_fwd_replies) == 0);
         queue_free(arguments->reserved_fwd_replies);
 
-        nested_fwd_parsing = 0;
-        queue_free(deferred_replies);
+        if (ccmd_last(ccmd) == arguments->last_reserved_used || ccmd_last(ccmd)->cmd != REPLY) { // edge-case (TODO: eventually this must be removed)
+            ccmd_add(ccmd, REPLY, &arguments->last_resp_size);
+            ccmd_last(ccmd)->resp.n_ack = 1;
+        }
         break;
     default:
         return ARGP_ERR_UNKNOWN;
@@ -813,7 +826,6 @@ int main(int argc, char *argv[]) {
     check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
 
-    ccmd_init(&ccmd);
     conn_init();
     req_init();
 

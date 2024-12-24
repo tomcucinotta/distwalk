@@ -38,8 +38,8 @@ dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request.o c
 
 test_distrib: test_distrib.o distrib.o
 test_distrib_debug: test_distrib_debug.o distrib_debug.o
-test_ccmd: ccmd.o test_ccmd.o distrib.o message.o
-test_ccmd_debug: ccmd_debug.o test_ccmd_debug.o distrib.o message_debug.o
+test_ccmd: ccmd.o queue.o test_ccmd.o distrib.o message.o
+test_ccmd_debug: ccmd_debug.o queue_debug.o test_ccmd_debug.o distrib.o message_debug.o
 test_pqueue: test_pqueue.o priority_queue.o
 test_pqueue_debug: test_pqueue_debug.o priority_queue_debug.o
 test_queue: test_queue.o queue.o
@@ -62,7 +62,7 @@ dep:
 
 # DO NOT DELETE
 
-ccmd.o: ccmd.h message.h distrib.h dw_debug.h
+ccmd.o: ccmd.h queue.h message.h distrib.h dw_debug.h
 connection.o: connection.h message.h request.h priority_queue.h dw_debug.h
 distrib.o: distrib.h dw_debug.h
 dw_client.o: dw_debug.h distrib.h message.h connection.h request.h address_utils.h

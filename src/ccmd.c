@@ -4,21 +4,12 @@
 #include <arpa/inet.h>
 #include <assert.h>
 
+#include "queue.h"
 #include "ccmd.h"
 #include "message.h"
 #include "dw_debug.h"
 
-void ccmd_init(ccmd_t** q) {
-    *q = malloc(sizeof(ccmd_t));
-
-    (*q)->num = 0;
-    (*q)->last_reply = 0;
-
-    (*q)->head = NULL;
-    (*q)->tail = NULL;
-}
-
-ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
+void ccmd_add(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     if (!q) {
         printf("ccmd_add() error - Initialize queue first\n");
         exit(EXIT_FAILURE);
@@ -28,16 +19,11 @@ ccmd_node_t *ccmd_add(ccmd_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     new_node->cmd = cmd;
     new_node->pd_val = *p_pd_spec;
 
-    if (!q->head) {
-        q->head = new_node;
-        q->tail = q->head;
-    } else {
-        q->tail->next = new_node;
-        q->tail = q->tail->next;
-    }
-    
-    q->num++;
-    return new_node;
+    if (queue_size(q) >= 1)
+        ccmd_last(q)->next = new_node;
+
+    data_t data = { .ptr=new_node };
+    queue_enqueue(q, cmd, data);
 }
 
 extern __thread struct drand48_data rnd_buf;
@@ -67,7 +53,8 @@ ccmd_node_t* ccmd_skip(ccmd_node_t* node, int to_skip) {
     return itr;
 }
 
-/* ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
+/* OLD IMPL.
+ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
     int prev_was_mfwd = 0;
     while (n-- > 0 && curr) {
         if (curr->cmd == FORWARD || (curr->cmd == MULTI_FORWARD && !prev_was_mfwd)) {
@@ -96,11 +83,11 @@ ccmd_node_t* ccmd_skip(ccmd_node_t* node, int to_skip) {
 }*/
 
 // returns 1 if the message has been succesfully copied, 0 if there is not enough space (saved in req_size field)
-int ccmd_dump(ccmd_t* q, message_t* m) {
+int ccmd_dump(queue_t* q, message_t* m) {
     check(q, "ccmd_dump() error - Initialize queue first");
     check(m, "ccmd_dump() error - NullPointer message_t*");
 
-    ccmd_node_t* ccmd_itr = q->head;
+    ccmd_node_t* ccmd_itr = queue_node_data(queue_head(q)).ptr;
 
     double x = 0;
     command_t *m_cmd_itr = message_first_cmd(m);
@@ -159,28 +146,30 @@ int ccmd_dump(ccmd_t* q, message_t* m) {
     return 1;
 }
 
-void ccmd_destroy(ccmd_t** q) {
-    check(q, "ccmd_destroy() error - Initialize queue first");
+void ccmd_destroy(queue_t** q) {
+    check(*q, "ccmd_destroy() error - Initialize queue first");
 
-    ccmd_node_t* curr = (*q)->head;
+    ccmd_node_t* curr = ccmd_first(*q);
     ccmd_node_t* tmp = NULL;
+    
     while (curr) {
         tmp = curr->next;
         free(curr);
         curr = tmp;
     }
 
-    free(*q);
+    queue_drop(*q);
+    queue_free(*q);
     *q = NULL;
 }
 
-void ccmd_log(ccmd_t* q) {
+void ccmd_log(queue_t* q) {
     check(q, "ccmd_log() error - Initialize queue first");
-    printf("ccmd ");
 
-    ccmd_node_t* curr = q->head;
-
-    while (curr) {
+    int itr = queue_itr_begin(q);
+    while (queue_itr_has_next(q, itr)) {
+        node_t* node = queue_itr_next(q, &itr);
+        ccmd_node_t* curr = (ccmd_node_t*) queue_node_data(node).ptr;
         char opts[64] = "";
 
         switch (curr->cmd) {
@@ -212,8 +201,7 @@ void ccmd_log(ccmd_t* q) {
                 fprintf(stderr, "ccmd_log() - Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
-        printf("%s(%s)%s", get_command_name(curr->cmd), opts, curr->next ? "->" : "");
-        curr = curr->next;
+        printf("%s(%s)%s", get_command_name(curr->cmd), opts, queue_itr_has_next(q, itr) ? "->" : "");
     }
     printf("\n");
 }
