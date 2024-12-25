@@ -169,6 +169,55 @@ bool test_queue_drop() {
 	return true;
 }
 
+bool test_queue_iterator_1() {
+	queue_t *queue = queue_alloc(20);
+	for (int i=0; i < queue_capacity(queue); i++) {
+		data_t data = {.value=i*10};
+		queue_enqueue(queue, i, data);
+	}
+
+	int itr = queue_itr_begin(queue);
+	for (int i = 0; i < queue_size(queue); i++) {
+		node_t *node = queue_itr_next(queue, &itr);
+
+		if (queue_node_key(node) != i 
+			|| queue_node_data(node).value != i*10)
+			return false;
+	}
+
+	if (queue_itr_has_next(queue, itr))
+		return false;
+
+	queue_free(queue);
+	return true;
+}
+
+bool test_queue_iterator_2() {
+	queue_t *queue = queue_alloc(20);
+	for (int i=0; i < queue_capacity(queue); i++) {
+		data_t data = {.value=i*10};
+		queue_enqueue(queue, i, data);
+	}
+
+	queue_dequeue_head(queue);
+	queue_dequeue_tail(queue);
+
+	int itr = queue_itr_begin(queue);
+	for (int i = 0; i < queue_size(queue); i++) {
+		node_t *node = queue_itr_next(queue, &itr);
+
+		if (queue_node_key(node) != i+1
+			|| queue_node_data(node).value != (i+1)*10)
+			return false;
+	}
+
+	if (queue_itr_has_next(queue, itr))
+		return false;
+
+	queue_free(queue);
+	return true;
+}
+
 int main() {
 	perform_test(test_queue_insert());
 	perform_test(test_queue_insert_complex());
@@ -176,5 +225,7 @@ int main() {
 	perform_test(test_queue_remove_complex());
 	perform_test(test_queue_capacity());
 	perform_test(test_queue_drop());
+	perform_test(test_queue_iterator_1());
+	perform_test(test_queue_iterator_2());
 	return 0;
 }

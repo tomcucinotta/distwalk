@@ -17,6 +17,16 @@ void queue_free(queue_t *queue) {
 	free(queue);
 }
 
+void queue_log(queue_t *queue) {
+	int itr = queue_itr_begin(queue);
+
+	while (queue_itr_has_next(queue, itr)) {
+		node_t *node = queue_itr_next(queue, &itr);
+		printf("(%d)->", node->key);
+	}
+	printf("x\n");
+}
+
 node_t* queue_enqueue(queue_t *queue, int key, data_t data) {
 	if (queue->size == queue->capacity) // overflow
 		return NULL;
@@ -52,4 +62,16 @@ void queue_drop(queue_t* queue) {
 	queue->tail = -1;
 
 	queue->size = 0;
+}
+
+node_t* queue_itr_next(queue_t* queue, int* itr) {
+	if (!queue_itr_has_next(queue, *itr))
+		return NULL;
+
+	int prev = *itr;
+	*itr = (*itr + 1) % queue->capacity;
+
+	if (queue_node(queue, *itr) == queue_head(queue))
+		*itr = -1;
+	return queue_node(queue, prev);
 }
