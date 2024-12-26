@@ -1,6 +1,6 @@
 DistWalk - Distributed processing emulation tool for Linux
-	   Copyright 2016-2021 by Tommaso Cucinotta
-	   firstname dot lastname at santannapisa dot it
+           Copyright 2016-2025 by Tommaso Cucinotta
+           firstname dot lastname at santannapisa dot it
 ======================================================================
 
 
@@ -63,42 +63,43 @@ command:
   [myuser@myserver distwalk/src]$ ./dw_node
 
 then launching on the client the following command, with which we are
-submitting 10 packets at a rate of 1000 pkt/s
+submitting 10 requests asking 100us of computation, at a rate of 1000 pkt/s
 
-[myuser@myclient distwalk/src]$ ./src/dw_client -n 10 -r 1000 -C 1000 --ps 512
-
+[myuser@myclient distwalk/src]$ ./src/dw_client -n 10 -r 1000 -C 100us
 Configuration:
   clienthost=0.0.0.0:0
   serverhost=127.0.0.1:7891
   num_threads: 1
-  num_pkts=10 (COMPUTE:1, STORE:0, LOAD:0)
-  rate=1000, exp_arrivals=0
+  num_pkts=10
   period=1000us
   waitspin=0
-  ramp_num_steps=0, ramp_delta_rate=0, ramp_step_secs=0
-  pkt_size=512 (+66 for headers)
+  rate=1000
+  rate_step_secs=0
+  pkt_size=1024 (+66 for headers)
+  resp_size=512 (+66 with headers)
   min packet size due to header: send=20, reply=12
   max packet size: 16777216
   no_delay: 1
   num_sessions: 1
-  per_session_output: 0
-  request template: ccmd COMPUTE(1000us)->REPLY(512b,1)
-t: 271 us, elapsed: 1100 us, req_id: 0, thr_id: 0, sess_id: 0
-t: 1355 us, elapsed: 1026 us, req_id: 1, thr_id: 0, sess_id: 0
-t: 2366 us, elapsed: 1024 us, req_id: 2, thr_id: 0, sess_id: 0
-t: 3354 us, elapsed: 1045 us, req_id: 3, thr_id: 0, sess_id: 0
-t: 4355 us, elapsed: 1050 us, req_id: 4, thr_id: 0, sess_id: 0
-t: 5358 us, elapsed: 1065 us, req_id: 5, thr_id: 0, sess_id: 0
-t: 6356 us, elapsed: 1073 us, req_id: 6, thr_id: 0, sess_id: 0
-t: 7358 us, elapsed: 1081 us, req_id: 7, thr_id: 0, sess_id: 0
-t: 8347 us, elapsed: 1097 us, req_id: 8, thr_id: 0, sess_id: 0
-t: 9325 us, elapsed: 1136 us, req_id: 9, thr_id: 0, sess_id: 0
+  use_per_session_output: 0
+  num_conn_retries: 1 (retry_period: 200 ms)
+  request template: ccmd COMPUTE(100us)->REPLY(512b,1)
+t: 176 us, elapsed: 164 us, req_id: 0, thr_id: 0, sess_id: 0
+t: 1213 us, elapsed: 137 us, req_id: 1, thr_id: 0, sess_id: 0
+t: 2214 us, elapsed: 163 us, req_id: 2, thr_id: 0, sess_id: 0
+t: 3213 us, elapsed: 127 us, req_id: 3, thr_id: 0, sess_id: 0
+t: 4210 us, elapsed: 127 us, req_id: 4, thr_id: 0, sess_id: 0
+t: 5210 us, elapsed: 130 us, req_id: 5, thr_id: 0, sess_id: 0
+t: 6211 us, elapsed: 144 us, req_id: 6, thr_id: 0, sess_id: 0
+t: 7213 us, elapsed: 133 us, req_id: 7, thr_id: 0, sess_id: 0
+t: 8303 us, elapsed: 125 us, req_id: 8, thr_id: 0, sess_id: 0
+t: 9212 us, elapsed: 127 us, req_id: 9, thr_id: 0, sess_id: 0
 
 The following command spawns 4 threads submitting concurrently
-requests to the same server (each thread submits 5000 requests needing
+requests to the server a.b.c.d (each thread submits 5000 requests needing
 a 1ms of processing time each, at a rate of 250 pkt/s):
 
-  [myuser@myclient distwalk/src]$ ./dw_client --nt 4 -n 5000 -r 250 -C 1000
+  [myuser@myclient distwalk/src]$ ./dw_client --to a.b.c.d --nt 4 -n 5000 -r 250 -C 1000
 
 The following command spawns 3 threads, with each of them using 10
 sessions to submit the 5000 packets as in the above command, so each
