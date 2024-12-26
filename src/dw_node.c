@@ -664,7 +664,7 @@ int establish_conn(dw_poll_t *p_poll, int conn_id) {
     // this may trigger send_messages() on return, if messages have already been enqueued
     conn_set_status_by_id(conn_id, READY);
 
-    sys_check(dw_poll_mod(p_poll, conns[conn_id].sock, DW_POLLIN, i2l(SOCKET, conn_id)));
+    sys_check(dw_poll_mod(p_poll, conns[conn_id].sock, DW_POLLIN | DW_POLLOUT, i2l(SOCKET, conn_id)));
 
     return 1;
 }

@@ -71,6 +71,7 @@ void dw_select_add_wr(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t a
 }
 
 int dw_poll_add(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
+    dw_log("dw_poll_add(): p_poll=%p, fd=%d, flags=%08x, aux=%lu\n", p_poll, fd, flags, aux);
     int rv = 0;
     switch (p_poll->poll_type) {
     case DW_SELECT:
@@ -114,7 +115,12 @@ int dw_poll_add(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
     return rv;
 }
 
+/* This tolerates on purpose being called after a ONESHOT event, for which
+ * poll and select will have deleted the fd in their user-space lists, whilst
+ * epoll has it still registered, but with a clear events interest list
+ */
 int dw_poll_mod(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
+    dw_log("dw_poll_mod(): p_poll=%p, fd=%d, flags=%08x, aux=%lu\n", p_poll, fd, flags, aux);
     int rv = 0;
     switch (p_poll->poll_type) {
     case DW_SELECT: {
@@ -135,21 +141,21 @@ int dw_poll_mod(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
         else if (i == p_poll->u.select_fds.n_wr_fd && (flags & DW_POLLOUT))
             dw_select_add_wr(p_poll, fd, flags, aux);
         break; }
-    case DW_POLL:
-        if (p_poll->u.poll_fds.n_pollfds == MAX_POLLFD) {
-            dw_log("Exhausted number of possible fds in poll()\n");
-            return -1;
-        }
-        for (int i = 0; i < p_poll->u.poll_fds.n_pollfds; i++) {
+    case DW_POLL: {
+        int i;
+        for (i = 0; i < p_poll->u.poll_fds.n_pollfds; i++) {
             struct pollfd *pev = &p_poll->u.poll_fds.pollfds[i];
             if (pev->fd == fd) {
                 pev->events = (flags & DW_POLLIN ? POLLIN : 0) | (flags & DW_POLLOUT ? POLLOUT : 0);
+                dw_log("dw_poll_mod(): pev->events=%04x\n", pev->events);
                 if (pev->events == 0)
                     dw_poll_del_pos(p_poll, i);
                 break;
             }
         }
-        break;
+        if (i == p_poll->u.poll_fds.n_pollfds && flags != 0)
+            rv = dw_poll_add(p_poll, fd, flags, aux);
+        break; }
     case DW_EPOLL: {
         struct epoll_event ev = {
             .data.u64 = aux,
