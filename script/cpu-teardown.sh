@@ -1,9 +1,9 @@
 #!/bin/bash
 
-#enable autogrouping
+# Enable autogrouping
 echo 1 > /proc/sys/kernel/sched_autogroup_enabled
 
-#unblock cpu freq
+# Unblock cpu freq
 echo 100 > /sys/devices/system/cpu/intel_pstate/max_perf_pct
 echo 35 > /sys/devices/system/cpu/intel_pstate/min_perf_pct
 
@@ -23,14 +23,17 @@ do
 done
 
 if [ -d /sys/devices/system/cpu/intel_pstate ]; then
-    #enable turbo boost
+    # Enable turbo boost
     echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo
 
     if [ -f /sys/devices/system/cpu/intel_pstate/hwp_dynamic_boost ]; then
-        #enable hwp dynamic boost
+        # Enable hwp dynamic boost
         echo 1 > /sys/devices/system/cpu/intel_pstate/hwp_dynamic_boost
     fi
 fi
+
+# Enable cpu deep idle states
+echo 0 | sudo tee /sys/devices/system/cpu/cpu*/cpuidle/state*/disable
 
 # Show status
 if grep -i ubuntu /etc/os-release > /dev/null; then
