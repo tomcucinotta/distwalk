@@ -253,8 +253,16 @@ void *thread_receiver(void *data) {
         clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_sync, NULL);
     }
 
+    memset(&usecs_send[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
+    memset(&usecs_elapsed[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
+
     for (int i = 0; i < num_pkts; i++) {
+        // TODO (?) thr_data is allocated in the stack and reused for every thread, possible (but completly improbable) race condition
         thread_data_t thr_data;
+        thr_data.thread_id = thread_id;
+        thr_data.first_pkt_id = i,
+        thr_data.num_send_pkts = pkts_per_session;
+
         if (i % pkts_per_session == 0) {
             struct timespec ts1, ts2;
             if (conn_times)
@@ -264,10 +272,13 @@ void *thread_receiver(void *data) {
                 clock_gettime(CLOCK_MONOTONIC, &ts2);
             // check if connection succeeded
             if (rv != 0) {
-                close(clientSocket[thread_id]);
+                thr_data.conn_id = -1;
                 fprintf(stderr, "Connection to %s:%d failed: %s\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), strerror(errno));
-                ccmd_destroy(&ccmd);
-                exit(EXIT_FAILURE);
+                unsigned long skip_pkts =
+                    pkts_per_session - ((i + 1) % pkts_per_session);
+                printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
+                i += skip_pkts;
+                goto skip;
             }
 
             if (conn_times)
@@ -281,11 +292,8 @@ void *thread_receiver(void *data) {
             check(conn_id != -1, "conn_alloc() failed, consider increasing MAX_CONNS");
             conn_set_status_by_id(conn_id, READY);
 
-            // TODO (?) thr_data is allocated in the stack and reused for every thread, possible (but completly improbable) race condition
-            thr_data.thread_id = thread_id;
+            
             thr_data.conn_id = conn_id;
-            thr_data.first_pkt_id = i,
-            thr_data.num_send_pkts = pkts_per_session;
             sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
                                   (void *)&thr_data));
         }
@@ -333,7 +341,7 @@ void *thread_receiver(void *data) {
     skip:
         if ((i + 1) % pkts_per_session == 0) {
             dw_log(
-                "Session is over (after receive of pkt %d), closing socket\n",
+                "Session is over (after receive/skip of pkt %d), closing socket\n",
                 i);
             close(clientSocket[thread_id]);
             conn_free(thr_data.conn_id);
