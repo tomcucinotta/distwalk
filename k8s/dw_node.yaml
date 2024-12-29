@@ -1,18 +1,28 @@
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: dw-node
+  name: dw-node-deployment
   labels:
-    app: dw-node
+    apps: dw-node
+
 spec:
-  containers:
-  - name: dw-node
-    image: remoandreoli/distwalk:latest
-    imagePullPolicy: Always
-    command: ["/bin/sh", "-c"]
-    args: ['./dw_node']
-    ports:
-    - containerPort: 7891
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dw-node
+  template:
+    metadata:
+      labels:
+        app: dw-node
+    spec:
+      containers:
+      - name: dw-node
+        image: remoandreoli/distwalk:latest
+        imagePullPolicy: Always
+        command: ["/bin/sh", "-c"]
+        args: ['./dw_node -b 0.0.0.0']
+        ports:
+        - containerPort: 7891
 ---
 apiVersion: v1
 kind: Service
