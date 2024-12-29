@@ -21,7 +21,7 @@ cat $TMP_N0 | grep -q "Handling response to FORWARD from 127.0.0.1:7892"
 
 cat $TMP_N1 | grep -q "Handling REPLY:"
 
-cat $TMP_C0 | grep -q "Session is over (after receive of pkt 0), closing socket"
+cat $TMP_C0 | grep -q "Session is over (after receive/skip of pkt 0), closing socket"
 
 node_bg &> $TMP_N0
 
