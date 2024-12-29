@@ -8,11 +8,11 @@ tmp=$(mktemp /tmp/test_accept_mode_parent-XXX.dat)
 
 node_bg -a parent --nt 3 &> $tmp
 
-client -C 1000 -n 1 --ns 3
+client -C 1000 -n 3 --ns 3
 
-cat $tmp | grep -q "[connw\-0] conn_id: 0 assigned to connw\-0"
-cat $tmp | grep -q "[connw\-0] conn_id: 0 assigned to connw\-1"
-cat $tmp | grep -q "[connw\-0] conn_id: 0 assigned to connw\-2"
+cat $tmp | grep assigned | head -1 | grep -q "assigned to connw-0"
+cat $tmp | grep assigned | head -2 | tail -1 | grep -q "assigned to connw-1"
+cat $tmp | grep assigned | head -3 | tail -1 | grep -q "assigned to connw-2"
 
 kill_all SIGINT
 rm $tmp
