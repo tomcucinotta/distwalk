@@ -436,7 +436,7 @@ static struct argp_option argp_client_options[] = {
     { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
     { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
-    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=n][,retry=n]", 0, "Send a number of FORWARD message to the ip:port list"},
+    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n]", 0, "Send a number of FORWARD message to the ip:port list"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests"},
     { "rs",                 REPLY_CMD,              "nbytes|prob:field=val[,field=val][,nack=n]", OPTION_ARG_OPTIONAL, "Add a Reply command; Optionally specify payload size and number of acknowledgments"},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
@@ -582,46 +582,48 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         ccmd_node_t* fwd_itr = NULL;
         while ((tok = strsep(&arg, ",")) != NULL) {
             if (sscanf(tok, "retry=%d", &retry_num) == 1
-                || sscanf(tok, "retries=%d", &retry_num) == 1
-                || sscanf(tok, "timeout=%d", &timeout_us) == 1)
-                    continue;
-            else {
-                char fwdhostport[MAX_HOSTPORT_STRLEN];
-                proto_t fwd_proto = TCP;
+                || sscanf(tok, "retries=%d", &retry_num) == 1)
+                continue;
+            double val;
+            if (sscanf_unit(tok, "timeout=%lf", &val, 1) == 1) {
+                timeout_us = (int) val;
+                continue;
+            }
+            char fwdhostport[MAX_HOSTPORT_STRLEN];
+            proto_t fwd_proto = TCP;
 
-                addr_proto_parse(tok, fwdhostport, &fwd_proto);
-                addr_parse(fwdhostport, &fwd_addr);
+            addr_proto_parse(tok, fwdhostport, &fwd_proto);
+            addr_parse(fwdhostport, &fwd_addr);
 
-                if (i > 0) {
-                    if (i == 1) { // morph previous FORWARD in MULTI_FORWARD
-                        ccmd_last(ccmd)->cmd = MULTI_FORWARD;
-                    }
-
-                    fwd_type = MULTI_FORWARD;
+            if (i > 0) {
+                if (i == 1) { // morph previous FORWARD in MULTI_FORWARD
+                    ccmd_last(ccmd)->cmd = MULTI_FORWARD;
                 }
 
-                // TODO: customize forward pkt size
-                ccmd_add(ccmd, fwd_type, &fwd_val);
-                ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
-                ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
-                
-                if (i == 0) // keep track of the first MULTI_FORWARD
-                    fwd_itr = ccmd_last(ccmd);
-                ccmd_last(ccmd)->fwd.on_fail_skip = 1;
-                ccmd_last(ccmd)->fwd.proto = fwd_proto;
-                i++;
+                fwd_type = MULTI_FORWARD;
             }
+
+            // TODO: customize forward pkt size
+            ccmd_add(ccmd, fwd_type, &fwd_val);
+            ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
+            ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
+
+            if (i == 0) // keep track of the first MULTI_FORWARD
+                fwd_itr = ccmd_last(ccmd);
+            ccmd_last(ccmd)->fwd.on_fail_skip = 1;
+            ccmd_last(ccmd)->fwd.proto = fwd_proto;
+            i++;
         }
 
         arguments->fwd_scope++;
-        
+
         // Update timeout and retry parameters for each parsed forwad operation
         while (fwd_itr != NULL && (fwd_itr->cmd == FORWARD || fwd_itr->cmd == MULTI_FORWARD)) {
             fwd_itr->fwd.timeout = timeout_us;
             fwd_itr->fwd.retries = retry_num;
             fwd_itr = fwd_itr->next;
         }
-        
+
         // Reserve a forward reply command
         data_t data = { .ptr=&repl_val }; 
         queue_enqueue(arguments->reserved_fwd_replies, i, data);
