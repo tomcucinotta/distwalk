@@ -5,7 +5,7 @@
 
 #include "message.h"
 
-#define MAX_HOSTPORT_STRLEN 31
+#define MAX_HOSTPORT_STRLEN 64
 #define DEFAULT_ADDR "127.0.0.1"
 #define DEFAULT_PORT "7891"
 
