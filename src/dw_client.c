@@ -57,7 +57,7 @@ struct argp_client_arguments {
     // parsing phase
     pd_spec_t last_resp_size;
 
-    queue_t* reserved_fwd_replies; // nack -> pd_val
+    queue_t* reserved_fwd_replies; // nack -> NULL
     ccmd_node_t* last_reserved_used;
     int fwd_scope;
 } input_args;
@@ -473,10 +473,10 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->last_resp_size = pd_build_fixed(default_resp_size);
 
         arguments->reserved_fwd_replies = queue_alloc(100);
+        ccmd = queue_alloc(100);
+
         arguments->last_reserved_used = NULL;
         arguments->fwd_scope = 0;
-
-        ccmd = queue_alloc(100);
         break;
     case HELP:
         argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
@@ -572,7 +572,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         struct sockaddr_in fwd_addr;
         command_type_t fwd_type = FORWARD;
         pd_spec_t fwd_val = pd_build_fixed(default_resp_size);
-        pd_spec_t repl_val = pd_build_fixed(default_resp_size);
 
         int timeout_us = 2000000;
         int retry_num = 0;
@@ -625,8 +624,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         }
 
         // Reserve a forward reply command
-        data_t data = { .ptr=&repl_val }; 
-        queue_enqueue(arguments->reserved_fwd_replies, i, data);
+        queue_enqueue(arguments->reserved_fwd_replies, i, (data_t) NULL);
 
         break; }
     case SEND_REQUEST_SIZE:
@@ -671,19 +669,12 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             break;
         }
 
-        // Update deferred reply's pd_val and nack value
+        // Use a reserved reply
         int deferred_nack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
-        pd_spec_t* deferred_val = queue_node_data(queue_tail(arguments->reserved_fwd_replies)).ptr;
-        deferred_val->val = val.val;
-        deferred_val->min = val.min;
-        deferred_val->max = val.max;
-        deferred_val->std = val.std;
-        deferred_val->prob = val.prob;
         if (nack > 0 && nack < deferred_nack)
             queue_tail(arguments->reserved_fwd_replies)->key = nack;
 
-        // Use a reserved reply
-        ccmd_add(ccmd, REPLY, queue_node_data(queue_tail(arguments->reserved_fwd_replies)).ptr);
+        ccmd_add(ccmd, REPLY, &val);
         ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
         queue_dequeue_tail(arguments->reserved_fwd_replies);
         
@@ -759,7 +750,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
 
         // Exhaust remaining deferred replies
         while(queue_size(arguments->reserved_fwd_replies) > 0 && arguments->fwd_scope > 0) {
-            ccmd_add(ccmd, REPLY, queue_node_data(queue_tail(arguments->reserved_fwd_replies)).ptr);
+            ccmd_add(ccmd, REPLY, &arguments->last_resp_size);
             ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
 
             queue_dequeue_tail(arguments->reserved_fwd_replies);
