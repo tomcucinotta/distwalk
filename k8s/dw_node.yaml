@@ -3,8 +3,7 @@ kind: Deployment
 metadata:
   name: dw-node-deployment
   labels:
-    apps: dw-node
-
+    app: dw-node
 spec:
   replicas: 1
   selector:
