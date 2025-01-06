@@ -207,6 +207,11 @@ void insert_timeout(conn_worker_info_t* infos, int req_id, dw_poll_t *p_poll, in
     if (req == NULL)
         return;
 
+    if (req->timeout_node) {
+        dw_log("TIMEOUT already inserted, req_id: %d\n", req_id);
+        return;
+    }
+
     if (pqueue_size(infos->timeout_queue) > 0) {
         struct itimerspec timerspec = {0};
         sys_check(timerfd_gettime(infos->timerfd, &timerspec));
@@ -688,7 +693,7 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
     command_t *p_cmd = req->curr_cmd;
     // if curr_cmd is no more on MULTI_FORWARD, ignore
     // TODO: case with 2 independent (non-nested) forwards in same req
-    if (p_cmd->cmd != FORWARD) // || m->req_id != req_id)
+    if (p_cmd->cmd != FORWARD && p_cmd->cmd != MULTI_FORWARD) // || m->req_id != req_id)
         return;
     fwd_opts_t *fwd = cmd_get_opts(fwd_opts_t, p_cmd);
     if (fwd->retries > 0) {
@@ -851,7 +856,7 @@ void* storage_worker(void* args) {
 
     // Add periodic sync timerfd
     if (infos->periodic_sync_msec > 0) {
-        if ((infos->timerfd = timerfd_create(CLOCK_MONOTONIC, 0)) < 0) {
+        if ((infos->timerfd = timerfd_create(CLOCK_BOOTTIME, 0)) < 0) {
             perror("timerfd_create");
             exit(EXIT_FAILURE);
         }
