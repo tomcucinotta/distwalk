@@ -190,7 +190,7 @@ int conn_del_sock(int sock) {
 }
 
 void conn_free(int conn_id) {
-    if (conn_id <= 0)
+    if (conn_id < 0)
         return;
     dw_log("Freeing conn %d\n", conn_id);
 

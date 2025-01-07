@@ -339,14 +339,10 @@ void *thread_receiver(void *data) {
 
     skip:
         if (i % pkts_per_session == 0) {
-            dw_log(
-                "Session is over (after receive/skip of pkt %d), closing socket\n",
-                i);
-            close(clientSocket[thread_id]);
-            conn_free(thr_data.conn_id);
+            int sess_id = i / pkts_per_session;
+            dw_log("Session %d is over (after receive/skip of pkt %d), closing socket\n", sess_id, i);
             if (use_per_session_output) {
                 int first_sess_pkt = i - (pkts_per_session - 1);
-                int sess_id = i / pkts_per_session;
                 for (int j = 0; j < pkts_per_session; j++) {
                     int pkt_id = first_sess_pkt + j;
                     // if we abruptly terminated the session, the send timestamp
@@ -366,6 +362,9 @@ void *thread_receiver(void *data) {
             }
             dw_log("Joining sender thread\n");
             pthread_join(sender[thread_id], NULL);
+
+            close(clientSocket[thread_id]);
+            conn_free(thr_data.conn_id);
         }
     }
 
