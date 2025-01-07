@@ -261,13 +261,15 @@ void *thread_receiver(void *data) {
 
     int num_success = 0;
     int num_failed = 0;
-    int i;
-    while ((i = num_success + num_failed) < num_pkts) {
-        if (i % pkts_per_session == 0) {
+   
+    int i_incr = 0;
+    int pkt_i;
+    while ((pkt_i = num_success + num_failed) < num_pkts) {
+        if (pkt_i % pkts_per_session == 0) {
             struct timespec ts1, ts2;
             if (conn_times)
                 clock_gettime(CLOCK_MONOTONIC, &ts1);
-            int rv = connect_retry(thread_id, i / pkts_per_session);
+            int rv = connect_retry(thread_id, pkt_i / pkts_per_session);
             if (conn_times)
                 clock_gettime(CLOCK_MONOTONIC, &ts2);
             // check if connection succeeded
@@ -275,9 +277,9 @@ void *thread_receiver(void *data) {
                 thr_data.conn_id = -1;
                 fprintf(stderr, "Connection to %s:%d failed: %s\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), strerror(errno));
                 unsigned long skip_pkts =
-                    pkts_per_session - (i % pkts_per_session);
+                    pkts_per_session - (pkt_i % pkts_per_session);
                 printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
-                i += skip_pkts;
+                i_incr = skip_pkts;
                 num_failed += skip_pkts;
                 goto skip;
             }
@@ -285,7 +287,7 @@ void *thread_receiver(void *data) {
             if (conn_times)
                 printf("conn_time: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n",
                        (ts2.tv_sec-ts1.tv_sec)*1000000+(ts2.tv_nsec-ts1.tv_nsec)/1000,
-                       i, thread_id, i / (int)pkts_per_session);
+                       pkt_i, thread_id, pkt_i / (int)pkts_per_session);
 
             /* spawn sender once connection is established */
             int conn_id = conn_alloc(clientSocket[thread_id], serveraddr, proto);
@@ -293,7 +295,7 @@ void *thread_receiver(void *data) {
             conn_set_status_by_id(conn_id, READY);
 
             thr_data.conn_id = conn_id;
-            thr_data.first_pkt_id = i;
+            thr_data.first_pkt_id = pkt_i;
             sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
                                   (void *)&thr_data));
         }
@@ -311,7 +313,7 @@ void *thread_receiver(void *data) {
             if (m->status != 0) {
                 dw_log("REPLY reported an error\n");
                 num_failed++;
-                i++;
+                i_incr = 1;
                 goto skip;
             }
 
@@ -325,24 +327,24 @@ void *thread_receiver(void *data) {
                 usecs_elapsed[thread_id][idx(pkt_id)]);
 
             num_success++;
-            i++;
+            i_incr = 1;
         }
 
         if (!recv) {
             printf("Error: cannot read received message\n");
             unsigned long skip_pkts =
-                pkts_per_session - (i % pkts_per_session);
+                pkts_per_session - (pkt_i % pkts_per_session);
             printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
             num_failed += skip_pkts;
-            i += skip_pkts;
+            i_incr = skip_pkts;
         }
 
     skip:
-        if (i % pkts_per_session == 0) {
-            int sess_id = i / pkts_per_session;
-            dw_log("Session %d is over (after receive/skip of pkt %d), closing socket\n", sess_id, i);
+        if ((pkt_i + i_incr) % pkts_per_session == 0) {
+            int sess_id = pkt_i / pkts_per_session;
+            dw_log("Session %d is over (after receive/skip of pkt %d), closing socket\n", sess_id, pkt_i);
             if (use_per_session_output) {
-                int first_sess_pkt = i - (pkts_per_session - 1);
+                int first_sess_pkt = pkt_i + i_incr - (pkts_per_session - 1);
                 for (int j = 0; j < pkts_per_session; j++) {
                     int pkt_id = first_sess_pkt + j;
                     // if we abruptly terminated the session, the send timestamp
