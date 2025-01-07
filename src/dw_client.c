@@ -257,9 +257,8 @@ void *thread_receiver(void *data) {
 
     int num_success = 0;
     int num_failed = 0;
-    int num_timeout = 0;
     int i;
-    while ((i = num_success + num_failed + num_timeout) < num_pkts) {
+    while ((i = num_success + num_failed) < num_pkts) {
         // TODO (?) thr_data is allocated in the stack and reused for every thread, possible (but completly improbable) race condition
         thread_data_t thr_data;
         thr_data.thread_id = thread_id;
@@ -281,7 +280,7 @@ void *thread_receiver(void *data) {
                     pkts_per_session - (i % pkts_per_session);
                 printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
                 i += skip_pkts;
-                num_timeout += skip_pkts;
+                num_failed += skip_pkts;
                 goto skip;
             }
 
@@ -314,6 +313,7 @@ void *thread_receiver(void *data) {
             if (m->status != 0) {
                 dw_log("REPLY reported an error\n");
                 num_failed++;
+                i++;
                 goto skip;
             }
 
@@ -327,6 +327,7 @@ void *thread_receiver(void *data) {
                 usecs_elapsed[thread_id][idx(pkt_id)]);
 
             num_success++;
+            i++;
         }
 
         if (!recv) {
@@ -334,12 +335,12 @@ void *thread_receiver(void *data) {
             unsigned long skip_pkts =
                 pkts_per_session - (i % pkts_per_session);
             printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
+            num_failed += skip_pkts;
             i += skip_pkts;
-            num_timeout += skip_pkts;
         }
 
     skip:
-        if ((i + 1) % pkts_per_session == 0) {
+        if (i % pkts_per_session == 0) {
             dw_log(
                 "Session is over (after receive/skip of pkt %d), closing socket\n",
                 i);
@@ -381,7 +382,7 @@ void *thread_receiver(void *data) {
         }
     }
 
-    printf("Sent pkts - success: %d, failed: %d, timeout: %d, thr_id: %d\n", num_success, num_failed, num_timeout, thread_id);
+    printf("Sent pkts - success: %d, failed: %d, thr_id: %d\n", num_success, num_failed, thread_id);
     dw_log("Receiver thread terminating\n");
     return 0;
 }
