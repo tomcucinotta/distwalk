@@ -240,7 +240,7 @@ int connect_retry(int thread_id, int sess_id) {
 }
 
 void *thread_receiver(void *data) {
-    int thread_id = (int)(unsigned long)data;
+    const int thread_id = (int)(unsigned long)data;
 
     sprintf(thread_name, "recvw-%d", thread_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
@@ -255,16 +255,14 @@ void *thread_receiver(void *data) {
     memset(&usecs_send[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
     memset(&usecs_elapsed[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
 
+    thread_data_t thr_data;
+    thr_data.thread_id = thread_id;
+    thr_data.num_send_pkts = pkts_per_session;
+
     int num_success = 0;
     int num_failed = 0;
     int i;
     while ((i = num_success + num_failed) < num_pkts) {
-        // TODO (?) thr_data is allocated in the stack and reused for every thread, possible (but completly improbable) race condition
-        thread_data_t thr_data;
-        thr_data.thread_id = thread_id;
-        thr_data.first_pkt_id = i,
-        thr_data.num_send_pkts = pkts_per_session;
-
         if (i % pkts_per_session == 0) {
             struct timespec ts1, ts2;
             if (conn_times)
@@ -294,8 +292,8 @@ void *thread_receiver(void *data) {
             check(conn_id != -1, "conn_alloc() failed, consider increasing MAX_CONNS");
             conn_set_status_by_id(conn_id, READY);
 
-            
             thr_data.conn_id = conn_id;
+            thr_data.first_pkt_id = i;
             sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
                                   (void *)&thr_data));
         }
