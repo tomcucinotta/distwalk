@@ -244,7 +244,6 @@ void *thread_receiver(void *data) {
 
     sprintf(thread_name, "recvw-%d", thread_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
-
     message_t *m = NULL;
     int recv = 0;
 
@@ -256,7 +255,11 @@ void *thread_receiver(void *data) {
     memset(&usecs_send[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
     memset(&usecs_elapsed[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
 
-    for (int i = 0; i < num_pkts; i++) {
+    int num_success = 0;
+    int num_failed = 0;
+    int num_timeout = 0;
+    int i;
+    while ((i = num_success + num_failed + num_timeout) < num_pkts) {
         // TODO (?) thr_data is allocated in the stack and reused for every thread, possible (but completly improbable) race condition
         thread_data_t thr_data;
         thr_data.thread_id = thread_id;
@@ -275,9 +278,10 @@ void *thread_receiver(void *data) {
                 thr_data.conn_id = -1;
                 fprintf(stderr, "Connection to %s:%d failed: %s\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), strerror(errno));
                 unsigned long skip_pkts =
-                    pkts_per_session - ((i + 1) % pkts_per_session);
+                    pkts_per_session - (i % pkts_per_session);
                 printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
                 i += skip_pkts;
+                num_timeout += skip_pkts;
                 goto skip;
             }
 
@@ -287,7 +291,6 @@ void *thread_receiver(void *data) {
                        i, thread_id, i / (int)pkts_per_session);
 
             /* spawn sender once connection is established */
-
             int conn_id = conn_alloc(clientSocket[thread_id], serveraddr, proto);
             check(conn_id != -1, "conn_alloc() failed, consider increasing MAX_CONNS");
             conn_set_status_by_id(conn_id, READY);
@@ -302,41 +305,38 @@ void *thread_receiver(void *data) {
         // TODO: support receive of variable reply-size requests
         conn_info_t *conn = conn_get_by_id(thr_data.conn_id);
 
-        do {
-            if (m == NULL)
-                recv = conn_recv(conn);
-            m = conn_next_message(conn);
-        } while (recv > 0 && m == NULL);
+        recv = conn_recv(conn);
+        while (recv > 0 && (m = conn_next_message(conn))) {
+#ifdef DW_DEBUG
+            msg_log(m, "received message: ");
+#endif
+            unsigned pkt_id = m->req_id;
+            if (m->status != 0) {
+                dw_log("REPLY reported an error\n");
+                num_failed++;
+                goto skip;
+            }
 
-        if (m == NULL) {
+            struct timespec ts_now;
+            clock_gettime(clk_id, &ts_now);
+            unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
+                                (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
+            usecs_elapsed[thread_id][idx(pkt_id)] =
+                usecs - usecs_send[thread_id][idx(pkt_id)];
+            dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
+                usecs_elapsed[thread_id][idx(pkt_id)]);
+
+            num_success++;
+        }
+
+        if (!recv) {
             printf("Error: cannot read received message\n");
             unsigned long skip_pkts =
-                pkts_per_session - ((i + 1) % pkts_per_session);
+                pkts_per_session - (i % pkts_per_session);
             printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
             i += skip_pkts;
-            goto skip;
-
+            num_timeout += skip_pkts;
         }
-
-        unsigned pkt_id = m->req_id;
-
-#ifdef DW_DEBUG
-        msg_log(m, "received message: ");
-#endif
-
-        if (m->status != 0) {
-            dw_log("REPLY reported an error\n");
-            goto skip;
-        }
-
-        struct timespec ts_now;
-        clock_gettime(clk_id, &ts_now);
-        unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
-                              (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
-        usecs_elapsed[thread_id][idx(pkt_id)] =
-            usecs - usecs_send[thread_id][idx(pkt_id)];
-        dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
-               usecs_elapsed[thread_id][idx(pkt_id)]);
 
     skip:
         if ((i + 1) % pkts_per_session == 0) {
@@ -381,6 +381,7 @@ void *thread_receiver(void *data) {
         }
     }
 
+    printf("Sent pkts - success: %d, failed: %d, timeout: %d, thr_id: %d\n", num_success, num_failed, num_timeout, thread_id);
     dw_log("Receiver thread terminating\n");
     return 0;
 }
