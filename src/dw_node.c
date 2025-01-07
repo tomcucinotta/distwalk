@@ -303,7 +303,6 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
 
         setnonblocking(clientSocket);
         fwd_conn_id = conn_alloc(clientSocket, addr, fwd.proto);
-
         if (fwd_conn_id == -1) {
             fprintf(stderr, "conn_alloc() failed, closing\n");
             close(clientSocket);
@@ -389,7 +388,7 @@ int process_messages(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t* inf
 int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos);
 
 // Call this once we received a REPLY from a socket matching a req_id we forwarded
-int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* infos) {
+int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* infos, int fwd_m_status) {
     req_info_t *req = req_get_by_id(req_id);
 
     if (!req) {
@@ -401,7 +400,7 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         
     if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
-
+        m->status = fwd_m_status;
         req->curr_cmd = message_skip_cmds(m, req->curr_cmd, 1);
         
         remove_timeout(infos, req_id, p_poll);
@@ -623,7 +622,7 @@ int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos) {
         if (message_first_cmd(m)->cmd == EOM) {
             dw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), 
                                                                            ntohs(conns[conn_id].target.sin_port), m->req_id);
-            if (!handle_forward_reply(m->req_id, p_poll, infos)) {
+            if (!handle_forward_reply(m->req_id, p_poll, infos, m->status)) {
                     dw_log("handle_forward_reply() failed\n");
                     return 0;
             }
@@ -792,14 +791,14 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
             message_t* m = req_get_message(tmp);
             if (tmp->curr_cmd->cmd == FORWARD) {
                 fwd_opts_t fwd = *cmd_get_opts(fwd_opts_t, tmp->curr_cmd);
-
-                if (fwd.timeout > 0) {
-                    break;
-                }
-
                 if (fwd.fwd_host == conn->target.sin_addr.s_addr &&
                         fwd.fwd_port == conn->target.sin_port) {
                     
+                    if (fwd.retries > 0)
+                        break;
+                    else
+                        remove_timeout(infos, m->req_id, p_poll);
+                        
                     // Go to last REPLY
                     command_t *itr = tmp->curr_cmd;
                     while (itr->cmd != EOM && itr->cmd != REPLY)
@@ -813,11 +812,9 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
                         m->status = -1;
                         process_messages(tmp, p_poll, infos);
                     }
-
                     break;
                 }
             }
-
             tmp = tmp->next;
             if (tmp == req_list_head) {
                 break;
