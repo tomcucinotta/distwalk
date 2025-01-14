@@ -10,7 +10,7 @@
 
 #define BUF_SIZE (16*1024*1024)
 
-typedef enum { COMPUTE, STORE, LOAD, PSKIP, FORWARD, MULTI_FORWARD, REPLY, EOM } command_type_t;
+typedef enum { COMPUTE, STORE, LOAD, PSKIP, FORWARD_BEGIN, FORWARD_CONTINUE, REPLY, EOM } command_type_t;
 
 typedef enum { UDP, TCP, PROTO_NUMBER } proto_t;
 

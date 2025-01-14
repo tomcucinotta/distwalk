@@ -340,7 +340,7 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
     assert(m_dst->req_size >= fwd.pkt_size);
 
     command_t *c = cmd_next(cmd);
-    while (c->cmd != EOM && c->cmd == MULTI_FORWARD) {
+    while (c->cmd != EOM && c->cmd == FORWARD_CONTINUE) {
         c = cmd_next(c);
     }
 
@@ -372,15 +372,13 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
 
 // return 1 if OK, 0 if an error occurred in at least one forward operation
 int start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_t *p_poll, conn_worker_info_t *infos) {
-    if (cmd->cmd == FORWARD)
-        return single_start_forward(req, m, cmd, p_poll, infos);
-    assert(cmd->cmd == MULTI_FORWARD);
+    assert(cmd->cmd == FORWARD_BEGIN || cmd->cmd == FORWARD_CONTINUE);
     do {
         int rv = single_start_forward(req, m, cmd, p_poll, infos);
         if (rv == 0)
             return 0;
         cmd = cmd_next(cmd);
-    } while (cmd->cmd == MULTI_FORWARD);
+    } while (cmd->cmd == FORWARD_CONTINUE);
     return 1;
 }
 
@@ -557,8 +555,8 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
         case COMPUTE:
             compute_for(cmd_get_opts(comp_opts_t, cmd)->comp_time_us);
             break;
-        case FORWARD:
-        case MULTI_FORWARD: {
+        case FORWARD_BEGIN:
+        case FORWARD_CONTINUE: {
             int rv = start_forward(req, m, cmd, p_poll, infos);
             if (rv == 0) {
                 fprintf(stderr, "Error: could not execute FORWARD\n");
@@ -690,9 +688,9 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
     remove_timeout(infos, req_id, p_poll);
 
     command_t *p_cmd = req->curr_cmd;
-    // if curr_cmd is no more on MULTI_FORWARD, ignore
+    // if curr_cmd is no more on FORWARD_CONTINUE, ignore
     // TODO: case with 2 independent (non-nested) forwards in same req
-    if (p_cmd->cmd != FORWARD && p_cmd->cmd != MULTI_FORWARD) // || m->req_id != req_id)
+    if (p_cmd->cmd != FORWARD_BEGIN && p_cmd->cmd != FORWARD_CONTINUE) // || m->req_id != req_id)
         return;
     fwd_opts_t *fwd = cmd_get_opts(fwd_opts_t, p_cmd);
     if (fwd->retries > 0) {
@@ -789,7 +787,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
         req_info_t* tmp = req_list_head;
         while (tmp != NULL) {
             message_t* m = req_get_message(tmp);
-            if (tmp->curr_cmd->cmd == FORWARD) {
+            if (tmp->curr_cmd->cmd == FORWARD_BEGIN) {
                 fwd_opts_t fwd = *cmd_get_opts(fwd_opts_t, tmp->curr_cmd);
                 if (fwd.fwd_host == conn->target.sin_addr.s_addr &&
                         fwd.fwd_port == conn->target.sin_port) {

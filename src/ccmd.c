@@ -36,11 +36,11 @@ ccmd_node_t* ccmd_skip(ccmd_node_t* node, int to_skip) {
         int nested_fwd = 0;
 
         do {
-            if (itr->cmd == FORWARD)
+            if (itr->cmd == FORWARD_BEGIN)
                 nested_fwd++;
-            else if (itr->cmd == MULTI_FORWARD) {
+            else if (itr->cmd == FORWARD_CONTINUE) {
                 nested_fwd++;
-                while (itr->next->cmd == MULTI_FORWARD)
+                while (itr->next->cmd == FORWARD_CONTINUE)
                     itr = itr->next;
             } else if (itr->cmd == REPLY)
                 nested_fwd--;
@@ -52,35 +52,6 @@ ccmd_node_t* ccmd_skip(ccmd_node_t* node, int to_skip) {
 
     return itr;
 }
-
-/* OLD IMPL.
-ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n) {
-    int prev_was_mfwd = 0;
-    while (n-- > 0 && curr) {
-        if (curr->cmd == FORWARD || (curr->cmd == MULTI_FORWARD && !prev_was_mfwd)) {
-            int nested_fwd = 0;
-            do {
-                check(curr != NULL);
-                prev_was_mfwd = (curr->cmd == MULTI_FORWARD);
-                curr = curr->next;
-                if (curr->cmd == REPLY) {
-                    if (nested_fwd == 0)
-                        break;
-                    else
-                        nested_fwd--;
-                } else if (curr->cmd == FORWARD || (curr->cmd == MULTI_FORWARD && !prev_was_mfwd))
-                    nested_fwd++;
-            } while (curr->cmd != REPLY && nested_fwd != 0);
-        }
-
-        if (curr) {
-            prev_was_mfwd = (curr->cmd == MULTI_FORWARD);
-            curr = curr->next;
-        }
-    }
-
-    return curr;
-}*/
 
 // returns 1 if the message has been succesfully copied, 0 if there is not enough space (saved in req_size field)
 int ccmd_dump(queue_t* q, message_t* m) {
@@ -125,8 +96,8 @@ int ccmd_dump(queue_t* q, message_t* m) {
                 else
                     ccmd_itr = ccmd_itr -> next;
                 continue;
-            case MULTI_FORWARD:
-            case FORWARD:
+            case FORWARD_BEGIN:
+            case FORWARD_CONTINUE:
                 *cmd_get_opts(fwd_opts_t, m_cmd_itr) = ccmd_itr->fwd;
                 cmd_get_opts(fwd_opts_t, m_cmd_itr)->pkt_size = pd_sample(&ccmd_itr->pd_val);
                 break;
@@ -190,8 +161,8 @@ void ccmd_log(queue_t* q) {
                 else
                     sprintf(opts, "%d", curr->n_skip);
                 break;
-            case MULTI_FORWARD:
-            case FORWARD:
+            case FORWARD_BEGIN:
+            case FORWARD_CONTINUE:
                 sprintf(opts, "%s://%s:%d,%sb,retries=%d,timeout=%d", curr->fwd.proto == TCP ? "tcp" : "udp", inet_ntoa((struct in_addr) {curr->fwd.fwd_host}), ntohs(curr->fwd.fwd_port), pd_str(&curr->pd_val), curr->fwd.retries, curr->fwd.timeout);
                 break;
             case REPLY:

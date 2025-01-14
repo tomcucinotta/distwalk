@@ -571,7 +571,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break; }
     case FORWARD_CMD: {
         struct sockaddr_in fwd_addr;
-        command_type_t fwd_type = FORWARD;
+        command_type_t fwd_type = FORWARD_BEGIN;
         pd_spec_t fwd_val = pd_build_fixed(default_resp_size);
 
         int timeout_us = 2000000;
@@ -579,7 +579,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         int i = 0;
 
         char* tok;
-        ccmd_node_t* fwd_itr = NULL;
+        ccmd_node_t* fwd_itr_start = NULL;
         while ((tok = strsep(&arg, ",")) != NULL) {
             if (sscanf(tok, "retry=%d", &retry_num) == 1
                 || sscanf(tok, "retries=%d", &retry_num) == 1)
@@ -595,38 +595,30 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             addr_proto_parse(tok, fwdhostport, &fwd_proto);
             addr_parse(fwdhostport, &fwd_addr);
 
-            if (i > 0) {
-                if (i == 1) { // morph previous FORWARD in MULTI_FORWARD
-                    ccmd_last(ccmd)->cmd = MULTI_FORWARD;
-                }
-
-                fwd_type = MULTI_FORWARD;
-            }
+            if (i > 0)
+                fwd_type = FORWARD_CONTINUE;
 
             // TODO: customize forward pkt size
             ccmd_add(ccmd, fwd_type, &fwd_val);
             ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
             ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
 
-            if (i == 0) // keep track of the first MULTI_FORWARD
-                fwd_itr = ccmd_last(ccmd);
+            if (i == 0) // keep track of the FORWARD_BEGIN
+                fwd_itr_start = ccmd_last(ccmd);
             ccmd_last(ccmd)->fwd.on_fail_skip = 1;
             ccmd_last(ccmd)->fwd.proto = fwd_proto;
             i++;
         }
 
-        arguments->fwd_scope++;
-
         // Update timeout and retry parameters for each parsed forwad operation
-        while (fwd_itr != NULL && (fwd_itr->cmd == FORWARD || fwd_itr->cmd == MULTI_FORWARD)) {
+        for(ccmd_node_t* fwd_itr = fwd_itr_start; fwd_itr != NULL; fwd_itr = fwd_itr->next) {
             fwd_itr->fwd.timeout = timeout_us;
             fwd_itr->fwd.retries = retry_num;
-            fwd_itr = fwd_itr->next;
         }
 
         // Reserve a forward reply command
+        arguments->fwd_scope++;
         queue_enqueue(arguments->reserved_fwd_replies, i, (data_t) NULL);
-
         break; }
     case SEND_REQUEST_SIZE:
         check(pd_parse_bytes(&send_pkt_size_pd, arg), "Wrong send request size specification");

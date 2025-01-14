@@ -20,8 +20,8 @@ inline const char* get_command_name(command_type_t cmd) {
     case STORE: return "STORE";
     case LOAD: return "LOAD";
     case PSKIP: return "SKIP";
-    case FORWARD: return "FORWARD";
-    case MULTI_FORWARD: return "MULTI_FORWARD";
+    case FORWARD_BEGIN: return "FORWARD_BEGIN";
+    case FORWARD_CONTINUE: return "FORWARD_CONTINUE";
     case REPLY: return "REPLY";
     case EOM: return "EOM";
     default: 
@@ -35,8 +35,8 @@ inline int cmd_type_size(command_type_t type) {
     switch (type) {
     case REPLY:
         return base + sizeof(reply_opts_t);
-    case MULTI_FORWARD:
-    case FORWARD:
+    case FORWARD_BEGIN:
+    case FORWARD_CONTINUE:
         return base + sizeof(fwd_opts_t);
     case COMPUTE:
         return base + sizeof(comp_opts_t);
@@ -92,11 +92,10 @@ command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip) {
         int nested_fwd = 0;
 
         do {
-            if (itr->cmd == FORWARD)
+            if (itr->cmd == FORWARD_BEGIN)
                 nested_fwd++;
-            else if (itr->cmd == MULTI_FORWARD) {
-                nested_fwd++;
-                while (cmd_next(itr)->cmd == MULTI_FORWARD)
+            else if (itr->cmd == FORWARD_CONTINUE) {
+                while (cmd_next(itr)->cmd == FORWARD_CONTINUE)
                     itr = cmd_next(itr);
             } else if (itr->cmd == REPLY)
                 nested_fwd--;
@@ -130,8 +129,8 @@ inline const void msg_log(message_t* m, char* padding) {
             sprintf(opts, "%ldb,offset=%ld", cmd_get_opts(load_opts_t, c)->load_nbytes,
                     (long)cmd_get_opts(load_opts_t, c)->offset);
             break;
-        case MULTI_FORWARD:
-        case FORWARD:
+        case FORWARD_BEGIN:
+        case FORWARD_CONTINUE:
             sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", inet_ntoa((struct in_addr) {cmd_get_opts(fwd_opts_t, c)->fwd_host}), ntohs(cmd_get_opts(fwd_opts_t, c)->fwd_port), cmd_get_opts(fwd_opts_t, c)->pkt_size, cmd_get_opts(fwd_opts_t, c)->retries, cmd_get_opts(fwd_opts_t, c)->timeout);
             break;
         case REPLY:
