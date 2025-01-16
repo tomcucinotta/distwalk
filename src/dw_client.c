@@ -574,9 +574,10 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         command_type_t fwd_type = FORWARD_BEGIN;
         pd_spec_t fwd_val = pd_build_fixed(default_resp_size);
 
-        int timeout_us = 2000000;
+        double timeout_us = 2000000;
         int retry_num = 0;
-        int i = 0;
+        int nack = -1;
+        int multi_fwds = 0;
 
         char* tok;
         ccmd_node_t* fwd_itr_start = NULL;
@@ -584,18 +585,18 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             if (sscanf(tok, "retry=%d", &retry_num) == 1
                 || sscanf(tok, "retries=%d", &retry_num) == 1)
                 continue;
-            double val;
-            if (sscanf_unit(tok, "timeout=%lf", &val, 1) == 1) {
-                timeout_us = (int) val;
+            if (sscanf_unit(tok, "timeout=%lf", &timeout_us, 1) == 1)
                 continue;
-            }
+            if (sscanf(tok, "nack=%d", &nack) == 1)
+                continue;
+
             char fwdhostport[MAX_HOSTPORT_STRLEN];
             proto_t fwd_proto = TCP;
 
             addr_proto_parse(tok, fwdhostport, &fwd_proto);
             addr_parse(fwdhostport, &fwd_addr);
 
-            if (i > 0)
+            if (multi_fwds > 0)
                 fwd_type = FORWARD_CONTINUE;
 
             // TODO: customize forward pkt size
@@ -603,22 +604,26 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
             ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
 
-            if (i == 0) // keep track of the FORWARD_BEGIN
+            if (multi_fwds == 0) // keep track of the FORWARD_BEGIN
                 fwd_itr_start = ccmd_last(ccmd);
             ccmd_last(ccmd)->fwd.on_fail_skip = 1;
             ccmd_last(ccmd)->fwd.proto = fwd_proto;
-            i++;
+            multi_fwds++;
         }
+
+        if (nack < 0 || nack > multi_fwds)
+            nack = multi_fwds;
 
         // Update timeout and retry parameters for each parsed forwad operation
         for(ccmd_node_t* fwd_itr = fwd_itr_start; fwd_itr != NULL; fwd_itr = fwd_itr->next) {
-            fwd_itr->fwd.timeout = timeout_us;
+            fwd_itr->fwd.timeout = (int) timeout_us;
             fwd_itr->fwd.retries = retry_num;
         }
 
         // Reserve a forward reply command
+        queue_enqueue(arguments->reserved_fwd_replies, nack, (data_t) NULL);
+
         arguments->fwd_scope++;
-        queue_enqueue(arguments->reserved_fwd_replies, i, (data_t) NULL);
         break; }
     case SEND_REQUEST_SIZE:
         check(pd_parse_bytes(&send_pkt_size_pd, arg), "Wrong send request size specification");
@@ -662,7 +667,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             break;
         }
 
-        // Use a reserved reply
+        // Use a reserved reply (note: the nack reserved by a forward has higher priority over the nack specified in reply)
         int deferred_nack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
         if (nack > 0 && nack < deferred_nack)
             queue_tail(arguments->reserved_fwd_replies)->key = nack;
