@@ -34,19 +34,16 @@ ccmd_node_t* ccmd_skip(ccmd_node_t* node, int to_skip) {
 
     while (itr && skipped > 0) {
         int nested_fwd = 0;
-
         do {
             if (itr->cmd == FORWARD_BEGIN)
                 nested_fwd++;
             else if (itr->cmd == FORWARD_CONTINUE) {
-                nested_fwd++;
                 while (itr->next->cmd == FORWARD_CONTINUE)
                     itr = itr->next;
             } else if (itr->cmd == REPLY)
                 nested_fwd--;
             itr = itr->next;
         } while (itr && nested_fwd > 0);
-
         skipped--;
     }
 

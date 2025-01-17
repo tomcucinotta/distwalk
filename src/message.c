@@ -65,7 +65,6 @@ command_t* cmd_skip(command_t *cmd, int to_skip) {
 
     while (itr->cmd != EOM && skipped > 0) {
         int nested_fwd = 0;
-
         do {
             if (itr->cmd == FORWARD_BEGIN)
                 nested_fwd++;
@@ -76,7 +75,6 @@ command_t* cmd_skip(command_t *cmd, int to_skip) {
                 nested_fwd--;
             itr = cmd_next(itr);
         } while (itr->cmd != EOM && nested_fwd > 0);
-
         skipped--;
     }
 
@@ -92,22 +90,24 @@ inline command_t* message_first_cmd(message_t *m) {
 command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     // copy message header
     m_dst->req_id = m->req_id;
+
+    // find matching reply
     command_t *itr = cmd;
     while (itr->cmd != EOM && itr->cmd != REPLY)
         itr = cmd_skip(itr, 1);
-    command_t *reply_cmd = itr;
-    itr = cmd_next(itr);
-    int cmds_len = ((unsigned char*)itr - (unsigned char*)cmd);
+
     int skipped_len = ((unsigned char*)cmd - (unsigned char*)message_first_cmd(m));
-    if (m_dst->req_size < cmds_len + cmd_type_size(EOM))
+    int cmds_len = ((unsigned char*)cmd_next(itr) - (unsigned char*)cmd);
+    if (m_dst->req_size < cmds_len + cmd_type_size(EOM)) // Check if enough space for EOM delimiter
       return NULL;
 
     memcpy(m_dst->cmds, cmd, cmds_len);
-    command_t* end_command = (command_t*)((unsigned char*)&m_dst->cmds[0] + cmds_len);
-    end_command->cmd = EOM;
-    m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
 
-    return reply_cmd;
+    command_t* end_command = (command_t*)((unsigned char*)message_first_cmd(m_dst) + cmds_len);
+    end_command->cmd = EOM;
+    
+    m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
+    return itr;
 }
 
 inline const void msg_log(message_t* m, char* padding) {
