@@ -51,40 +51,15 @@ inline int cmd_type_size(command_type_t type) {
     return base;
 }
 
-inline command_t* cmd_next(command_t *c) {
-    unsigned char *ptr = (unsigned char*)c;
-    ptr += cmd_type_size(c->cmd);
+// Move to the next command
+inline command_t* cmd_next(command_t *cmd) {
+    unsigned char *ptr = (unsigned char*)cmd;
+    ptr += cmd_type_size(cmd->cmd);
     return (command_t*) ptr;
 }
 
-inline command_t* message_first_cmd(message_t *m) {
-    return &m->cmds[0];
-}
-
-// copy a message, and its commands starting from cmd until the matching REPLY is found
-// m_dst->req_size should contain the available size
-command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
-    // copy message header
-    m_dst->req_id = m->req_id;
-    command_t *itr = cmd;
-    while (itr->cmd != EOM && itr->cmd != REPLY)
-        itr = message_skip_cmds(m, itr, 1);
-    command_t *reply_cmd = itr;
-    itr = cmd_next(itr);
-    int cmds_len = ((unsigned char*)itr - (unsigned char*)cmd);
-    int skipped_len = ((unsigned char*)cmd - (unsigned char*)message_first_cmd(m));
-    if (m_dst->req_size < cmds_len + cmd_type_size(EOM))
-      return NULL;
-
-    memcpy(m_dst->cmds, cmd, cmds_len);
-    command_t* end_command = (command_t*)((unsigned char*)&m_dst->cmds[0] + cmds_len);
-    end_command->cmd = EOM;
-    m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
-
-    return reply_cmd;
-}
-
-command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip) {
+// Skip to_skip contextes (i.e., a simple operation, or a collection of operation within a forward scope)
+command_t* cmd_skip(command_t *cmd, int to_skip) {
     int skipped = to_skip;
     command_t *itr = cmd;
 
@@ -106,6 +81,33 @@ command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip) {
     }
 
     return itr;
+}
+
+inline command_t* message_first_cmd(message_t *m) {
+    return &m->cmds[0];
+}
+
+// copy a message, and its commands starting from cmd until the matching REPLY is found
+// m_dst->req_size should contain the available size
+command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
+    // copy message header
+    m_dst->req_id = m->req_id;
+    command_t *itr = cmd;
+    while (itr->cmd != EOM && itr->cmd != REPLY)
+        itr = cmd_skip(itr, 1);
+    command_t *reply_cmd = itr;
+    itr = cmd_next(itr);
+    int cmds_len = ((unsigned char*)itr - (unsigned char*)cmd);
+    int skipped_len = ((unsigned char*)cmd - (unsigned char*)message_first_cmd(m));
+    if (m_dst->req_size < cmds_len + cmd_type_size(EOM))
+      return NULL;
+
+    memcpy(m_dst->cmds, cmd, cmds_len);
+    command_t* end_command = (command_t*)((unsigned char*)&m_dst->cmds[0] + cmds_len);
+    end_command->cmd = EOM;
+    m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
+
+    return reply_cmd;
 }
 
 inline const void msg_log(message_t* m, char* padding) {
@@ -131,7 +133,10 @@ inline const void msg_log(message_t* m, char* padding) {
             break;
         case FORWARD_BEGIN:
         case FORWARD_CONTINUE:
-            sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", inet_ntoa((struct in_addr) {cmd_get_opts(fwd_opts_t, c)->fwd_host}), ntohs(cmd_get_opts(fwd_opts_t, c)->fwd_port), cmd_get_opts(fwd_opts_t, c)->pkt_size, cmd_get_opts(fwd_opts_t, c)->retries, cmd_get_opts(fwd_opts_t, c)->timeout);
+            sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", 
+                                                                            inet_ntoa((struct in_addr) {cmd_get_opts(fwd_opts_t, c)->fwd_host}), 
+                                                                            ntohs(cmd_get_opts(fwd_opts_t, c)->fwd_port), cmd_get_opts(fwd_opts_t, c)->pkt_size, 
+                                                                            cmd_get_opts(fwd_opts_t, c)->retries, cmd_get_opts(fwd_opts_t, c)->timeout);
             break;
         case REPLY:
             sprintf(opts, "%db,%d", cmd_get_opts(reply_opts_t, c)->resp_size, cmd_get_opts(reply_opts_t, c)->n_ack);

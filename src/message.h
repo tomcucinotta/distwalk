@@ -64,11 +64,12 @@ const char *proto_str(proto_t proto);
 const char* get_command_name(command_type_t cmd);
 
 command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd);
-command_t* message_skip_cmds(message_t* m, command_t *cmd, int to_skip);
 
-int cmd_type_size(command_type_t type);
-command_t* cmd_next(command_t *c);
+command_t* cmd_next(command_t *cmd);
+command_t* cmd_skip(command_t *cmd, int to_skip);
+
 command_t* message_first_cmd(message_t *m);
+int cmd_type_size(command_type_t type);
 
 static inline int msg_num_cmd(message_t *m) {
     int n = 0;

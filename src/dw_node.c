@@ -399,7 +399,7 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
     if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
         m->status = fwd_m_status;
-        req->curr_cmd = message_skip_cmds(m, req->curr_cmd, 1);
+        req->curr_cmd = cmd_skip(req->curr_cmd, 1);
         
         remove_timeout(infos, req_id, p_poll);
 
@@ -701,7 +701,7 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
     } else if (fwd->on_fail_skip > 0) {
         dw_log("TIMEOUT expired, failed, skipping: %d\n", fwd->on_fail_skip);
         
-        req->curr_cmd = message_skip_cmds(m, req->curr_cmd, fwd->on_fail_skip);
+        req->curr_cmd = cmd_skip(req->curr_cmd, fwd->on_fail_skip);
         m->status = -1;
         process_messages(req, p_poll, infos);
     } else {
@@ -800,7 +800,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
                     // Go to last REPLY
                     command_t *itr = tmp->curr_cmd;
                     while (itr->cmd != EOM && itr->cmd != REPLY)
-                        itr = message_skip_cmds(m, tmp->curr_cmd, 1);
+                        itr = cmd_skip(tmp->curr_cmd, 1);
 
                     if (itr->cmd == EOM) { // brutal
                         close_and_forget(p_poll, pending_conn->sock);
