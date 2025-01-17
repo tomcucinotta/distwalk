@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-#include "queue.h"
 #include "ccmd.h"
 #include "message.h"
 #include "dw_debug.h"
