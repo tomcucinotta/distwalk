@@ -219,13 +219,14 @@ bool test_queue_iterator_2() {
 }
 
 int main() {
-	perform_test(test_queue_insert());
-	perform_test(test_queue_insert_complex());
-	perform_test(test_queue_remove());
-	perform_test(test_queue_remove_complex());
-	perform_test(test_queue_capacity());
-	perform_test(test_queue_drop());
-	perform_test(test_queue_iterator_1());
-	perform_test(test_queue_iterator_2());
-	return 0;
+	int rv = 0;
+	perform_test(test_queue_insert(), rv);
+	perform_test(test_queue_insert_complex(), rv);
+	perform_test(test_queue_remove(), rv);
+	perform_test(test_queue_remove_complex(), rv);
+	perform_test(test_queue_capacity(), rv);
+	perform_test(test_queue_drop(), rv);
+	perform_test(test_queue_iterator_1(), rv);
+	perform_test(test_queue_iterator_2(), rv);
+	return !rv;
 }

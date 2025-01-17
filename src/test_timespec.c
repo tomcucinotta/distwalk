@@ -76,10 +76,10 @@ bool test_ts_leq() {
 
 
 int main() {
-    perform_test(test_ts_add());
-    perform_test(test_ts_sub());
-    perform_test(test_ts_sub_us());
-    perform_test(test_ts_leq());
-
-    return 0;
+    int rv = 0;
+    perform_test(test_ts_add(), rv);
+    perform_test(test_ts_sub(), rv);
+    perform_test(test_ts_sub_us(), rv);
+    perform_test(test_ts_leq(),rv );
+    return !rv;
 }

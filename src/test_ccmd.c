@@ -390,19 +390,20 @@ bool test_ccmd_dump() {
 }  
 
 int main() {
-    perform_test(test_ccmd_init_destroy());
-    perform_test(test_ccmd_add_1());
-    perform_test(test_ccmd_add_2());
-    perform_test(test_ccmd_add_3());
-    perform_test(test_ccmd_add_4());
-    perform_test(test_ccmd_last());
-    perform_test(test_ccmd_last_reply());
-    perform_test(test_ccmd_attach_last_reply_1());
-    perform_test(test_ccmd_attach_last_reply_2());
-    perform_test(test_ccmd_skip_1());
-    perform_test(test_ccmd_skip_2());
-    perform_test(test_ccmd_skip_3());
-    perform_test(test_ccmd_skip_4());
-    perform_test(test_ccmd_dump());
-    return 0;
+    int rv = 0;
+    perform_test(test_ccmd_init_destroy(), rv);
+    perform_test(test_ccmd_add_1(), rv);
+    perform_test(test_ccmd_add_2(), rv);
+    perform_test(test_ccmd_add_3(), rv);
+    perform_test(test_ccmd_add_4(), rv);
+    perform_test(test_ccmd_last(), rv);
+    perform_test(test_ccmd_last_reply(), rv);
+    perform_test(test_ccmd_attach_last_reply_1(), rv);
+    perform_test(test_ccmd_attach_last_reply_2(), rv);
+    perform_test(test_ccmd_skip_1(), rv);
+    perform_test(test_ccmd_skip_2(), rv);
+    perform_test(test_ccmd_skip_3(), rv);
+    perform_test(test_ccmd_skip_4(), rv);
+    perform_test(test_ccmd_dump(), rv);
+    return !rv;
 }

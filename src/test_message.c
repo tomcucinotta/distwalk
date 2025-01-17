@@ -120,8 +120,9 @@ bool test_message_copy_2() {
 }
 
 int main() {
-    perform_test(test_message_construct());
-    perform_test(test_message_copy_1());
-    perform_test(test_message_copy_2());
-    return 0;
+    int rv = 0;
+    perform_test(test_message_construct(), rv);
+    perform_test(test_message_copy_1(), rv);
+    perform_test(test_message_copy_2(), rv);
+    return !rv;
 }

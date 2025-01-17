@@ -65,11 +65,11 @@ __attribute__((weak)) __thread char thread_name[16];
   } while (0)
 
 // Execute a test function
-#define perform_test(fun)                        \
+#define perform_test(fun, rv)                    \
     do {                                         \
-        bool res = (fun);                        \
+        rv = (fun);                        \
         printf("TEST " #fun ": ");               \
-        if (res)                                 \
+        if (rv)                                 \
             printf("SUCCESS\n");                 \
         else                                     \
             printf("FAILED\n");                  \

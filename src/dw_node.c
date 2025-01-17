@@ -340,9 +340,8 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
     assert(m_dst->req_size >= fwd.pkt_size);
 
     command_t *c = cmd_next(cmd);
-    while (c->cmd != EOM && c->cmd == FORWARD_CONTINUE) {
+    while (c->cmd != EOM && c->cmd == FORWARD_CONTINUE)
         c = cmd_next(c);
-    }
 
     command_t* reply_cmd = message_copy_tail(m, m_dst, c);
     m_dst->req_id = req->req_id;
