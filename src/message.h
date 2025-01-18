@@ -63,6 +63,7 @@ typedef struct {
 const char *proto_str(proto_t proto);
 const char* get_command_name(command_type_t cmd);
 
+
 command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd);
 
 command_t* cmd_next(command_t *cmd);
@@ -82,5 +83,5 @@ static inline int msg_num_cmd(message_t *m) {
 }
 
 const void msg_log(message_t* m, char* padding);
-
+const void cmd_log(command_t* c);
 #endif /* __MESSAGE_H__ */
