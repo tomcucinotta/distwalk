@@ -37,7 +37,7 @@ bool test_message_construct() {
     return false;
 }
 
-bool test_message_copy_1() {
+bool test_message_copy_no_append() {
     message_t *m = (message_t *) calloc(BUF_SIZE, sizeof(unsigned char));
     m->req_size = BUF_SIZE;
     m->req_id = 0;
@@ -51,8 +51,9 @@ bool test_message_copy_1() {
 
     message_t *m_dst = (message_t *) malloc(BUF_SIZE);
     m_dst->req_size = BUF_SIZE;
-
-    if (!message_copy_tail(m, m_dst, message_first_cmd(m)))
+    message_first_cmd(m_dst)->cmd = EOM;
+    
+    if (!message_copy_tail(m, m_dst, message_first_cmd(m), 0))
         goto err;
     if (msg_num_cmd(m_dst) != 2)
         goto err;
@@ -62,7 +63,8 @@ bool test_message_copy_1() {
             goto err;
     }
 
-    if (!message_copy_tail(m, m_dst, cmd_next(message_first_cmd(m))))
+
+    if (!message_copy_tail(m, m_dst, cmd_next(message_first_cmd(m)), 0))
         goto err;
     if (msg_num_cmd(m_dst) != 1)
         goto err;
@@ -81,7 +83,54 @@ bool test_message_copy_1() {
     return false;
 }
 
-bool test_message_copy_2() {
+bool test_message_copy_append() {
+    message_t *m = (message_t *) calloc(BUF_SIZE, sizeof(unsigned char));
+    m->req_size = BUF_SIZE;
+    m->req_id = 0;
+
+    command_t *c_itr = message_first_cmd(m);
+    cmd_get_opts(comp_opts_t, c_itr)->comp_time_us = 1000;
+    c_itr = cmd_next(c_itr);
+    cmd_get_opts(comp_opts_t, c_itr)->comp_time_us = 2000;
+    c_itr = cmd_next(c_itr);
+    c_itr->cmd = EOM;
+
+    message_t *m_dst = (message_t *) malloc(BUF_SIZE);
+    m_dst->req_size = BUF_SIZE;
+    message_first_cmd(m_dst)->cmd = EOM;
+    
+    if (!message_copy_tail(m, m_dst, message_first_cmd(m), 1))
+        goto err;
+    if (msg_num_cmd(m_dst) != 2)
+        goto err;
+    for (command_t *itr = message_first_cmd(m_dst); itr->cmd != EOM; itr = cmd_next(itr)) {
+        int comp_us = cmd_get_opts(comp_opts_t, itr)->comp_time_us;
+        if (itr->cmd != COMPUTE || (comp_us != 1000 && comp_us != 2000))
+            goto err;
+    }
+
+
+    if (!message_copy_tail(m, m_dst, cmd_next(message_first_cmd(m)), 1))
+        goto err;
+    if (msg_num_cmd(m_dst) != 3)
+        goto err;
+    for (command_t *itr = message_first_cmd(m_dst); itr->cmd != EOM; itr = cmd_next(itr)) {
+        int comp_us = cmd_get_opts(comp_opts_t, itr)->comp_time_us;
+        if (itr->cmd != COMPUTE || (comp_us != 1000 && comp_us != 2000))
+            goto err;
+    }
+
+    free(m);
+    free(m_dst);
+    return true;
+
+    err:
+    free(m);
+    free(m_dst);
+    return false;
+}
+
+bool test_message_copy_with_reply() {
     message_t *m = (message_t *) (message_t *) calloc(BUF_SIZE, sizeof(unsigned char));;
     m->req_size = BUF_SIZE;
     m->req_id = 0;
@@ -97,8 +146,9 @@ bool test_message_copy_2() {
 
     message_t *m_dst = (message_t *) malloc(BUF_SIZE);
     m_dst->req_size = BUF_SIZE;
+    message_first_cmd(m_dst)->cmd = EOM;
 
-    if (!message_copy_tail(m, m_dst, message_first_cmd(m)))
+    if (!message_copy_tail(m, m_dst, message_first_cmd(m), 0))
         goto err;
     if (msg_num_cmd(m_dst) != 2)
         goto err;
@@ -122,7 +172,8 @@ bool test_message_copy_2() {
 int main() {
     int rv = 0;
     perform_test(test_message_construct(), rv);
-    perform_test(test_message_copy_1(), rv);
-    perform_test(test_message_copy_2(), rv);
+    perform_test(test_message_copy_no_append(), rv);
+    perform_test(test_message_copy_append(), rv);
+    perform_test(test_message_copy_with_reply(), rv);
     return !rv;
 }

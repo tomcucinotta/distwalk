@@ -63,7 +63,7 @@ typedef struct {
 const char *proto_str(proto_t proto);
 const char* get_command_name(command_type_t cmd);
 
-command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd);
+command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd, int append_mode);
 
 command_t* cmd_next(command_t *cmd);
 command_t* cmd_skip(command_t *cmd, int to_skip);

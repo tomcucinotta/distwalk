@@ -343,7 +343,7 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
     while (c->cmd != EOM && c->cmd == FORWARD_CONTINUE)
         c = cmd_next(c);
 
-    command_t* reply_cmd = message_copy_tail(m, m_dst, c);
+    command_t* reply_cmd = message_copy_tail(m, m_dst, c, 0);
     if (!reply_cmd) {
         dw_log("message_copy_tail(): destination message out-of-space\n");
         return 0;
