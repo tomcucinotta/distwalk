@@ -113,10 +113,10 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd, int
         itr = cmd_skip(itr, 1);
     int cmds_len = ((unsigned char*)cmd_next(itr) - (unsigned char*)cmd);
 
-    // find last cmd in destination (optional)
     command_t * dst_itr = message_first_cmd(m_dst);
     int offset = 0;
 
+    // find last cmd in destination (optional)
     if (append_mode) {
         while (dst_itr->cmd != EOM)
             dst_itr = cmd_skip(dst_itr, 1);
@@ -134,12 +134,9 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd, int
     m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
     return itr;
 }
-
-inline const void msg_log(message_t* m, char* padding) {
-    printf("%s", padding);
-    printf("message (req_id: %u, req_size: %u, num: %u, status: %d): ", m->req_id, m->req_size, msg_num_cmd(m), m->status);
-
-    command_t *c = message_first_cmd(m), *pre_c;
+       
+inline const void cmd_log(command_t* cmd) {
+    command_t *c = cmd, *pre_c;
     while (c->cmd != EOM) {
         char opts[64] = "";
 
@@ -175,5 +172,11 @@ inline const void msg_log(message_t* m, char* padding) {
         printf("%s(%s)%s", get_command_name(pre_c->cmd), opts, "->");
     }
     printf("EOM");
-    printf(" [%ld bytes]\n", (unsigned char*)c - (unsigned char*)message_first_cmd(m));
+    printf(" [%ld bytes]\n", (unsigned char*)c - (unsigned char*)cmd);
+}
+
+inline const void msg_log(message_t* m, char* padding) {
+    printf("%s", padding);
+    printf("message (req_id: %u, req_size: %u, num: %u, status: %d): ", m->req_id, m->req_size, msg_num_cmd(m), m->status);
+    cmd_log(message_first_cmd(m));
 }

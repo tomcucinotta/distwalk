@@ -83,5 +83,5 @@ static inline int msg_num_cmd(message_t *m) {
 }
 
 const void msg_log(message_t* m, char* padding);
-
+const void cmd_log(command_t* c);
 #endif /* __MESSAGE_H__ */
