@@ -242,6 +242,9 @@ int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     conns[conn_id].curr_send_buf = conns[conn_id].send_buf;
     conns[conn_id].curr_send_size = 0;
     conns[conn_id].serialize_request = 0;
+    
+    ((message_t*) conns[conn_id].send_buf)->cmds[0].cmd = EOM;
+    ((message_t*) conns[conn_id].recv_buf)->cmds[0].cmd = EOM;
 
     return conn_id;
 

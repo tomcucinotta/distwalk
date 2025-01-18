@@ -1,6 +1,8 @@
-#include "message.h"
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
+
+#include "message.h"
 
 #ifndef min
 #   define min(a, b) ((a)>(b)?(b):(a))
@@ -54,7 +56,20 @@ inline int cmd_type_size(command_type_t type) {
 // Move to the next command
 inline command_t* cmd_next(command_t *cmd) {
     unsigned char *ptr = (unsigned char*)cmd;
-    ptr += cmd_type_size(cmd->cmd);
+    int offset = cmd_type_size(cmd->cmd);
+
+    if (!(offset > 0 && *ptr > UCHAR_MAX - offset)) // overflow check
+        ptr += offset;
+    return (command_t*) ptr;
+}
+
+// Move to the previous command
+inline command_t* cmd_prev(command_t *cmd) {
+    unsigned char *ptr = (unsigned char*)cmd;
+    int offset = cmd_type_size(cmd->cmd);
+
+    if (!(offset > 0 && *ptr < UCHAR_MAX + offset)) // underflow check
+        ptr -= offset;
     return (command_t*) ptr;
 }
 
@@ -86,8 +101,9 @@ inline command_t* message_first_cmd(message_t *m) {
 }
 
 // copy a message, and its commands starting from cmd until the matching REPLY is found
-// m_dst->req_size should contain the available size
-command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
+// m_dst->req_size should contain the available size. Optionally append to m_dst without
+// replacing all the commands
+command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd, int append_mode) {
     // copy message header
     m_dst->req_id = m->req_id;
 
@@ -95,17 +111,26 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     command_t *itr = cmd;
     while (itr->cmd != EOM && itr->cmd != REPLY)
         itr = cmd_skip(itr, 1);
-
-    int skipped_len = ((unsigned char*)cmd - (unsigned char*)message_first_cmd(m));
     int cmds_len = ((unsigned char*)cmd_next(itr) - (unsigned char*)cmd);
-    if (m_dst->req_size < cmds_len + cmd_type_size(EOM)) // Check if enough space for EOM delimiter
+
+    // find last cmd in destination (optional)
+    command_t * dst_itr = message_first_cmd(m_dst);
+    int offset = 0;
+
+    if (append_mode) {
+        while (dst_itr->cmd != EOM)
+            dst_itr = cmd_skip(dst_itr, 1);
+        offset = ((unsigned char*)cmd_next(dst_itr) - (unsigned char*)message_first_cmd(m_dst));
+    }
+    if (m_dst->req_size < cmds_len + offset + cmd_type_size(EOM)) // Check if enough space for EOM delimiter
       return NULL;
 
-    memcpy(m_dst->cmds, cmd, cmds_len);
+    memcpy(dst_itr, cmd, cmds_len);
 
-    command_t* end_command = (command_t*)((unsigned char*)message_first_cmd(m_dst) + cmds_len);
+    command_t* end_command = (command_t*)((unsigned char*)message_first_cmd(m_dst) + cmds_len + offset);
     end_command->cmd = EOM;
     
+    int skipped_len = ((unsigned char*)cmd - (unsigned char*)message_first_cmd(m));
     m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
     return itr;
 }
