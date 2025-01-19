@@ -60,6 +60,7 @@ struct argp_client_arguments {
     queue_t* reserved_fwd_replies; // nack -> NULL
     ccmd_node_t* last_reserved_used;
     int fwd_scope;
+    int branching_degree;
 } input_args;
 
 #define MAX_THREADS 256
@@ -437,8 +438,8 @@ static struct argp_option argp_client_options[] = {
     { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
     { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
-    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n]", 0, "Send a number of FORWARD message to the ip:port list"},
-    { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests"},
+    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,cont]", 0, "Send a number of FORWARD messages to the ip:port list"},
+    { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests; Optionally specify timeout and connection retries, as well as specify if its a continued/branched multi-forward"},
     { "rs",                 REPLY_CMD,              "nbytes|prob:field=val[,field=val][,nack=n]", OPTION_ARG_OPTIONAL, "Add a Reply command; Optionally specify payload size and number of acknowledgments"},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
@@ -478,6 +479,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
 
         arguments->last_reserved_used = NULL;
         arguments->fwd_scope = 0;
+        arguments->branching_degree = 0;
         break;
     case HELP:
         argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
@@ -578,6 +580,17 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         int retry_num = 0;
         int nack = -1;
         int multi_fwds = 0;
+        int branched = 0;
+        ccmd_node_t* last_fwd_reply = NULL;
+        if (arguments->branching_degree > 0 && ccmd_last(ccmd)->cmd != REPLY) { // automatically close previous fwd branch
+            pd_spec_t reply_val = pd_build_fixed(default_resp_size);
+
+            ccmd_add(ccmd, REPLY, &reply_val);
+            ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
+            queue_dequeue_tail(arguments->reserved_fwd_replies);
+
+            last_fwd_reply = ccmd_last(ccmd);
+        }
 
         char* tok;
         ccmd_node_t* fwd_itr_start = NULL;
@@ -589,35 +602,50 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 continue;
             if (sscanf(tok, "nack=%d", &nack) == 1)
                 continue;
-
+            if (strncmp(tok, "cont", 4) == 0) {
+                branched = 1;
+                arguments->branching_degree++;
+                continue;
+            }
             char fwdhostport[MAX_HOSTPORT_STRLEN];
             proto_t fwd_proto = TCP;
 
             addr_proto_parse(tok, fwdhostport, &fwd_proto);
             addr_parse(fwdhostport, &fwd_addr);
 
-            if (multi_fwds > 0)
-                fwd_type = FORWARD_CONTINUE;
-
-            // TODO: customize forward pkt size
             ccmd_add(ccmd, fwd_type, &fwd_val);
+            if (multi_fwds == 0) // keep track of the first forward operation
+                fwd_itr_start = ccmd_last(ccmd);
+
+            // Static params
             ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
             ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
-
-            if (multi_fwds == 0) // keep track of the FORWARD_BEGIN
-                fwd_itr_start = ccmd_last(ccmd);
             ccmd_last(ccmd)->fwd.on_fail_skip = 1;
             ccmd_last(ccmd)->fwd.proto = fwd_proto;
+            // TODO: customize forward pkt size
+
             multi_fwds++;
         }
 
         if (nack < 0 || nack > multi_fwds)
             nack = multi_fwds;
 
-        // Update timeout and retry parameters for each parsed forwad operation
+        if (!branched)
+            arguments->branching_degree = 0;
+        
+        // Dynamic params (i.e., inputted by user at run-time)
         for(ccmd_node_t* fwd_itr = fwd_itr_start; fwd_itr != NULL; fwd_itr = fwd_itr->next) {
             fwd_itr->fwd.timeout = (int) timeout_us;
             fwd_itr->fwd.retries = retry_num;
+            fwd_itr->fwd.branching = branched;
+
+            if ((fwd_itr != fwd_itr_start && multi_fwds > 0) || arguments->branching_degree > 1)
+                fwd_itr->cmd = FORWARD_CONTINUE;
+        }
+
+        if (last_fwd_reply) { // update previous fwd branch
+            last_fwd_reply->resp.n_ack += nack;
+            nack = last_fwd_reply->resp.n_ack;
         }
 
         // Reserve a forward reply command
@@ -667,7 +695,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             break;
         }
 
-        // Use a reserved reply (note: the nack reserved by a forward has higher priority over the nack specified in reply)
+        // Use a reserved reply (note: nack assigned by a REPLY has higher priority over the nack pre-reserved in a forward)
         int deferred_nack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
         if (nack > 0 && nack < deferred_nack)
             queue_tail(arguments->reserved_fwd_replies)->key = nack;

@@ -74,6 +74,8 @@ command_t* cmd_skip(command_t *cmd, int to_skip) {
             if (itr->cmd == FORWARD_BEGIN)
                 nested_fwd++;
             else if (itr->cmd == FORWARD_CONTINUE) {
+                if (cmd_get_opts(fwd_opts_t, itr)->branching > 0)
+                    nested_fwd++;
                 while (cmd_next(itr)->cmd == FORWARD_CONTINUE)
                     itr = cmd_next(itr);
             } else if (itr->cmd == REPLY)
@@ -90,7 +92,7 @@ inline command_t* message_first_cmd(message_t *m) {
     return &m->cmds[0];
 }
 
-// copy a message, and its commands starting from cmd until the matching REPLY is found
+// copy a message and its commands starting from cmd until the matching REPLY is found.
 // m_dst->req_size should contain the available size. Optionally append to m_dst without
 // replacing all the commands
 command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {

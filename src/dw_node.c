@@ -339,6 +339,7 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
     message_t *m_dst = conn_send_message(&conns[fwd_conn_id]);
     assert(m_dst->req_size >= fwd.pkt_size);
 
+    // skip multi-fwd, same branch
     command_t *c = cmd_next(cmd);
     while (c->cmd != EOM && c->cmd == FORWARD_CONTINUE)
         c = cmd_next(c);
@@ -348,7 +349,6 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
         dw_log("message_copy_tail(): destination message out-of-space\n");
         return 0;
     }
-    
     m_dst->req_id = req->req_id;
     m_dst->req_size = fwd.pkt_size;
 
@@ -553,7 +553,7 @@ void close_and_forget(dw_poll_t *p_poll, int sock) {
 int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t *infos) {
     message_t *m = req_get_message(req);
 
-    for (command_t *cmd = req->curr_cmd; cmd->cmd != EOM; cmd = cmd_next(cmd)) {
+    for (command_t *cmd = req->curr_cmd; cmd->cmd != EOM; cmd = cmd_skip(cmd, 1)) {
         dw_log("PROCESS conn_id: %d, req_id: %d,  command: %s\n", req->conn_id, req->req_id, get_command_name(cmd->cmd));
         switch(cmd->cmd) {
         case COMPUTE:
@@ -567,6 +567,8 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
                 return -1;
             }
             req->curr_cmd = cmd;
+            if (cmd_get_opts(fwd_opts_t, cmd)->branching > 0 && cmd_skip(cmd, 1)->cmd == FORWARD_CONTINUE)
+                break;
             return 0; }
         case REPLY:
             dw_log("Handling REPLY: req_id=%d\n", m->req_id);
@@ -698,18 +700,18 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
         return;
     fwd_opts_t *fwd = cmd_get_opts(fwd_opts_t, p_cmd);
     if (fwd->retries > 0) {
-        dw_log("TIMEOUT expired, retry: %d\n", fwd->retries);
+        dw_log("TIMEOUT expired, req_id: %d, retry: %d\n", req->req_id, fwd->retries);
         
         fwd->retries--;
         process_messages(req, p_poll, infos);
     } else if (fwd->on_fail_skip > 0) {
-        dw_log("TIMEOUT expired, failed, skipping: %d\n", fwd->on_fail_skip);
+        dw_log("TIMEOUT expired, req_id: %d, failed, skipping: %d\n", req->req_id, fwd->on_fail_skip);
         
         req->curr_cmd = cmd_skip(req->curr_cmd, fwd->on_fail_skip);
         m->status = -1;
         process_messages(req, p_poll, infos);
     } else {
-        dw_log("TIMEOUT expired, failed\n");
+        dw_log("TIMEOUT expired, req_id: %d, failed\n", req->req_id);
 
         m->status = -1;
         conn_req_remove(conn, req);

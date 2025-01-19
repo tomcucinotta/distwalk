@@ -10,8 +10,10 @@ bool test_message_construct() {
     m->req_id = 0;
 
     command_t *c_itr = message_first_cmd(m);
+    c_itr->cmd = COMPUTE;
     cmd_get_opts(comp_opts_t, c_itr)->comp_time_us = 1000;
     c_itr = cmd_next(c_itr);
+    c_itr->cmd = COMPUTE;
     cmd_get_opts(comp_opts_t, c_itr)->comp_time_us = 2000;
     c_itr = cmd_next(c_itr);
     c_itr->cmd = EOM;
@@ -90,9 +92,11 @@ bool test_message_copy_with_reply() {
 
     command_t *c_itr = message_first_cmd(m);
     cmd_get_opts(comp_opts_t, c_itr)->comp_time_us = 1000;
+    c_itr->cmd = COMPUTE;
     c_itr = cmd_next(c_itr);
     c_itr->cmd = REPLY;
     c_itr = cmd_next(c_itr);
+    c_itr->cmd = COMPUTE;
     cmd_get_opts(comp_opts_t, c_itr)->comp_time_us = 2000;
     c_itr = cmd_next(c_itr);
     c_itr->cmd = EOM;
@@ -171,6 +175,7 @@ bool test_message_copy_fragment() {
 
     // check
     c_itr = message_first_cmd(m_branch1);
+
     if (c_itr->cmd != STORE)
         goto err;
     c_itr = cmd_next(c_itr);
@@ -192,5 +197,6 @@ int main() {
     perform_test(test_message_construct(), rv);
     perform_test(test_message_copy_no_append(), rv);
     perform_test(test_message_copy_with_reply(), rv);
+    perform_test(test_message_copy_fragment(), rv);
     return !rv;
 }
