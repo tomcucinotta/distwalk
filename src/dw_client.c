@@ -574,7 +574,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         command_type_t fwd_type = FORWARD_BEGIN;
         pd_spec_t fwd_val = pd_build_fixed(default_resp_size);
 
-        double timeout_us = 2000000;
+        double timeout_us = 10000000;
         int retry_num = 0;
         int nack = -1;
         int multi_fwds = 0;
