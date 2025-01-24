@@ -373,10 +373,9 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
         req->fwd_replies_left = cmd_get_opts(reply_opts_t, reply_cmd)->n_ack;
         req->fwd_retries = cmd_get_opts(fwd_opts_t, cmd)->retries;
         req->fwd_on_fail_skip = cmd_get_opts(fwd_opts_t, cmd)->on_fail_skip;
-        req->fwd_cmd = cmd;
     }
 
-    return cmd_next(reply_cmd);
+    return cmd_next(cmd_get_opts(fwd_opts_t, cmd)->branching ? reply_cmd : cmd);
 }
 
 // return ptr to the cmd after the entire MULTI_FORWARD if OK, or NULL if an error occurred in at least one forward operation
@@ -403,7 +402,7 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
     }
 
     dw_log("Found match with conn_id %d\n", req->conn_id);
-        
+
     if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
         m->status = fwd_m_status;
@@ -698,7 +697,7 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
 
     remove_timeout(infos, req_id, p_poll);
 
-    command_t *p_cmd = req->curr_cmd;
+    // command_t *p_cmd = req->curr_cmd;
     // if curr_cmd is no more on FORWARD_CONTINUE, ignore
     // TODO: case with 2 independent (non-nested) forwards in same req
     //if (p_cmd->cmd != FORWARD_BEGIN && p_cmd->cmd != FORWARD_CONTINUE) // || m->req_id != req_id)
@@ -713,7 +712,7 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
     } else if (req->fwd_on_fail_skip > 0) {
         dw_log("TIMEOUT expired, req_id: %d, failed, skipping: %d\n", req->req_id, req->fwd_on_fail_skip);
         
-        req->curr_cmd = cmd_skip(req->curr_cmd, req->fwd_on_fail_skip - 1);
+        req->curr_cmd = cmd_skip(req->curr_cmd, req->fwd_on_fail_skip);
         m->status = -1;
         process_messages(req, p_poll, infos);
     } else {

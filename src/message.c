@@ -77,8 +77,7 @@ command_t* cmd_skip(command_t *cmd, int to_skip) {
             else if (itr->cmd == FORWARD_CONTINUE) {
                 if (cmd_get_opts(fwd_opts_t, itr)->branching > 0)
                     nested_fwd++;
-                while (cmd_next(itr)->cmd == FORWARD_CONTINUE)
-                    itr = cmd_next(itr);
+                /* skip multiple (non-branching) FORWARD_CONTINUE following FORWARD_BEGIN */
             } else if (itr->cmd == REPLY)
                 nested_fwd--;
             itr = cmd_next(itr);
