@@ -278,8 +278,8 @@ void setnonblocking(int fd);
 // remove the first (cmd_id+1) commands from cmds[], and forward the
 // rest to the next hop
 //
-// returns 1 if forward successfully started, or 0 if a problem occurred
-int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_t *p_poll, conn_worker_info_t *infos) {
+// returns the cmd after the forward if forward successfully started, or NULL if a problem occurred
+command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_t *p_poll, conn_worker_info_t *infos) {
     fwd_opts_t fwd = *cmd_get_opts(fwd_opts_t, cmd);
 
     struct sockaddr_in addr;
@@ -306,7 +306,7 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
         if (fwd_conn_id == -1) {
             fprintf(stderr, "conn_alloc() failed, closing\n");
             close(clientSocket);
-            return 0;
+            return NULL;
         }
 
         if (fwd.proto == TCP) {
@@ -320,7 +320,7 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
             if (rv == -1) {
                 if (errno != EAGAIN && errno != EINPROGRESS) {
                     dw_log("unexpected error from connect(): %s\n", strerror(errno));
-                    return 0;
+                    return NULL;
                 }
 
                 dw_log("connect(): %s\n", strerror(errno));
@@ -339,16 +339,17 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
     message_t *m_dst = conn_send_message(&conns[fwd_conn_id]);
     assert(m_dst->req_size >= fwd.pkt_size);
 
-    // skip multi-fwd, same branch
+    // skip possible FORWARD_CONTINUE cmds in non-branched multi-fwd
     command_t *c = cmd_next(cmd);
-    while (c->cmd != EOM && c->cmd == FORWARD_CONTINUE)
+    while (c->cmd == FORWARD_CONTINUE)
         c = cmd_next(c);
 
     command_t* reply_cmd = message_copy_tail(m, m_dst, c);
     if (!reply_cmd) {
         dw_log("message_copy_tail(): destination message out-of-space\n");
-        return 0;
+        return NULL;
     }
+
     m_dst->req_id = req->req_id;
     m_dst->req_size = fwd.pkt_size;
 
@@ -362,28 +363,31 @@ int single_start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
            m_dst->req_size);
 
     if (conn_start_send(&conns[fwd_conn_id], addr) < 0)
-        return 0;
+        return NULL;
         
     if (fwd.timeout) {
         insert_timeout(infos, req->req_id, p_poll, fwd.timeout);
     }
 
-    if (req->fwd_replies_left == -1)
+    if (req->fwd_replies_left == -1) {
         req->fwd_replies_left = cmd_get_opts(reply_opts_t, reply_cmd)->n_ack;
+        req->fwd_retries = cmd_get_opts(fwd_opts_t, cmd)->retries;
+        req->fwd_on_fail_skip = cmd_get_opts(fwd_opts_t, cmd)->on_fail_skip;
+        req->fwd_cmd = cmd;
+    }
 
-    return 1;
+    return cmd_next(reply_cmd);
 }
 
-// return 1 if OK, 0 if an error occurred in at least one forward operation
-int start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_t *p_poll, conn_worker_info_t *infos) {
+// return ptr to the cmd after the entire MULTI_FORWARD if OK, or NULL if an error occurred in at least one forward operation
+command_t *start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_t *p_poll, conn_worker_info_t *infos) {
     assert(cmd->cmd == FORWARD_BEGIN || cmd->cmd == FORWARD_CONTINUE);
     do {
-        int rv = single_start_forward(req, m, cmd, p_poll, infos);
-        if (rv == 0)
-            return 0;
-        cmd = cmd_next(cmd);
+        cmd = single_start_forward(req, m, cmd, p_poll, infos);
+        if (cmd == NULL)
+            return NULL;
     } while (cmd->cmd == FORWARD_CONTINUE);
-    return 1;
+    return cmd;
 }
 
 int process_messages(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t* infos);
@@ -403,8 +407,10 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
     if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
         m->status = fwd_m_status;
-        req->curr_cmd = cmd_skip(req->curr_cmd, 1);
-        
+        do {
+            req->curr_cmd = cmd_skip(req->curr_cmd, 1);
+        } while (req->curr_cmd->cmd == FORWARD_CONTINUE);
+
         remove_timeout(infos, req_id, p_poll);
 
         return process_messages(req, p_poll, infos);
@@ -561,14 +567,12 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             break;
         case FORWARD_BEGIN:
         case FORWARD_CONTINUE: {
-            int rv = start_forward(req, m, cmd, p_poll, infos);
-            if (rv == 0) {
+            if (start_forward(req, m, cmd, p_poll, infos) == NULL) {
                 fprintf(stderr, "Error: could not execute FORWARD\n");
                 return -1;
             }
+            // leave req->curr_cmd pointing to the FORWARD_BEGIN cmd, useful in case of retransmissions on timeout
             req->curr_cmd = cmd;
-            if (cmd_get_opts(fwd_opts_t, cmd)->branching > 0 && cmd_skip(cmd, 1)->cmd == FORWARD_CONTINUE)
-                break;
             return 0; }
         case REPLY:
             dw_log("Handling REPLY: req_id=%d\n", m->req_id);
@@ -679,6 +683,7 @@ void setnonblocking(int fd) {
     sys_check(fcntl(fd, F_SETFL, flags));
 }
 
+// @TODO: in case of multi-forward (branched or not), this has to distinguish among who replied and who not, rather than just counting retries in req->fwd_retries
 void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
     if (!pqueue_size(infos->timeout_queue))
         return;
@@ -696,18 +701,19 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
     command_t *p_cmd = req->curr_cmd;
     // if curr_cmd is no more on FORWARD_CONTINUE, ignore
     // TODO: case with 2 independent (non-nested) forwards in same req
-    if (p_cmd->cmd != FORWARD_BEGIN && p_cmd->cmd != FORWARD_CONTINUE) // || m->req_id != req_id)
-        return;
-    fwd_opts_t *fwd = cmd_get_opts(fwd_opts_t, p_cmd);
-    if (fwd->retries > 0) {
-        dw_log("TIMEOUT expired, req_id: %d, retry: %d\n", req->req_id, fwd->retries);
+    //if (p_cmd->cmd != FORWARD_BEGIN && p_cmd->cmd != FORWARD_CONTINUE) // || m->req_id != req_id)
+    //    return;
+
+    dw_log("on_fail_skip=%d\n", req->fwd_on_fail_skip);
+    if (req->fwd_retries > 0) {
+        dw_log("TIMEOUT expired, req_id: %d, retry: %d\n", req->req_id, req->fwd_retries);
         
-        fwd->retries--;
+        req->fwd_retries--;
         process_messages(req, p_poll, infos);
-    } else if (fwd->on_fail_skip > 0) {
-        dw_log("TIMEOUT expired, req_id: %d, failed, skipping: %d\n", req->req_id, fwd->on_fail_skip);
+    } else if (req->fwd_on_fail_skip > 0) {
+        dw_log("TIMEOUT expired, req_id: %d, failed, skipping: %d\n", req->req_id, req->fwd_on_fail_skip);
         
-        req->curr_cmd = cmd_skip(req->curr_cmd, fwd->on_fail_skip);
+        req->curr_cmd = cmd_skip(req->curr_cmd, req->fwd_on_fail_skip - 1);
         m->status = -1;
         process_messages(req, p_poll, infos);
     } else {
