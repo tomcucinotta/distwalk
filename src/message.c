@@ -57,11 +57,7 @@ inline int cmd_type_size(command_type_t type) {
 // Move to the next command
 inline command_t* cmd_next(command_t *cmd) {
     unsigned char *ptr = (unsigned char*)cmd;
-    int offset = cmd_type_size(cmd->cmd);
-
-    if (!(offset > 0 && *ptr - offset > UCHAR_MAX)) // overflow check
-        ptr += offset;
-    return (command_t*) ptr;
+    return (command_t*) (ptr + cmd_type_size(cmd->cmd));
 }
 
 // Skip to_skip contextes (i.e., a simple operation, or a collection of operation within a forward scope)
