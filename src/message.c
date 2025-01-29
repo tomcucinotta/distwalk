@@ -63,25 +63,24 @@ inline command_t* cmd_next(command_t *cmd) {
 // Skip to_skip contextes (i.e., a simple operation, or a collection of operation within a forward scope)
 command_t* cmd_skip(command_t *cmd, int to_skip) {
     int skipped = to_skip;
-    command_t *itr = cmd;
 
-    while (itr->cmd != EOM && skipped > 0) {
+    while (cmd->cmd != EOM && skipped > 0) {
         int nested_fwd = 0;
         do {
-            if (itr->cmd == FORWARD_BEGIN)
+            if (cmd->cmd == FORWARD_BEGIN)
                 nested_fwd++;
-            else if (itr->cmd == FORWARD_CONTINUE) {
-                if (cmd_get_opts(fwd_opts_t, itr)->branching > 0)
+            else if (cmd->cmd == FORWARD_CONTINUE) {
+                if (cmd_get_opts(fwd_opts_t, cmd)->branching > 0)
                     nested_fwd++;
                 /* skip multiple (non-branching) FORWARD_CONTINUE following FORWARD_BEGIN */
-            } else if (itr->cmd == REPLY)
+            } else if (cmd->cmd == REPLY)
                 nested_fwd--;
-            itr = cmd_next(itr);
-        } while (itr->cmd != EOM && nested_fwd > 0);
+            cmd = cmd_next(cmd);
+        } while (cmd->cmd != EOM && nested_fwd > 0);
         skipped--;
     }
 
-    return itr;
+    return cmd;
 }
 
 inline command_t* message_first_cmd(message_t *m) {
