@@ -32,4 +32,4 @@ for d in gcov/*; do
     cp ../src/*.gcno $d
 done
 
-gcovr --object-directory ../src --root ../
+gcovr --object-directory ../src --root ../ --gcov-ignore-parse-errors
