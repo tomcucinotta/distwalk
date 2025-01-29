@@ -16,6 +16,7 @@ struct req_info_t {
     int conn_id;
     struct sockaddr_in target;
     int fwd_replies_left;
+    int fwd_replies_mask;
     int fwd_retries;
     int fwd_on_fail_skip;
     unsigned char *message_ptr;
