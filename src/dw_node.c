@@ -372,6 +372,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     if (req->fwd_replies_left == -1) {
         req->fwd_replies_left = cmd_get_opts(reply_opts_t, reply_cmd)->n_ack;
         req->fwd_replies_mask = 0;
+        req->fwd_replies_id = 0;
         req->fwd_retries = cmd_get_opts(fwd_opts_t, cmd)->retries;
         req->fwd_on_fail_skip = cmd_get_opts(fwd_opts_t, cmd)->on_fail_skip;
     }
@@ -394,14 +395,16 @@ int process_messages(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t* inf
 int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos);
 
 // return 0-based id if found, or -1 if not found
-int find_forward_reply_id(command_t *cmd, struct sockaddr_in from_addr) {
-    int id = 0;
-    for (; cmd->cmd != EOM; cmd = cmd_next(cmd), id++) {
+int find_forward_reply_id(command_t *cmd, struct sockaddr_in from_addr, int checkmask, int* id) {
+    for (; cmd->cmd != EOM; cmd = cmd_next_forward_reply(cmd), (*id)++) {
+        if (checkmask & (1 << *id))
+            continue;
+
         if (cmd->cmd != FORWARD_BEGIN && cmd->cmd != FORWARD_CONTINUE)
             return -1;
         if (cmd_get_opts(fwd_opts_t, cmd)->fwd_host == from_addr.sin_addr.s_addr
             && cmd_get_opts(fwd_opts_t, cmd)->fwd_port == from_addr.sin_port)
-            return id;
+            return *id;
     }
     return -1;
 }
@@ -416,8 +419,7 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
     }
 
     dw_log("Found match with conn_id %d\n", req->conn_id);
-
-    int reply_id = find_forward_reply_id(req->curr_cmd, from_addr);
+    int reply_id = find_forward_reply_id(req->curr_cmd, from_addr, req->fwd_replies_mask, &req->fwd_replies_id);
     check(reply_id != -1);
     if (req->fwd_replies_mask & (1 << reply_id))
         // already acknowledged, ignore
@@ -430,7 +432,10 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         do {
             req->curr_cmd = cmd_skip(req->curr_cmd, 1);
         } while (req->curr_cmd->cmd == FORWARD_CONTINUE);
-
+        
+        // reply mask reset 
+        req->fwd_replies_mask = 0;
+        req->fwd_replies_id = 0;
         remove_timeout(infos, req_id, p_poll);
 
         return process_messages(req, p_poll, infos);

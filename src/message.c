@@ -4,6 +4,7 @@
 #include <limits.h>
 
 #include "message.h"
+#include "dw_debug.h"
 
 #ifndef min
 #   define min(a, b) ((a)>(b)?(b):(a))
@@ -80,6 +81,19 @@ command_t* cmd_skip(command_t *cmd, int to_skip) {
         skipped--;
     }
 
+    return cmd;
+}
+
+command_t* cmd_next_forward_reply(command_t *cmd) {
+    check(cmd->cmd == FORWARD_CONTINUE || cmd->cmd == FORWARD_BEGIN);
+
+    cmd = cmd_next(cmd);
+    while (cmd->cmd != EOM && cmd->cmd != FORWARD_CONTINUE) {
+        if (cmd->cmd == FORWARD_BEGIN)
+            cmd = cmd_skip(cmd, 1);
+        else
+            cmd = cmd_next(cmd);
+    }
     return cmd;
 }
 
