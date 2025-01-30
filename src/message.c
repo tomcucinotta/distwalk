@@ -63,34 +63,43 @@ inline command_t* cmd_next(command_t *cmd) {
 
 // Skip to_skip contextes (i.e., a simple operation, or a collection of operation within a forward scope)
 command_t* cmd_skip(command_t *cmd, int to_skip) {
-    int skipped = to_skip;
-
-    while (cmd->cmd != EOM && skipped > 0) {
+    while (cmd->cmd != EOM && to_skip > 0) {
         int nested_fwd = 0;
+        int more_fwd;
         do {
-            if (cmd->cmd == FORWARD_BEGIN)
+            more_fwd = 0;
+            if (cmd->cmd == FORWARD_BEGIN) {
                 nested_fwd++;
-            else if (cmd->cmd == FORWARD_CONTINUE) {
+            } else if (cmd->cmd == FORWARD_CONTINUE) {
                 if (cmd_get_opts(fwd_opts_t, cmd)->branching > 0)
                     nested_fwd++;
                 /* skip multiple (non-branching) FORWARD_CONTINUE following FORWARD_BEGIN */
-            } else if (cmd->cmd == REPLY)
+            } else if (cmd->cmd == REPLY) {
                 nested_fwd--;
+                if (cmd_next(cmd)->cmd == FORWARD_CONTINUE) // must have branching=1
+                    more_fwd = 1;
+            }
             cmd = cmd_next(cmd);
-        } while (cmd->cmd != EOM && nested_fwd > 0);
-        skipped--;
+        } while (cmd->cmd != EOM && (more_fwd || nested_fwd > 0));
+        to_skip--;
     }
 
     return cmd;
 }
 
-command_t* cmd_next_forward_reply(command_t *cmd) {
+// return next FORWARD in the same multi-FORWARD context, or NULL if there are none
+command_t* cmd_next_forward(command_t *cmd) {
     check(cmd->cmd == FORWARD_CONTINUE || cmd->cmd == FORWARD_BEGIN);
 
+    int branching = cmd_get_opts(fwd_opts_t, cmd)->branching;
     cmd = cmd_next(cmd);
     while (cmd->cmd != EOM && cmd->cmd != FORWARD_CONTINUE) {
         if (cmd->cmd == FORWARD_BEGIN)
             cmd = cmd_skip(cmd, 1);
+        else if (cmd->cmd == REPLY && (!branching || cmd_next(cmd)->cmd != FORWARD_CONTINUE))
+            // when branching, a REPLY is followed by a CONTINUE, or the FORWARD context is over;
+            // when !branching, a REPLY terminates the FORWARD context
+            return NULL;
         else
             cmd = cmd_next(cmd);
     }
@@ -149,10 +158,11 @@ inline const void cmd_log(command_t* cmd) {
             break;
         case FORWARD_BEGIN:
         case FORWARD_CONTINUE:
-            sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", 
+            sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d,branching=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", 
                                                                             inet_ntoa((struct in_addr) {cmd_get_opts(fwd_opts_t, c)->fwd_host}), 
                                                                             ntohs(cmd_get_opts(fwd_opts_t, c)->fwd_port), cmd_get_opts(fwd_opts_t, c)->pkt_size, 
-                                                                            cmd_get_opts(fwd_opts_t, c)->retries, cmd_get_opts(fwd_opts_t, c)->timeout);
+                                                                            cmd_get_opts(fwd_opts_t, c)->retries, cmd_get_opts(fwd_opts_t, c)->timeout,
+                                                                            cmd_get_opts(fwd_opts_t, c)->branching);
             break;
         case REPLY:
             sprintf(opts, "%db,%d", cmd_get_opts(reply_opts_t, c)->resp_size, cmd_get_opts(reply_opts_t, c)->n_ack);

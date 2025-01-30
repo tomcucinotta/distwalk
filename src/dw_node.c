@@ -274,6 +274,8 @@ int remove_timeout(conn_worker_info_t* infos, int req_id, dw_poll_t *p_poll) {
 
 void setnonblocking(int fd);
 
+int find_forward_reply_id(command_t *cmd, struct sockaddr_in from_addr);
+
 // cmd_id is the index of the FORWARD item within m->cmds[] here, we
 // remove the first (cmd_id+1) commands from cmds[], and forward the
 // rest to the next hop
@@ -288,6 +290,17 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     addr.sin_addr.s_addr = fwd.fwd_host;
     addr.sin_port = fwd.fwd_port;
 
+    dw_log("Found reply_id %d for fwd to: %s:%d\n", find_forward_reply_id(req->curr_cmd, addr),
+           inet_ntoa((struct in_addr) {addr.sin_addr.s_addr}), ntohs(addr.sin_port));
+    if (req->fwd_replies_left != -1 && (req->fwd_replies_mask & (1 << find_forward_reply_id(req->curr_cmd, addr)))) {
+        // avoid retransmissions of already acknowledged FORWARD branches
+        cmd = cmd_next_forward(cmd);
+        if (cmd == NULL) {
+            cmd_log(cmd_skip(req->curr_cmd, 1));
+        } else
+            cmd_log(cmd);
+        return cmd == NULL ? cmd_skip(req->curr_cmd, 1) : cmd;
+    }
     int fwd_conn_id = conn_find_existing(addr, fwd.proto);
     if (fwd_conn_id == -1) {
         int clientSocket = 0;
@@ -372,7 +385,6 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     if (req->fwd_replies_left == -1) {
         req->fwd_replies_left = cmd_get_opts(reply_opts_t, reply_cmd)->n_ack;
         req->fwd_replies_mask = 0;
-        req->fwd_replies_id = 0;
         req->fwd_retries = cmd_get_opts(fwd_opts_t, cmd)->retries;
         req->fwd_on_fail_skip = cmd_get_opts(fwd_opts_t, cmd)->on_fail_skip;
     }
@@ -395,16 +407,12 @@ int process_messages(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t* inf
 int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos);
 
 // return 0-based id if found, or -1 if not found
-int find_forward_reply_id(command_t *cmd, struct sockaddr_in from_addr, int checkmask, int* id) {
-    for (; cmd->cmd != EOM; cmd = cmd_next_forward_reply(cmd), (*id)++) {
-        if (checkmask & (1 << *id))
-            continue;
-
-        if (cmd->cmd != FORWARD_BEGIN && cmd->cmd != FORWARD_CONTINUE)
-            return -1;
+int find_forward_reply_id(command_t *cmd, struct sockaddr_in from_addr) {
+    int id = 0;
+    for (; cmd != NULL; cmd = cmd_next_forward(cmd), id++) {
         if (cmd_get_opts(fwd_opts_t, cmd)->fwd_host == from_addr.sin_addr.s_addr
             && cmd_get_opts(fwd_opts_t, cmd)->fwd_port == from_addr.sin_port)
-            return *id;
+            return id;
     }
     return -1;
 }
@@ -419,8 +427,15 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
     }
 
     dw_log("Found match with conn_id %d\n", req->conn_id);
-    int reply_id = find_forward_reply_id(req->curr_cmd, from_addr, req->fwd_replies_mask, &req->fwd_replies_id);
-    check(reply_id != -1);
+    int reply_id = find_forward_reply_id(req->curr_cmd, from_addr);
+    dw_log("Found reply_id %d from: %s:%d\n", reply_id,
+           inet_ntoa((struct in_addr) {from_addr.sin_addr.s_addr}), ntohs(from_addr.sin_port));
+    if (reply_id == -1) {
+        dw_log("Got a REPLY to FORWARD from an unexpected endpoint: %s:%d - Dropped",
+               inet_ntoa((struct in_addr) {from_addr.sin_addr.s_addr}), ntohs(from_addr.sin_port));
+        return -1;
+    }
+    dw_log("fwd_replies_mask: %d, replies_left: %d, reply_id: %d\n", req->fwd_replies_mask, req->fwd_replies_left, reply_id);
     if (req->fwd_replies_mask & (1 << reply_id))
         // already acknowledged, ignore
         return -1;
@@ -435,7 +450,6 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         
         // reply mask reset 
         req->fwd_replies_mask = 0;
-        req->fwd_replies_id = 0;
         remove_timeout(infos, req_id, p_poll);
 
         return process_messages(req, p_poll, infos);
@@ -591,14 +605,15 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             compute_for(cmd_get_opts(comp_opts_t, cmd)->comp_time_us);
             break;
         case FORWARD_BEGIN:
-        case FORWARD_CONTINUE: {
+            // leave req->curr_cmd pointing to the FORWARD_BEGIN cmd, useful in case of retransmissions on timeout
+            req->curr_cmd = cmd;
+            // fall-through on purpose
+        case FORWARD_CONTINUE:
             if (start_forward(req, m, cmd, p_poll, infos) == NULL) {
                 fprintf(stderr, "Error: could not execute FORWARD\n");
                 return -1;
             }
-            // leave req->curr_cmd pointing to the FORWARD_BEGIN cmd, useful in case of retransmissions on timeout
-            req->curr_cmd = cmd;
-            return 0; }
+            return 0;
         case REPLY:
             dw_log("Handling REPLY: req_id=%d\n", m->req_id);
             if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd, infos)) {
