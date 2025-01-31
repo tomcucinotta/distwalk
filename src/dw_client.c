@@ -61,6 +61,7 @@ struct argp_client_arguments {
     ccmd_node_t* last_reserved_used;
     int fwd_scope;
     int branching_degree;
+    ccmd_node_t* curr_forward_begin;
 } input_args;
 
 #define MAX_THREADS 256
@@ -480,6 +481,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->last_reserved_used = NULL;
         arguments->fwd_scope = 0;
         arguments->branching_degree = 0;
+        arguments->curr_forward_begin = NULL;
         break;
     case HELP:
         argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
@@ -572,15 +574,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         ccmd_last(ccmd)->n_skip = n_skip;
         break; }
     case FORWARD_CMD: {
-        struct sockaddr_in fwd_addr;
-        command_type_t fwd_type = FORWARD_BEGIN;
-        pd_spec_t fwd_val = pd_build_fixed(default_resp_size);
-
-        double timeout_us = 10000000;
-        int retry_num = 0;
-        int nack = -1;
-        int multi_fwds = 0;
-        int branched = 0;
         if (arguments->branching_degree > 0 && ccmd_last(ccmd)->cmd != REPLY) { // automatically close previous fwd branch
             pd_spec_t reply_val = pd_build_fixed(queue_node_key(queue_tail(arguments->reserved_fwd_replies)));
 
@@ -588,6 +581,15 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             queue_dequeue_tail(arguments->reserved_fwd_replies);
         }
 
+        struct sockaddr_in fwd_addr;
+        pd_spec_t fwd_val = pd_build_fixed(default_resp_size);
+
+        double timeout_us = 10000000;
+        int retry_num = 0;
+        int nack = -1;
+        int branched = 0;
+
+        int multi_fwds = 0;
         char* tok;
         ccmd_node_t* fwd_itr_start = NULL;
         while ((tok = strsep(&arg, ",")) != NULL) {
@@ -609,8 +611,11 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             addr_proto_parse(tok, fwdhostport, &fwd_proto);
             addr_parse(fwdhostport, &fwd_addr);
 
-            ccmd_add(ccmd, fwd_type, &fwd_val);
-            if (multi_fwds == 0) // keep track of the first forward operation
+            ccmd_add(ccmd, FORWARD_BEGIN, &fwd_val); // may need to be changed to FORWARD_CONTINUE later
+
+            if (multi_fwds == 0 && arguments->branching_degree == 0) // update begin position to current context
+                arguments->curr_forward_begin = ccmd_last(ccmd);
+            if (multi_fwds == 0) // keep track of the first forward operation in this subcontext
                 fwd_itr_start = ccmd_last(ccmd);
 
             // Static params
@@ -622,21 +627,34 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
 
             multi_fwds++;
         }
-
-        if (nack < 0 || nack > multi_fwds)
+        if (nack <= 0 || (!branched && nack > multi_fwds))
             nack = multi_fwds;
 
-        if (!branched)
+        if (!branched) {
             arguments->branching_degree = 0;
-        
-        // Dynamic params (i.e., inputted by user at run-time)
-        for(ccmd_node_t* fwd_itr = fwd_itr_start; fwd_itr != NULL; fwd_itr = fwd_itr->next) {
-            fwd_itr->fwd.timeout = (int) timeout_us;
-            fwd_itr->fwd.retries = retry_num;
-            fwd_itr->fwd.branched = branched;
-            fwd_itr->fwd.n_ack = nack;
-            if ((fwd_itr != fwd_itr_start && multi_fwds > 0) || arguments->branching_degree > 1)
-                fwd_itr->cmd = FORWARD_CONTINUE;
+            arguments->curr_forward_begin = fwd_itr_start;
+        }
+
+
+        // Update dynamic params (i.e., inputted by user at run-time) for FORWARD_BEGIN onl
+        if (arguments->branching_degree <= 1) {
+            arguments->curr_forward_begin->fwd.n_ack += nack;
+            arguments->curr_forward_begin->fwd.timeout = (int) timeout_us;
+            arguments->curr_forward_begin->fwd.retries = retry_num;
+            arguments->curr_forward_begin->fwd.branched = branched;
+        }
+
+        ccmd_node_t* fwd_itr = fwd_itr_start;
+        if (fwd_itr_start == arguments->curr_forward_begin)
+            fwd_itr = fwd_itr->next;
+
+        for(; fwd_itr != NULL; fwd_itr = fwd_itr->next) {           
+            fwd_itr->cmd = FORWARD_CONTINUE;
+
+            fwd_itr->fwd.timeout = -1;
+            fwd_itr->fwd.retries = -1;
+            fwd_itr->fwd.branched = branched;  // Only parameter to be considered in a FORWARD_CONTINUE
+            fwd_itr->fwd.n_ack = 0;
         }
 
         // Reserve a forward reply command

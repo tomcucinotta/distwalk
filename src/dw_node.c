@@ -378,23 +378,25 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     if (conn_start_send(&conns[fwd_conn_id], addr) < 0)
         return NULL;
         
-    if (fwd.timeout) {
-        insert_timeout(infos, req->req_id, p_poll, fwd.timeout);
+    if (req->fwd_timeout) {
+        insert_timeout(infos, req->req_id, p_poll, req->fwd_timeout);
     }
-
-    if (req->fwd_replies_left == -1) {
-        req->fwd_replies_left = cmd_get_opts(fwd_opts_t, cmd)->n_ack;
-        req->fwd_replies_mask = 0;
-        req->fwd_retries = cmd_get_opts(fwd_opts_t, cmd)->retries;
-        req->fwd_on_fail_skip = cmd_get_opts(fwd_opts_t, cmd)->on_fail_skip;
-    }
-
     return cmd_next(cmd_get_opts(fwd_opts_t, cmd)->branched ? reply_cmd : cmd);
 }
 
 // return ptr to the cmd after the entire MULTI_FORWARD if OK, or NULL if an error occurred in at least one forward operation
 command_t *start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_t *p_poll, conn_worker_info_t *infos) {
     assert(cmd->cmd == FORWARD_BEGIN || cmd->cmd == FORWARD_CONTINUE);
+    if (req->fwd_replies_left == -1) {
+        req->fwd_replies_left = cmd_get_opts(fwd_opts_t, cmd)->n_ack;
+        req->fwd_replies_mask = 0;
+        req->fwd_timeout = cmd_get_opts(fwd_opts_t, cmd)->timeout;
+        req->fwd_retries = cmd_get_opts(fwd_opts_t, cmd)->retries;
+        req->fwd_on_fail_skip = cmd_get_opts(fwd_opts_t, cmd)->on_fail_skip;
+
+        dw_log("Starting FORWARD context for req:%d with nack:%d, timeout:%d, retry:%d\n", req->req_id, req->fwd_replies_left, req->fwd_timeout, req->fwd_retries);
+    }
+
     do {
         cmd = single_start_forward(req, m, cmd, p_poll, infos);
         if (cmd == NULL)
@@ -450,6 +452,9 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         
         // reply mask reset 
         req->fwd_replies_mask = 0;
+        req->fwd_replies_left = -1;
+        req->fwd_timeout = 0;
+        req->fwd_retries = 0;
         remove_timeout(infos, req_id, p_poll);
 
         return process_messages(req, p_poll, infos);

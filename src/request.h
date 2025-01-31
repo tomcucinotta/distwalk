@@ -18,6 +18,7 @@ struct req_info_t {
     int fwd_replies_left;
     int fwd_replies_mask;
     int fwd_retries;
+    int fwd_timeout;
     int fwd_on_fail_skip;
     unsigned char *message_ptr;
     command_t *curr_cmd;
