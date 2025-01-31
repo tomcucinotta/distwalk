@@ -71,12 +71,12 @@ command_t* cmd_skip(command_t *cmd, int to_skip) {
             if (cmd->cmd == FORWARD_BEGIN) {
                 nested_fwd++;
             } else if (cmd->cmd == FORWARD_CONTINUE) {
-                if (cmd_get_opts(fwd_opts_t, cmd)->branching > 0)
+                if (cmd_get_opts(fwd_opts_t, cmd)->branched)
                     nested_fwd++;
                 /* skip multiple (non-branching) FORWARD_CONTINUE following FORWARD_BEGIN */
             } else if (cmd->cmd == REPLY) {
                 nested_fwd--;
-                if (cmd_next(cmd)->cmd == FORWARD_CONTINUE) // must have branching=1
+                if (cmd_next(cmd)->cmd == FORWARD_CONTINUE) // must have branched=1
                     more_fwd = 1;
             }
             cmd = cmd_next(cmd);
@@ -91,14 +91,14 @@ command_t* cmd_skip(command_t *cmd, int to_skip) {
 command_t* cmd_next_forward(command_t *cmd) {
     check(cmd->cmd == FORWARD_CONTINUE || cmd->cmd == FORWARD_BEGIN);
 
-    int branching = cmd_get_opts(fwd_opts_t, cmd)->branching;
+    int branched = cmd_get_opts(fwd_opts_t, cmd)->branched;
     cmd = cmd_next(cmd);
     while (cmd->cmd != EOM && cmd->cmd != FORWARD_CONTINUE) {
         if (cmd->cmd == FORWARD_BEGIN)
             cmd = cmd_skip(cmd, 1);
-        else if (cmd->cmd == REPLY && (!branching || cmd_next(cmd)->cmd != FORWARD_CONTINUE))
-            // when branching, a REPLY is followed by a CONTINUE, or the FORWARD context is over;
-            // when !branching, a REPLY terminates the FORWARD context
+        else if (cmd->cmd == REPLY && (!branched || cmd_next(cmd)->cmd != FORWARD_CONTINUE))
+            // when branched, a REPLY is followed by a CONTINUE, or the FORWARD context is over;
+            // when !branched, a REPLY terminates the FORWARD context
             return NULL;
         else
             cmd = cmd_next(cmd);
@@ -158,11 +158,11 @@ inline const void cmd_log(command_t* cmd) {
             break;
         case FORWARD_BEGIN:
         case FORWARD_CONTINUE:
-            sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d,branching=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", 
+            sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d,branched=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", 
                                                                             inet_ntoa((struct in_addr) {cmd_get_opts(fwd_opts_t, c)->fwd_host}), 
                                                                             ntohs(cmd_get_opts(fwd_opts_t, c)->fwd_port), cmd_get_opts(fwd_opts_t, c)->pkt_size, 
                                                                             cmd_get_opts(fwd_opts_t, c)->retries, cmd_get_opts(fwd_opts_t, c)->timeout,
-                                                                            cmd_get_opts(fwd_opts_t, c)->branching);
+                                                                            cmd_get_opts(fwd_opts_t, c)->branched);
             break;
         case REPLY:
             sprintf(opts, "%db,%d", cmd_get_opts(reply_opts_t, c)->resp_size, cmd_get_opts(reply_opts_t, c)->n_ack);

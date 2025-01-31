@@ -389,7 +389,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
         req->fwd_on_fail_skip = cmd_get_opts(fwd_opts_t, cmd)->on_fail_skip;
     }
 
-    return cmd_next(cmd_get_opts(fwd_opts_t, cmd)->branching ? reply_cmd : cmd);
+    return cmd_next(cmd_get_opts(fwd_opts_t, cmd)->branched ? reply_cmd : cmd);
 }
 
 // return ptr to the cmd after the entire MULTI_FORWARD if OK, or NULL if an error occurred in at least one forward operation

@@ -21,7 +21,7 @@ typedef struct {
     uint32_t timeout;     // timeout in microsecond (0 means no timeout)
     uint8_t retries;      // how many times to reply before failing
     uint8_t on_fail_skip; // how many instructions skip after failing
-    uint8_t branching;    // i-th branch of a multi-forward
+    uint8_t branched;     // multi-branched forward
     proto_t proto;        // which transport protocol to use
 } fwd_opts_t;
 

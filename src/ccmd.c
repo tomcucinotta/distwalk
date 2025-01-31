@@ -160,7 +160,9 @@ void ccmd_log(queue_t* q) {
                 break;
             case FORWARD_BEGIN:
             case FORWARD_CONTINUE:
-                sprintf(opts, "%s://%s:%d,%sb,retries=%d,timeout=%d", curr->fwd.proto == TCP ? "tcp" : "udp", inet_ntoa((struct in_addr) {curr->fwd.fwd_host}), ntohs(curr->fwd.fwd_port), pd_str(&curr->pd_val), curr->fwd.retries, curr->fwd.timeout);
+                sprintf(opts, "%s://%s:%d,%sb,retries=%d,timeout=%d,branched=%d", curr->fwd.proto == TCP ? "tcp" : "udp", 
+                                                                                  inet_ntoa((struct in_addr) {curr->fwd.fwd_host}), ntohs(curr->fwd.fwd_port), 
+                                                                                  pd_str(&curr->pd_val), curr->fwd.retries, curr->fwd.timeout, curr->fwd.branched);
                 break;
             case REPLY:
                 sprintf(opts, "%sb,%d", pd_str(&curr->pd_val), curr->resp.n_ack);

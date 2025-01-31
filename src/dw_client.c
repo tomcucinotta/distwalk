@@ -581,15 +581,12 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         int nack = -1;
         int multi_fwds = 0;
         int branched = 0;
-        ccmd_node_t* last_fwd_reply = NULL;
         if (arguments->branching_degree > 0 && ccmd_last(ccmd)->cmd != REPLY) { // automatically close previous fwd branch
             pd_spec_t reply_val = pd_build_fixed(default_resp_size);
 
             ccmd_add(ccmd, REPLY, &reply_val);
             ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
             queue_dequeue_tail(arguments->reserved_fwd_replies);
-
-            last_fwd_reply = ccmd_last(ccmd);
         }
 
         char* tok;
@@ -602,7 +599,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 continue;
             if (sscanf(tok, "nack=%d", &nack) == 1)
                 continue;
-            if (strncmp(tok, "cont", 4) == 0) {
+            if (strncmp(tok, "branch", 6) == 0) {
                 branched = 1;
                 arguments->branching_degree++;
                 continue;
@@ -637,15 +634,10 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         for(ccmd_node_t* fwd_itr = fwd_itr_start; fwd_itr != NULL; fwd_itr = fwd_itr->next) {
             fwd_itr->fwd.timeout = (int) timeout_us;
             fwd_itr->fwd.retries = retry_num;
-            fwd_itr->fwd.branching = branched;
+            fwd_itr->fwd.branched = branched;
 
             if ((fwd_itr != fwd_itr_start && multi_fwds > 0) || arguments->branching_degree > 1)
                 fwd_itr->cmd = FORWARD_CONTINUE;
-        }
-
-        if (last_fwd_reply) { // update previous fwd branch
-            last_fwd_reply->resp.n_ack += nack;
-            nack = last_fwd_reply->resp.n_ack;
         }
 
         // Reserve a forward reply command

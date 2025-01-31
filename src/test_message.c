@@ -133,7 +133,7 @@ bool test_message_copy_fragment() {
 
     command_t *c_itr = message_first_cmd(m);
     c_itr->cmd = FORWARD_BEGIN;
-    cmd_get_opts(fwd_opts_t, c_itr)->branching = 1;
+    cmd_get_opts(fwd_opts_t, c_itr)->branched = 1;
 
     c_itr = cmd_next(c_itr);
     c_itr->cmd = STORE;
@@ -144,7 +144,7 @@ bool test_message_copy_fragment() {
 
     c_itr = cmd_next(c_itr);
     c_itr->cmd = FORWARD_CONTINUE;
-    cmd_get_opts(fwd_opts_t, c_itr)->branching = 2;
+    cmd_get_opts(fwd_opts_t, c_itr)->branched = 1;
 
     c_itr = cmd_next(c_itr);
     c_itr->cmd = LOAD;
