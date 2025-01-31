@@ -20,6 +20,7 @@ typedef struct {
     uint16_t fwd_port;    // target port (network encoding, for multiple nodes on same host)
     uint32_t timeout;     // timeout in microsecond (0 means no timeout)
     uint8_t retries;      // how many times to reply before failing
+    uint8_t n_ack;        // forward-reply concern (number of acknowledgments)
     uint8_t on_fail_skip; // how many instructions skip after failing
     uint8_t branched;     // multi-branched forward
     proto_t proto;        // which transport protocol to use
@@ -42,7 +43,6 @@ typedef struct {
 
 typedef struct {
     uint32_t resp_size;   // REPLY pkt size
-    uint8_t n_ack;        // reply concern
 } reply_opts_t;
 
 // TODO: Here we need all quantities to be network-ordered

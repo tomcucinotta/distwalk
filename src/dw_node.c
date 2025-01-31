@@ -383,7 +383,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     }
 
     if (req->fwd_replies_left == -1) {
-        req->fwd_replies_left = cmd_get_opts(reply_opts_t, reply_cmd)->n_ack;
+        req->fwd_replies_left = cmd_get_opts(fwd_opts_t, cmd)->n_ack;
         req->fwd_replies_mask = 0;
         req->fwd_retries = cmd_get_opts(fwd_opts_t, cmd)->retries;
         req->fwd_on_fail_skip = cmd_get_opts(fwd_opts_t, cmd)->on_fail_skip;

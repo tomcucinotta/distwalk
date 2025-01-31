@@ -58,7 +58,7 @@ while ! grep -q "received message: message (req_id: 0, req_size: 512, num: 0, st
     ((attempt++))
 done
 
-client --to :7891 -C 100 -F :7892,:7893 -C 200 --rs=1000,nack=1 | grep -q "received message: message (req_id: 0, req_size: 512, num: 0, status: 0)"
+client --to :7891 -C 100 -F :7892,:7893,nack=1 -C 200 --rs=1000 | grep -q "received message: message (req_id: 0, req_size: 512, num: 0, status: 0)"
 kill_all SIGINT
 
 rm $tmp

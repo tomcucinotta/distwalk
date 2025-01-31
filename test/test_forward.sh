@@ -48,14 +48,14 @@ client -F :7892 -C 1000 -R -F :7893 -C 2000 -R | grep -q "Sent pkts - success: 1
 cat $TMP_N0 | grep -q "Forwarding req 0 to 127.0.0.1:7892"
 cat $TMP_N0 | grep -q "Forwarding req 0 to 127.0.0.1:7893"
 
-cat $TMP_N1 | grep -q "COMPUTE(1000us)->REPLY(512b,1)->EOM"
-cat $TMP_N2 | grep -q "COMPUTE(2000us)->REPLY(512b,1)->EOM"
+cat $TMP_N1 | grep -q "COMPUTE(1000us)->REPLY(512b)->EOM"
+cat $TMP_N2 | grep -q "COMPUTE(2000us)->REPLY(512b)->EOM"
 
 # multi forward
 client -F :7892,:7893 -C 1000 -C 2000 -R | grep -q "Sent pkts - success: 1, failed: 0, thr_id: 0"
 
-cat $TMP_N1 | grep -q "COMPUTE(1000us)->COMPUTE(2000us)->REPLY(512b,1)->EOM"
-cat $TMP_N2 | grep -q "COMPUTE(1000us)->COMPUTE(2000us)->REPLY(512b,1)->EOM"
+cat $TMP_N1 | grep -q "COMPUTE(1000us)->COMPUTE(2000us)->REPLY(512b)->EOM"
+cat $TMP_N2 | grep -q "COMPUTE(1000us)->COMPUTE(2000us)->REPLY(512b)->EOM"
 kill_all SIGINT
 
 node_bg -b :7891 &> $TMP_N0
@@ -68,7 +68,7 @@ client -F :7892 -C 1000 -F :7893 -C 2000 -C 3000 -R | grep -q "Sent pkts - succe
 cat $TMP_N0 | grep -q "Forwarding req 0 to 127.0.0.1:7892"
 cat $TMP_N1 | grep -q "Forwarding req 0 to 127.0.0.1:7893"
 
-cat $TMP_N2 | grep -q "COMPUTE(2000us)->COMPUTE(3000us)->REPLY(512b,1)->EOM"
+cat $TMP_N2 | grep -q "COMPUTE(2000us)->COMPUTE(3000us)->REPLY(512b)->EOM"
 
 kill_all SIGINT
 

@@ -158,14 +158,14 @@ inline const void cmd_log(command_t* cmd) {
             break;
         case FORWARD_BEGIN:
         case FORWARD_CONTINUE:
-            sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d,branched=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", 
+            sprintf(opts, "%s://%s:%d,%u,retries=%d,timeout=%d,branched=%d,nack=%d", cmd_get_opts(fwd_opts_t, c)->proto == TCP ? "tcp" : "udp", 
                                                                             inet_ntoa((struct in_addr) {cmd_get_opts(fwd_opts_t, c)->fwd_host}), 
                                                                             ntohs(cmd_get_opts(fwd_opts_t, c)->fwd_port), cmd_get_opts(fwd_opts_t, c)->pkt_size, 
                                                                             cmd_get_opts(fwd_opts_t, c)->retries, cmd_get_opts(fwd_opts_t, c)->timeout,
-                                                                            cmd_get_opts(fwd_opts_t, c)->branched);
+                                                                            cmd_get_opts(fwd_opts_t, c)->branched, cmd_get_opts(fwd_opts_t, c)->n_ack);
             break;
         case REPLY:
-            sprintf(opts, "%db,%d", cmd_get_opts(reply_opts_t, c)->resp_size, cmd_get_opts(reply_opts_t, c)->n_ack);
+            sprintf(opts, "%db", cmd_get_opts(reply_opts_t, c)->resp_size);
             break;
         default: 
             printf("Unknown command type\n");

@@ -57,7 +57,7 @@ struct argp_client_arguments {
     // parsing phase
     pd_spec_t last_resp_size;
 
-    queue_t* reserved_fwd_replies; // nack -> NULL
+    queue_t* reserved_fwd_replies; // resp_size -> NULL
     ccmd_node_t* last_reserved_used;
     int fwd_scope;
     int branching_degree;
@@ -438,9 +438,9 @@ static struct argp_option argp_client_options[] = {
     { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
     { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
-    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,cont]", 0, "Send a number of FORWARD messages to the ip:port list"},
+    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,branch][,nack=n]", 0, "Send a number of FORWARD messages to the ip:port list"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests; Optionally specify timeout and connection retries, as well as specify if its a continued/branched multi-forward"},
-    { "rs",                 REPLY_CMD,              "nbytes|prob:field=val[,field=val][,nack=n]", OPTION_ARG_OPTIONAL, "Add a Reply command; Optionally specify payload size and number of acknowledgments"},
+    { "rs",                 REPLY_CMD,              "nbytes|prob:field=val[,field=val]", OPTION_ARG_OPTIONAL, "Add a Reply command; Optionally specify payload size"},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
     { "num-sessions",       NUM_SESSIONS,           "n",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
@@ -582,10 +582,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         int multi_fwds = 0;
         int branched = 0;
         if (arguments->branching_degree > 0 && ccmd_last(ccmd)->cmd != REPLY) { // automatically close previous fwd branch
-            pd_spec_t reply_val = pd_build_fixed(default_resp_size);
+            pd_spec_t reply_val = pd_build_fixed(queue_node_key(queue_tail(arguments->reserved_fwd_replies)));
 
             ccmd_add(ccmd, REPLY, &reply_val);
-            ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
             queue_dequeue_tail(arguments->reserved_fwd_replies);
         }
 
@@ -635,13 +634,13 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             fwd_itr->fwd.timeout = (int) timeout_us;
             fwd_itr->fwd.retries = retry_num;
             fwd_itr->fwd.branched = branched;
-
+            fwd_itr->fwd.n_ack = nack;
             if ((fwd_itr != fwd_itr_start && multi_fwds > 0) || arguments->branching_degree > 1)
                 fwd_itr->cmd = FORWARD_CONTINUE;
         }
 
         // Reserve a forward reply command
-        queue_enqueue(arguments->reserved_fwd_replies, nack, (data_t) NULL);
+        queue_enqueue(arguments->reserved_fwd_replies, default_resp_size, (data_t) NULL);
 
         arguments->fwd_scope++;
         break; }
@@ -652,49 +651,33 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         check(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE, "Too big send request size, maximum is %d", BUF_SIZE);
         break;
     case REPLY_CMD: {
-        if (queue_size(ccmd) <= 0) { // edge-case
-            pd_spec_t val = pd_build_fixed(default_compute_us);
-            ccmd_add(ccmd, COMPUTE, &val);
-        }
-
         pd_spec_t val;
-        int nack = 1;
 
         if (arg == NULL)
             val = pd_build_fixed(default_resp_size);
         else {
-            char *tok;
-            while ((tok = strsep(&arg, ",")) != NULL) {
-                if (sscanf(tok, "nack=%d", &nack) == 1) {
-                    continue;
-                } else {
-                    check(pd_parse_bytes(&val, tok), "Wrong response size specification");
-                    val.min = MIN_REPLY_SIZE;
-                    val.max = BUF_SIZE;
-                    check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
-                }
-            }
+            check(pd_parse_bytes(&val, arg), "Wrong response size specification");
+            val.min = MIN_REPLY_SIZE;
+            val.max = BUF_SIZE;
+            check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
         }
-        if (nack == 0) // TODO: allow n_ack 0 when reply messages will be optional 
-            nack = 1;
+
+        if (queue_size(ccmd) <= 0) { // edge-case
+            ccmd_add(ccmd, COMPUTE, &val);
+            break;
+        }
 
         if (arguments->fwd_scope <= 0) {
             if (ccmd_last(ccmd)->cmd == REPLY && ccmd_last(ccmd) != arguments->last_reserved_used) // update last chained reply
                 ccmd_last(ccmd)->pd_val = val;
             else // intra-chain reply
                 ccmd_add(ccmd, REPLY, &val);
-            ccmd_last(ccmd)->resp.n_ack = nack;
             break;
         }
 
-        // Use a reserved reply (note: nack assigned by a REPLY has higher priority over the nack pre-reserved in a forward)
-        int deferred_nack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
-        if (nack > 0 && nack < deferred_nack)
-            queue_tail(arguments->reserved_fwd_replies)->key = nack;
-
-        ccmd_add(ccmd, REPLY, &val);
-        ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
+        // Discard last reserved reply and use updated resp size
         queue_dequeue_tail(arguments->reserved_fwd_replies);
+        ccmd_add(ccmd, REPLY, &val);
         
         arguments->last_reserved_used = ccmd_last(ccmd);
         arguments->fwd_scope--;
@@ -768,8 +751,8 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
 
         // Exhaust remaining deferred replies
         while(queue_size(arguments->reserved_fwd_replies) > 0 && arguments->fwd_scope > 0) {
-            ccmd_add(ccmd, REPLY, &arguments->last_resp_size);
-            ccmd_last(ccmd)->resp.n_ack = queue_node_key(queue_tail(arguments->reserved_fwd_replies));
+            pd_spec_t val = pd_build_fixed(queue_node_key(queue_tail(arguments->reserved_fwd_replies)));
+            ccmd_add(ccmd, REPLY, &val);
 
             queue_dequeue_tail(arguments->reserved_fwd_replies);
             arguments->last_reserved_used = ccmd_last(ccmd);
@@ -781,7 +764,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
 
         if (ccmd_last(ccmd) == arguments->last_reserved_used || ccmd_last(ccmd)->cmd != REPLY) { // edge-case (TODO: eventually this must be removed)
             ccmd_add(ccmd, REPLY, &arguments->last_resp_size);
-            ccmd_last(ccmd)->resp.n_ack = 1;
         }
         break;
     default:
