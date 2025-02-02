@@ -65,22 +65,17 @@ inline command_t* cmd_next(command_t *cmd) {
 command_t* cmd_skip(command_t *cmd, int to_skip) {
     while (cmd->cmd != EOM && to_skip > 0) {
         int nested_fwd = 0;
-        int more_fwd;
         do {
-            more_fwd = 0;
             if (cmd->cmd == FORWARD_BEGIN) {
                 nested_fwd++;
             } else if (cmd->cmd == FORWARD_CONTINUE) {
-                if (cmd_get_opts(fwd_opts_t, cmd)->branched)
-                    nested_fwd++;
                 /* skip multiple (non-branching) FORWARD_CONTINUE following FORWARD_BEGIN */
             } else if (cmd->cmd == REPLY) {
-                nested_fwd--;
-                if (cmd_next(cmd)->cmd == FORWARD_CONTINUE) // must have branched=1
-                    more_fwd = 1;
+                if (cmd_next(cmd)->cmd != FORWARD_CONTINUE) // must have branched=1
+                    nested_fwd--;
             }
             cmd = cmd_next(cmd);
-        } while (cmd->cmd != EOM && (more_fwd || nested_fwd > 0));
+        } while (cmd->cmd != EOM && nested_fwd > 0);
         to_skip--;
     }
 
