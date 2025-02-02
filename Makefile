@@ -1,5 +1,5 @@
 all:
-	cd src && make all && cp dw_node dw_client dw_node_debug dw_client_debug dw_node_tsan dw_client_tsan ../
+	cd src && make all
 
 run-tests:
 	cd src && make all
