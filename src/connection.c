@@ -326,7 +326,7 @@ int conn_send(conn_info_t *conn) {
             return 0;
         } 
 
-        if (errno = EPIPE || errno == ECONNRESET) {
+        if (errno == EPIPE || errno == ECONNRESET) {
             dw_log("SEND Connection closed by remote end conn_id=%d\n", conn_get_id_by_ptr(conn));
             conn->status = CLOSE;
             return 0;
