@@ -313,7 +313,7 @@ int conn_start_send(conn_info_t *conn, struct sockaddr_in target) {
 int conn_send(conn_info_t *conn) {
     int sock = conn->sock;
     dw_log("SEND conn_id=%d, status=%d (%s), curr_send_size=%lu, sock=%d\n", conn_get_id_by_ptr(conn), conn->status, conn_status_str(conn->status), conn->curr_send_size, sock);
-    size_t sent = sendto(sock, conn->curr_send_buf, conn->curr_send_size, MSG_NOSIGNAL, (const struct sockaddr*)&conn->target, sizeof(conn->target));
+    ssize_t sent = sendto(sock, conn->curr_send_buf, conn->curr_send_size, MSG_NOSIGNAL, (const struct sockaddr*)&conn->target, sizeof(conn->target));
     if (sent == 0) {
         // TODO: should not even be possible, ignoring
         dw_log("SEND returned 0\n");
@@ -326,7 +326,7 @@ int conn_send(conn_info_t *conn) {
             return 0;
         } 
 
-        if (errno = EPIPE || errno == ECONNRESET) {
+        if (errno == EPIPE || errno == ECONNRESET) {
             dw_log("SEND Connection closed by remote end conn_id=%d\n", conn_get_id_by_ptr(conn));
             conn->status = CLOSE;
             return 0;
@@ -342,13 +342,13 @@ int conn_send(conn_info_t *conn) {
     if (conn->curr_send_size == 0)
         conn->curr_send_buf = conn->send_buf;
 
-    return sent;
+    return (int)sent;
 }
 
 int conn_recv(conn_info_t *conn) {
     int sock = conn->sock;
     socklen_t recvsize = sizeof(conn->target);
-    size_t received = recvfrom(sock, conn->curr_recv_buf, conn->curr_recv_size, 0,
+    ssize_t received = recvfrom(sock, conn->curr_recv_buf, conn->curr_recv_size, 0,
                                (struct sockaddr*)&conn->target, (socklen_t*)&recvsize);
     dw_log("RECV returned: %d\n", (int)received);
     if (received == 0) {
