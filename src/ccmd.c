@@ -29,22 +29,22 @@ void ccmd_add(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
 extern __thread struct drand48_data rnd_buf;
 
 ccmd_node_t* ccmd_skip(ccmd_node_t* node, int to_skip) {
-    int skipped = to_skip;
     ccmd_node_t *itr = node;
 
-    while (itr && skipped > 0) {
+    while (itr && to_skip > 0) {
         int nested_fwd = 0;
         do {
-            if (itr->cmd == FORWARD_BEGIN)
+            if (itr->cmd == FORWARD_BEGIN) {
                 nested_fwd++;
-            else if (itr->cmd == FORWARD_CONTINUE) {
-                while (itr->next->cmd == FORWARD_CONTINUE)
-                    itr = itr->next;
-            } else if (itr->cmd == REPLY)
-                nested_fwd--;
+            } else if (itr->cmd == FORWARD_CONTINUE) {
+                /* skip multiple (non-branching) FORWARD_CONTINUE following FORWARD_BEGIN */
+            } else if (itr->cmd == REPLY) {
+                if (itr->next && itr->next->cmd != FORWARD_CONTINUE) // must have branched=1
+                    nested_fwd--;
+            }
             itr = itr->next;
         } while (itr && nested_fwd > 0);
-        skipped--;
+        to_skip--;
     }
 
     return itr;
