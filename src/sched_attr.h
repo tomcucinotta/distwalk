@@ -1,6 +1,10 @@
 #ifndef __SCHED_ATTR_H__
 #define __SCHED_ATTR_H__
 
+/* sched_attr is already defined in glibc >= 2.41 */
+#if !(defined(__GLIBC__) && defined(__GLIBC_MINOR__) && \
+      ((__GLIBC__ > 2) || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 41)))
+
 #include <sys/syscall.h>
 
 struct sched_attr {
@@ -23,5 +27,7 @@ int sched_setattr(pid_t pid,
 {
     return syscall(SYS_sched_setattr, pid, attr, flags);
 }
+
+#endif
 
 #endif /* __SCHED_ATTR_H__ */
