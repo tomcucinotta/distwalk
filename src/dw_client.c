@@ -107,95 +107,6 @@ int idx(int pkt_id) {
     return val;
 }
 
-void *thread_sender(void *data) {
-    thread_data_t *p = (thread_data_t *)data;
-
-    sprintf(thread_name, "sendw-%d", p->thread_id);
-    sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
-
-    int thread_id = p->thread_id;
-    int first_pkt_id = p->first_pkt_id;
-    int num_send_pkts = p->num_send_pkts;
-    struct timespec ts_now;
-
-    clock_gettime(clk_id, &ts_now);
-    pd_init(time(NULL));
-
-    message_t *m;
-    conn_info_t *conn = conn_get_by_id(p->conn_id);
-
-#ifdef DW_DEBUG
-    ccmd_log(ccmd);
-#endif
-
-    for (int i = 0; i < num_send_pkts; i++) {
-        m = conn_send_message(conn);
-        ccmd_dump(ccmd, m);
-
-        /* remember time of send relative to ts_start */
-        struct timespec ts_send;
-        clock_gettime(clk_id, &ts_send);
-        int pkt_id = first_pkt_id + i;
-        usecs_send[thread_id][idx(pkt_id)] = ts_sub_us(ts_send, ts_start);
-        // mark corresponding elapsed value as 0, i.e., non-valid (in case we
-        // don't receive all packets back)
-        usecs_elapsed[thread_id][idx(pkt_id)] = 0;
-        /*---- Issue a request to the server ---*/
-        m->req_id = pkt_id;
-        m->req_size = pd_sample(&send_pkt_size_pd);
-
-        dw_log("sending %u bytes...\n", m->req_size);
-        assert(m->req_size <= BUF_SIZE);
-
-#ifdef DW_DEBUG
-        msg_log(m, "Sending msg: ");
-#endif
-        if (!conn_start_send(conn, conn->target)) {
-            fprintf(stderr,
-                    "Forcing premature termination of sender thread while "
-                    "attempting to send pkt %d\n",
-                    pkt_id);
-            break;
-        }
-
-        if (ramp_step_secs != 0 && pkt_id > 0) {
-            int step_prev =
-                usecs_send[thread_id][idx(pkt_id - 1)] / 1000000 / ramp_step_secs;
-            int step =
-                usecs_send[thread_id][idx(pkt_id)] / 1000000 / ramp_step_secs;
-            int rate;
-            while (step_prev++ < step) {
-                int old_rate = 1000000.0 / send_period_us_pd.val;
-                rate = pd_sample(&send_rate_pd);
-                send_period_us_pd.val = 1000000.0 / rate;
-                if (rate != old_rate) {
-                    dw_log("pkt_id: %d, old_rate: %d, rate: %d\n", pkt_id, old_rate, rate);
-                }
-            }
-        }
-
-        unsigned long period_ns = pd_sample(&send_period_us_pd) * 1000.0;
-        dw_log("period_ns=%lu\n", period_ns);
-        struct timespec ts_delta =
-            (struct timespec) { period_ns / 1000000000, period_ns % 1000000000 };
-
-        ts_now = ts_add(ts_now, ts_delta);
-
-        if (use_wait_spinning) {
-            struct timespec ts;
-            do {
-                clock_gettime(clk_id, &ts);
-            } while (ts_leq(ts, ts_now));
-        } else {
-            sys_check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
-        }
-    }
-
-    dw_log("Sender thread terminating\n");
-
-    return 0;
-}
-
 int connect_retry(int thread_id, int sess_id) {
     int rv = 0;
     int conn_retry;
@@ -239,6 +150,96 @@ int connect_retry(int thread_id, int sess_id) {
         }
     }
     return rv;
+}
+
+void *thread_sender(void *data) {
+    thread_data_t *p = (thread_data_t *)data;
+
+    sprintf(thread_name, "sendw-%d", p->thread_id);
+    sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
+
+    int thread_id = p->thread_id;
+    int first_pkt_id = p->first_pkt_id;
+    int num_send_pkts = p->num_send_pkts;
+    struct timespec ts_now;
+
+    clock_gettime(clk_id, &ts_now);
+    pd_init(time(NULL));
+
+    message_t *m;
+    conn_info_t *conn = conn_get_by_id(p->conn_id);
+
+#ifdef DW_DEBUG
+    ccmd_log(ccmd);
+#endif
+
+    for (int i = 0; i < num_send_pkts; i++) {
+        int pkt_id = first_pkt_id + i;
+        m = conn_send_message(conn);
+        ccmd_dump(ccmd, m);
+
+        // remember time of send relative to ts_start
+        struct timespec ts_send;
+        clock_gettime(clk_id, &ts_send);
+        
+        usecs_send[thread_id][idx(pkt_id)] = ts_sub_us(ts_send, ts_start);
+        usecs_elapsed[thread_id][idx(pkt_id)] = 0; // mark corresponding elapsed value as 0, i.e., non-valid 
+                                                   // (in case we don't receive all packets back)
+
+        // Issue a request to the server
+        m->req_id = pkt_id;
+        m->req_size = pd_sample(&send_pkt_size_pd);
+
+        dw_log("sending %u bytes...\n", m->req_size);
+        assert(m->req_size <= BUF_SIZE);
+        #ifdef DW_DEBUG
+            msg_log(m, "Sending msg: ");
+        #endif
+        
+        if (!conn_start_send(conn, conn->target)) {
+            fprintf(stderr,
+                    "Forcing premature termination of sender thread while "
+                    "attempting to send pkt %d\n",
+                    pkt_id);
+            break;
+        }
+
+        // wait / spin-wait before sending next packet based on the specified rate / period
+        if (ramp_step_secs != 0 && pkt_id > 0) {
+            int step_prev =
+                usecs_send[thread_id][idx(pkt_id - 1)] / 1000000 / ramp_step_secs;
+            int step =
+                usecs_send[thread_id][idx(pkt_id)] / 1000000 / ramp_step_secs;
+            int rate;
+            while (step_prev++ < step) {
+                int old_rate = 1000000.0 / send_period_us_pd.val;
+                rate = pd_sample(&send_rate_pd);
+                send_period_us_pd.val = 1000000.0 / rate;
+                if (rate != old_rate) {
+                    dw_log("pkt_id: %d, old_rate: %d, rate: %d\n", pkt_id, old_rate, rate);
+                }
+            }
+        }
+
+        unsigned long period_ns = pd_sample(&send_period_us_pd) * 1000.0;
+        dw_log("period_ns=%lu\n", period_ns);
+        struct timespec ts_delta =
+            (struct timespec) { period_ns / 1000000000, period_ns % 1000000000 };
+
+        ts_now = ts_add(ts_now, ts_delta);
+
+        if (use_wait_spinning) {
+            struct timespec ts;
+            do {
+                clock_gettime(clk_id, &ts);
+            } while (ts_leq(ts, ts_now));
+        } else {
+            sys_check(clock_nanosleep(clk_id, TIMER_ABSTIME, &ts_now, NULL));
+        }
+    }
+
+    dw_log("Sender thread terminating\n");
+    return 0;
 }
 
 void *thread_receiver(void *data) {
@@ -308,9 +309,10 @@ void *thread_receiver(void *data) {
 
         recv = conn_recv(conn);
         while (recv > 0 && (m = conn_next_message(conn))) {
-#ifdef DW_DEBUG
-            msg_log(m, "received message: ");
-#endif
+            #ifdef DW_DEBUG
+                msg_log(m, "received message: ");
+            #endif
+
             unsigned pkt_id = m->req_id;
             if (m->status != 0) {
                 dw_log("REPLY reported an error\n");
