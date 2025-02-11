@@ -64,23 +64,27 @@ dep:
 
 # DO NOT DELETE
 
-ccmd.o: ccmd.h queue.h message.h distrib.h dw_debug.h
-connection.o: connection.h message.h request.h priority_queue.h dw_debug.h
+address_utils.o: address_utils.h message.h dw_debug.h
+ccmd.o: queue.h queueing_common.h ccmd.h message.h distrib.h dw_debug.h
+connection.o: connection.h message.h request.h priority_queue.h
+connection.o: queueing_common.h dw_debug.h
 distrib.o: distrib.h dw_debug.h
-dw_client.o: dw_debug.h distrib.h message.h connection.h request.h address_utils.h
-dw_client.o: priority_queue.h timespec.h ccmd.h
-dw_node.o: dw_debug.h message.h timespec.h thread_affinity.h priority_queue.h address_utils.h
-dw_node.o: request.h connection.h
-message.o: message.h
-address_utils.o: address_utils.h dw_debug.h
-node-fwd.o: message.h timespec.h
-priority_queue.o: priority_queue.h
-queue.o : queue.h
-request.o: request.h message.h priority_queue.h dw_debug.h
-test_ccmd.o: ccmd.h message.h distrib.h dw_debug.h
-test_message.o: message.h dw_debug.h
+dw_client.o: dw_debug.h distrib.h message.h connection.h request.h
+dw_client.o: priority_queue.h queueing_common.h timespec.h ccmd.h queue.h
+dw_client.o: address_utils.h
+dw_node.o: dw_debug.h message.h timespec.h thread_affinity.h priority_queue.h
+dw_node.o: queueing_common.h sched_attr.h request.h connection.h
+dw_node.o: address_utils.h dw_poll.h
+dw_poll.o: dw_poll.h dw_debug.h
+message.o: message.h dw_debug.h
+priority_queue.o: priority_queue.h queueing_common.h
+queue.o: queue.h queueing_common.h
+request.o: request.h message.h priority_queue.h queueing_common.h dw_debug.h
+test_ccmd.o: ccmd.h queue.h queueing_common.h message.h distrib.h dw_debug.h
 test_distrib.o: distrib.h
-test_pqueue.o: priority_queue.h dw_debug.h
-test_queue.o: queue.h dw_debug.h
+test_message.o: message.h dw_debug.h
+test_pqueue.o: priority_queue.h queueing_common.h dw_debug.h
+test_queue.o: queue.h queueing_common.h dw_debug.h ccmd.h message.h distrib.h
+test_thread_affinity.o: thread_affinity.h dw_debug.h
 test_timespec.o: timespec.h dw_debug.h
-thread_affinity.o: thread_affinity.h
+thread_affinity.o: thread_affinity.h dw_debug.h
