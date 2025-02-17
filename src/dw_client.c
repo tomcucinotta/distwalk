@@ -154,7 +154,7 @@ void *thread_sender(void *data) {
 
     for (int i = 0; i < num_send_pkts; i++) {
         int pkt_id = first_pkt_id + i;
-        m = conn_send_message(conn);
+        m = conn_prepare_send_message(conn);
         ccmd_dump(ccmd, m);
 
         // remember time of send relative to ts_start
@@ -303,7 +303,7 @@ void *thread_receiver(void *data) {
         conn_info_t *conn = conn_get_by_id(thr_data.conn_id);
 
         recv = conn_recv(conn);
-        while (recv > 0 && (m = conn_next_message(conn))) {
+        while (recv > 0 && (m = conn_prepare_recv_message(conn))) {
             #ifdef DW_DEBUG
                 msg_log(m, "received message: ");
             #endif

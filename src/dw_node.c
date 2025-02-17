@@ -348,7 +348,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
 
     int sock = conns[fwd_conn_id].sock;
     assert(sock != -1);
-    message_t *m_dst = conn_send_message(&conns[fwd_conn_id]);
+    message_t *m_dst = conn_prepare_send_message(&conns[fwd_conn_id]);
     assert(m_dst->req_size >= fwd.pkt_size);
 
     // skip possible FORWARD_CONTINUE cmds in non-branched multi-fwd
@@ -463,7 +463,7 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
 
 // returns 1 if reply sent correctly, 0 otherwise
 int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* infos) {
-    message_t *m_dst = conn_send_message(&conns[req->conn_id]);
+    message_t *m_dst = conn_prepare_send_message(&conns[req->conn_id]);
     reply_opts_t *opts = cmd_get_opts(reply_opts_t, cmd);
     assert(m_dst->req_size >= opts->resp_size);
 
@@ -668,7 +668,7 @@ int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos) {
     if (conn->serialize_request && conn->req_list != NULL)
         return 1;
 
-    for (message_t *m = conn_next_message(conn); m != NULL; m = conn_next_message(conn)) {
+    for (message_t *m = conn_prepare_recv_message(conn); m != NULL; m = conn_prepare_recv_message(conn)) {
         // FORWARD finished
         if (message_first_cmd(m)->cmd == EOM) {
             dw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), 
