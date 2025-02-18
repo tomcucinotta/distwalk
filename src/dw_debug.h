@@ -19,9 +19,9 @@ __attribute__((weak)) __thread char thread_name[16];
     struct timespec __ts; \
     clock_gettime(CLOCK_MONOTONIC, &__ts);\
     if (thread_name) \
-      printf("[%ld.%09ld][%s] " msg, __ts.tv_sec, __ts.tv_nsec, thread_name, ## __VA_ARGS__); \
+      printf("[%ld.%09ld][%s][%s:%d] " msg, __ts.tv_sec, __ts.tv_nsec, thread_name, __FILE__, __LINE__, ## __VA_ARGS__); \
     else \
-      printf("[%ld.%09ld] " msg, __ts.tv_sec, __ts.tv_nsec, ## __VA_ARGS__); \
+      printf("[%ld.%09ld][%s:%d] " msg, __ts.tv_sec, __ts.tv_nsec, __FILE__, __LINE__, ## __VA_ARGS__); \
     fflush(stdout);  \
   } while (0);
 

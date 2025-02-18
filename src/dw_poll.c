@@ -71,7 +71,7 @@ void dw_select_add_wr(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t a
 }
 
 int dw_poll_add(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
-    dw_log("dw_poll_add(): p_poll=%p, fd=%d, flags=%08x, aux=%lu\n", p_poll, fd, flags, aux);
+    dw_log("dw_poll_add(): fd=%d, p_poll=%p, flags=%08x, aux=%lu\n", fd, p_poll, flags, aux);
     int rv = 0;
     switch (p_poll->poll_type) {
     case DW_SELECT:
@@ -120,7 +120,7 @@ int dw_poll_add(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
  * epoll has it still registered, but with a clear events interest list
  */
 int dw_poll_mod(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux) {
-    dw_log("dw_poll_mod(): p_poll=%p, fd=%d, flags=%08x, aux=%lu\n", p_poll, fd, flags, aux);
+    dw_log("dw_poll_mod(): fd=%d, p_poll=%p, flags=%08x, aux=%lu\n", fd, p_poll, flags, aux);
     int rv = 0;
     switch (p_poll->poll_type) {
     case DW_SELECT: {

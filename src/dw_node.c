@@ -322,7 +322,6 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
         }
 
         if (fwd.proto == TCP) {
-            dw_log("Adding fd %d to dw_poll %p\n", clientSocket, p_poll);
             check(dw_poll_add(p_poll, clientSocket, DW_POLLOUT | DW_POLLONESHOT, i2l(CONNECT, fwd_conn_id)) == 0);
 
             dw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { addr.sin_addr.s_addr }),
@@ -371,8 +370,6 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
 #ifdef DW_DEBUG
     msg_log(m_dst, "  f: ");
 #endif
-    dw_log("  f: cmds[] has %d items, pkt_size is %u\n", msg_num_cmd(m_dst),
-           m_dst->req_size);
 
     if (conn_start_send(&conns[fwd_conn_id], addr) < 0)
         return NULL;
@@ -467,16 +464,12 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
     reply_opts_t *opts = cmd_get_opts(reply_opts_t, cmd);
     assert(m_dst->req_size >= opts->resp_size);
 
-    dw_log("conn_id:%d, m_dst: %p, send_buf: %p\n", req->conn_id, m_dst, conns[req->conn_id].send_buf);
-
     m_dst->req_id = m->req_id;
     m_dst->req_size = opts->resp_size;
     m_dst->cmds[0].cmd = EOM;
     m_dst->status = m->status;
 
     dw_log("Replying to req %u (conn_id=%d)\n", m->req_id, req->conn_id);
-    dw_log("  cmds[] has %d items, pkt_size is %u\n", msg_num_cmd(m_dst),
-           m_dst->req_size);
 #ifdef DW_DEBUG
     msg_log(m_dst, "REPLY ");
 #endif
@@ -703,7 +696,6 @@ int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos) {
 }
 
 int establish_conn(dw_poll_t *p_poll, int conn_id) {
-    dw_log("establish_conn() for conn %d\n", conn_id);
     int val;
     socklen_t len = sizeof(val);
     sys_check(getsockopt(conns[conn_id].sock, SOL_SOCKET, SO_ERROR, (void*)&val, &len));
@@ -770,7 +762,6 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
 
 void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t type, conn_worker_info_t* infos) {
     conn_info_t *conn = conn_get_by_id(conn_id);
-
     dw_log("event_type=%s, conn_id=%d\n", get_event_str(type), conn_id);
 
     if (type == TIMER) {
@@ -799,13 +790,14 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
         // we need the send_messages() below to still be tried afterwards
     }
     if ((pflags & DW_POLLOUT) && conn->curr_send_size > 0 && conn_get_status(conn) != CONNECTING && conn_get_status(conn) != NOT_INIT) {
-        dw_log("calling send_mesg()\n");
+        dw_log("calling send_mesg() to conn_id=%d\n", conn_id);
         if (!conn_send(conn))
             goto err;
     }
     dw_log("conns[%d].status=%d (%s)\n", conn_id, conn_get_status(conn), conn_status_str(conn_get_status(conn)));
 
     // check whether we have new or leftover messages to process
+    dw_log("calling obtain_messages() from conn_id=%d's recv buffer\n", conn_id)
     if (!obtain_messages(conn_id, p_poll, infos))
         goto err;
 
@@ -932,7 +924,6 @@ void* storage_worker(void* args) {
     }
 
     while (running) {
-        dw_log("dw_poll_wait()ing...\n");
         int nfds = dw_poll_wait(p_poll);
         if (nfds == -1) {
             perror("dw_poll_wait() returned error");
@@ -1081,8 +1072,8 @@ void* conn_worker(void* args) {
             int event_data;
             event_t event_type;
             l2i(aux, &event_type, (uint32_t*) &event_data);
-            dw_log("event_type=%s, event_data=%d (fd or conn_id)\n", get_event_str(event_type), event_data);
-
+            dw_log("event_type=%s, event_data=%d (conn_id if event_type==SOCKET, polled fd otherwise)\n", get_event_str(event_type), event_data);
+            
             if (event_type == LISTEN) { // New connection (TCP)
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);

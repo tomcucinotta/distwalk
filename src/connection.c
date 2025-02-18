@@ -270,6 +270,7 @@ message_t* conn_prepare_send_message(conn_info_t *conn) {
 }
 
 message_t* conn_prepare_recv_message(conn_info_t *conn) {
+    dw_log("Check whether we have new or leftover messages to process...\n");
     unsigned long msg_size = conn->curr_recv_buf - conn->curr_proc_buf;
     message_t *m = (message_t *)conn->curr_proc_buf;
 
