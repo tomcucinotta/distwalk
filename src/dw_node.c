@@ -328,7 +328,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
         }
 
         if (fwd.proto == TCP) {
-            check(dw_poll_add(p_poll, clientSocket, DW_POLLOUT | DW_POLLONESHOT, i2l(CONNECT, fwd_conn_id)) == 0);
+            check(dw_poll_add(p_poll, clientSocket, DW_POLLOUT | DW_POLLIN, i2l(CONNECT, fwd_conn_id)) == 0);
 
             dw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { addr.sin_addr.s_addr }),
                    ntohs(addr.sin_port));
