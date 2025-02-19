@@ -28,3 +28,5 @@ client --nd 1 -C 1000
 
 strace_client --nd=0 2>&1 | grep sockopt | grep 'TCP_NODELAY, \[0\]'
 strace_client --nd=1 2>&1 | grep sockopt | grep 'TCP_NODELAY, \[1\]'
+
+client --ws -C 0
