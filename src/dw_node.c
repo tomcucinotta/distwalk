@@ -476,9 +476,12 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
 #endif
 
     conn_info_t *conn = conn_get_by_id(req->conn_id);
+    // cannot access req after conn_req_remove()
+    int conn_id = req->conn_id;
+    struct sockaddr_in target = req->target;
     conn_req_remove(conn, req);
     infos->active_reqs--;
-    return conn_start_send(&conns[req->conn_id], req->target);
+    return conn_start_send(&conns[conn_id], target);
 }
 
 void compute_for(unsigned long usecs) {
