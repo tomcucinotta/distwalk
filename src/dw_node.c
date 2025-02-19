@@ -1083,9 +1083,8 @@ void* conn_worker(void* args) {
                 dw_log("Accepted connection from: %s:%d\n",
                        inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
                 setnonblocking(conn_sock);
-                int val = 1;
                 sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY,
-                                     (void *)&val, sizeof(val)));
+                                     (void *)&no_delay, sizeof(no_delay)));
 
                 int conn_id = conn_alloc(conn_sock, addr, TCP);
                 if (conn_id < 0) {
@@ -1221,7 +1220,7 @@ static struct argp_option argp_node_options[] = {
     {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access (bypass read/write OS caches)"},
     {"thread-affinity",   THREAD_AFFINITY,  "auto|cX,cZ[,cA-cD[:step]]",      0,  "Thread-to-core pinning (automatic or user-defined list using taskset syntax)"},
     {"sched-policy",      SCHED_POLICY,     "other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us", 0,  "Scheduling policy (defaults to other)"},
-    {"no-delay",          NO_DELAY,         "0|1",                              0,  "Set value of TCP_NODELAY socket option"},
+    {"no-delay",          NO_DELAY,         "0|1",                            0,  "Set value of TCP_NODELAY socket option"},
     {"nd",                NO_DELAY,         "0|1", OPTION_ALIAS },
     {"help",              HELP,              0,                               0,  "Show this help message", 1 },
     {"usage",             USAGE,             0,                               0,  "Show a short usage message", 1 },

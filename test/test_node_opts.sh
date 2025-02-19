@@ -36,4 +36,14 @@ node_bg -b :7000://:tcp &> $tmp
 cat $tmp | grep -q "Error"
 kill_all SIGINT
 
+strace_node_bg --nd=0 &> $tmp
+client
+kill_all SIGINT
+grep sockopt $tmp | grep 'TCP_NODELAY, \[0\]'
+
+strace_node_bg --nd=1 &> $tmp
+client
+kill_all SIGINT
+grep sockopt $tmp | grep 'TCP_NODELAY, \[1\]'
+
 rm $tmp
