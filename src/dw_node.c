@@ -153,6 +153,7 @@ storage_worker_info_t storage_worker_info;
 int conn_threads = 1;
 int no_delay = 1;
 atomic_int next_thread_cnt = 0;
+int use_wait_spinning = 0;
 
 typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
 accept_mode_t accept_mode = AM_CHILD;
@@ -1190,6 +1191,7 @@ enum argp_node_option_keys {
     SYNC,
     ODIRECT,
     NO_DELAY,
+    WAIT_SPIN,
     BACKLOG_LENGTH,
 };
 
@@ -1222,6 +1224,8 @@ static struct argp_option argp_node_options[] = {
     {"sched-policy",      SCHED_POLICY,     "other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us", 0,  "Scheduling policy (defaults to other)"},
     {"no-delay",          NO_DELAY,         "0|1",                            0,  "Set value of TCP_NODELAY socket option"},
     {"nd",                NO_DELAY,         "0|1", OPTION_ALIAS },
+    { "wait-spin",        WAIT_SPIN,         0,                               0,  "Spin-wait instead of sleeping till next received packet"},
+    { "ws",               WAIT_SPIN,         0,  OPTION_ALIAS },
     {"help",              HELP,              0,                               0,  "Show this help message", 1 },
     {"usage",             USAGE,             0,                               0,  "Show a short usage message", 1 },
     { 0 }
@@ -1272,6 +1276,9 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
     case NO_DELAY:
         no_delay = atoi(arg);
         check(no_delay == 0 || no_delay == 1);
+        break;
+    case WAIT_SPIN:
+        use_wait_spinning = 1;
         break;
     case STORAGE_OPT_ARG:
         if (strlen(arg) >= MAX_STORAGE_PATH_STR) {

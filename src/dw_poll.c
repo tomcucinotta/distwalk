@@ -3,6 +3,8 @@
 #include "dw_poll.h"
 #include "dw_debug.h"
 
+extern int use_wait_spinning;
+
 // return value useful to return failure if we allocate memory here in the future
 int dw_poll_init(dw_poll_t *p_poll, dw_poll_type_t type) {
     p_poll->poll_type = type;
@@ -193,19 +195,22 @@ int dw_poll_wait(dw_poll_t *p_poll) {
                 max_fd = p_poll->u.select_fds.wr_fd[i];
         }
         dw_log("select()ing: max_fd=%d\n", max_fd);
-        rv = select(max_fd + 1, &p_poll->u.select_fds.rd_fds, &p_poll->u.select_fds.wr_fds, &p_poll->u.select_fds.ex_fds, NULL);
+        struct timeval null_tout = { .tv_sec = 0, .tv_usec = 0 };
+        rv = select(max_fd + 1, &p_poll->u.select_fds.rd_fds, &p_poll->u.select_fds.wr_fds, &p_poll->u.select_fds.ex_fds, use_wait_spinning ? &null_tout : NULL);
         // make sure we don't wastefully iterate if select() returned 0 fds ready or error
         p_poll->u.select_fds.iter = rv > 0 ? 0 : p_poll->u.select_fds.n_rd_fd + p_poll->u.select_fds.n_wr_fd;
         break;
     case DW_POLL:
         dw_log("poll()ing: n_pollfds=%d\n", p_poll->u.poll_fds.n_pollfds);
-        rv = poll(p_poll->u.poll_fds.pollfds, p_poll->u.poll_fds.n_pollfds, -1);
+        rv = poll(p_poll->u.poll_fds.pollfds, p_poll->u.poll_fds.n_pollfds,
+                  use_wait_spinning ? 0 : -1);
         // make sure we don't wastefully iterate if poll() returned 0 fds ready or error
         p_poll->u.poll_fds.iter = rv > 0 ? 0 : p_poll->u.poll_fds.n_pollfds;
         break;
     case DW_EPOLL:
         dw_log("epoll_wait()ing: epollfd=%d\n", p_poll->u.epoll_fds.epollfd);
-        rv = epoll_wait(p_poll->u.epoll_fds.epollfd, p_poll->u.epoll_fds.events, MAX_POLLFD, -1);
+        rv = epoll_wait(p_poll->u.epoll_fds.epollfd, p_poll->u.epoll_fds.events, MAX_POLLFD,
+                        use_wait_spinning ? 0 : -1);
         p_poll->u.epoll_fds.iter = 0;
         if (rv >= 0)
             p_poll->u.epoll_fds.n_events = rv;

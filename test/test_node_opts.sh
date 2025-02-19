@@ -46,4 +46,8 @@ client
 kill_all SIGINT
 grep sockopt $tmp | grep 'TCP_NODELAY, \[1\]'
 
+node_bg --ws
+client
+kill_all SIGINT
+
 rm $tmp
