@@ -51,6 +51,18 @@ two executables are created:
 - src/dw_client_tsan: the client program with logging and thread sanitizer activated
 - src/dw_node_tsan: the server program with logging and thread sanitizer activated
 
+DOCKER BUILD
+----------------------------------------------------------------------
+1. Build docker image:
+```console
+docker build -t distwalk .
+```
+2. Run docker container:
+```console
+docker run -it distwalk
+```
+
+
 EXAMPLES OF USE
 ----------------------------------------------------------------------
 The classic and simplest scenario is the one of a client-server
@@ -59,9 +71,9 @@ size, and expecting back responses of a different fixed size.
 
 This example scenario is achieved launching on the server the simple
 command:
-
+```console
   [myuser@myserver distwalk/src]$ ./dw_node
-
+```
 then launching on the client the following command, with which we are
 submitting 10 requests asking 100us of computation, at a rate of 1000 pkt/s
 

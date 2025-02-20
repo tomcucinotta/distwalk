@@ -2,7 +2,7 @@
 FROM gcc:latest as build
 COPY ./src /distwalk
 WORKDIR /distwalk
-RUN make clean && make
+RUN make clean all 
 
 FROM busybox:glibc AS distwalk
 COPY --from=build distwalk /distwalk
