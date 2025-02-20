@@ -38,18 +38,18 @@ root folder:
   make
 
 two executables are created:
-- src/dw_client: the client program, try typing ./dw_client -h
-- src/dw_node: the server program, try typing ./dw_node -h
+- `src/dw_client`: the client program, try typing ./dw_client -h
+- `src/dw_node`: the server program, try typing ./dw_node -h
 
 For debug/development purposes, compile the executables, from the root folder:
 
   make debug
 
 two executables are created:
-- src/dw_client_debug: the client program with logging activated
-- src/dw_node_debug: the server program with logging activated
-- src/dw_client_tsan: the client program with logging and thread sanitizer activated
-- src/dw_node_tsan: the server program with logging and thread sanitizer activated
+- `src/dw_client_debug`: the client program with logging activated
+- `src/dw_node_debug`: the server program with logging activated
+- `src/dw_client_tsan`: the client program with logging and thread sanitizer activated
+- `src/dw_node_tsan`: the server program with logging and thread sanitizer activated
 
 DOCKER BUILD
 ----------------------------------------------------------------------
@@ -72,12 +72,14 @@ size, and expecting back responses of a different fixed size.
 This example scenario is achieved launching on the server the simple
 command:
 ```console
-  [myuser@myserver distwalk/src]$ ./dw_node
+./dw_node
 ```
 then launching on the client the following command, with which we are
 submitting 10 requests asking 100us of computation, at a rate of 1000 pkt/s
-
-[myuser@myclient distwalk/src]$ ./src/dw_client -n 10 -r 1000 -C 100us
+```bash
+./dw_client -n 10 -r 1000 -C 100us
+```
+```console
 Configuration:
   clienthost=0.0.0.0:0
   serverhost=127.0.0.1:7891
@@ -106,17 +108,19 @@ t: 6211 us, elapsed: 144 us, req_id: 6, thr_id: 0, sess_id: 0
 t: 7213 us, elapsed: 133 us, req_id: 7, thr_id: 0, sess_id: 0
 t: 8303 us, elapsed: 125 us, req_id: 8, thr_id: 0, sess_id: 0
 t: 9212 us, elapsed: 127 us, req_id: 9, thr_id: 0, sess_id: 0
+```
 
 The following command spawns 4 threads submitting concurrently
-requests to the server a.b.c.d (each thread submits 5000 requests needing
+requests to the server `a.b.c.d` (each thread submits 5000 requests needing
 a 1ms of processing time each, at a rate of 250 pkt/s):
-
-  [myuser@myclient distwalk/src]$ ./dw_client --to a.b.c.d --nt 4 -n 5000 -r 250 -C 1000
-
+```bash
+  ./dw_client --to a.b.c.d --nt 4 -n 5000 -r 250 -C 1000
+```
 The following command spawns 3 threads, with each of them using 10
 sessions to submit the 5000 packets as in the above command, so each
 session will send 500 requests at a rate of 250 pkt/s (at the end of
 each session, each client thread closes the connection and establishes
 a new connection for the subsequent session)
-
-  [myuser@myclient distwalk/src]$ ./dw_client --nt 3 --ns 10 -n 5000 -r 250 -C 1000
+```bash
+  ./dw_client --nt 3 --ns 10 -n 5000 -r 250 -C 1000
+```
