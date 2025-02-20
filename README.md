@@ -27,6 +27,15 @@ connection is closed and re-established for each new session.
 The client, or the node, can forward a sequence of instructions
 to N different nodes and await the response of M nodes (N>=M). 
 
+More information on the objectives, motivations, design, architecture
+and internals of DistWalk can be found in the paper:
+
+R. Andreoli, T. Cucinotta. "DistWalk: a Distributed Workload Emulator,"
+(to appear) in Proceedings of the 25th IEEE international Symposium on
+Cluster, Cloud and Internet Computing (IEEE CCGRID 2025), May 19-22,
+2025, Tromsø, Norway.
+See also: https://retis.santannapisa.it/~tommaso/papers/ccgrid25.php
+
 COMPILING
 ----------------------------------------------------------------------
 This program has been developed and tested on a Linux Ubuntu system,
