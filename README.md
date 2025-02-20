@@ -1,4 +1,4 @@
-DistWalk - Distributed workload benchmarking tool for Linux
+DistWalk - Distributed end-to-end benchmarking tool for Linux
 ======================================================================
 Copyright 2016-2025 by Tommaso Cucinotta (firstname dot lastname at santannapisa dot it)
 
