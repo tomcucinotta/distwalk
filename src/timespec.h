@@ -30,6 +30,11 @@ static inline long ts_sub_us(struct timespec a, struct timespec b) {
     return (c.tv_sec * 1000000) + c.tv_nsec / 1000;
 }
 
+static inline long ts_sub_ns(struct timespec a, struct timespec b) {
+    struct timespec c = ts_sub(a, b);
+    return (c.tv_sec * 1000000000) + c.tv_nsec;
+}
+
 static inline int ts_leq(struct timespec a, struct timespec b) {
     struct timespec ts = ts_sub(a, b);
     return (((signed long) ts.tv_sec) < 0

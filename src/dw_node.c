@@ -162,6 +162,11 @@ int listen_backlog = 5;
 
 int terminationfd; // special signalfd to handle termination
 
+// -1: old frequency-invariant behavior
+//  0: automatically compute calibration value, store it to ~/.dw_loops_per_usec, and reload it from there
+// >0: set explicitly calibration value
+double loops_per_usec = -1.0;
+
 int safe_write(int fd, unsigned char *buf, size_t len) {
     while (len > 0) {
         int written;
@@ -484,13 +489,57 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
     return conn_start_send(&conns[conn_id], target);
 }
 
-void compute_for(unsigned long usecs) {
+void compute_for_freqinv(unsigned long usecs) {
     struct timespec ts_beg, ts_end;
     dw_log("COMPUTE: computing for %lu usecs\n", usecs);
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_beg);
     do {
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
     } while (ts_sub_us(ts_end, ts_beg) < usecs);
+}
+
+unsigned long __attribute__((optimize("O0"))) loop() {
+    long acc = 0;
+    for (int i = 0; i < 100; i++)
+        acc += rand();
+    return acc;
+}
+
+double __attribute__((optimize("O0"))) compute_loops_per_usec() {
+    unsigned long elapsed_min_ns = 0;
+    struct timespec ts_beg, ts_end;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_beg);
+    for (int i = 0; i < 100000; i++) {
+        loop();
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
+        unsigned long elapsed_ns = ts_sub_ns(ts_end, ts_beg);
+        if (elapsed_min_ns == 0 || elapsed_ns < elapsed_min_ns)
+            elapsed_min_ns = elapsed_ns;
+        ts_beg = ts_end;
+    }
+    return 1000.0 / elapsed_min_ns;
+}
+
+void compute_for(unsigned long usecs) {
+    if (loops_per_usec == -1.0) {
+        compute_for_freqinv(usecs);
+        return;
+    }
+
+    unsigned long nloops = usecs * loops_per_usec;
+    dw_log("COMPUTE: computing for %lu usecs (nloops %ld)\n", usecs, nloops);
+
+    unsigned long elapsed_min_ns = 0;
+    struct timespec ts_beg, ts_end;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_beg);
+    for (int i = 0; i < nloops; i++) {
+        loop();
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
+        unsigned long elapsed_ns = ts_sub_ns(ts_end, ts_beg);
+        if (elapsed_min_ns == 0 || elapsed_ns < elapsed_min_ns)
+            elapsed_min_ns = elapsed_ns;
+        ts_beg = ts_end;
+    }
 }
 
 // Needed to perform writes with O_DIRECT and ensure that:
@@ -1195,6 +1244,7 @@ enum argp_node_option_keys {
     ODIRECT,
     NO_DELAY,
     WAIT_SPIN,
+    LOOPS_PER_USEC,
     BACKLOG_LENGTH,
 };
 
@@ -1227,8 +1277,9 @@ static struct argp_option argp_node_options[] = {
     {"sched-policy",      SCHED_POLICY,     "other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us", 0,  "Scheduling policy (defaults to other)"},
     {"no-delay",          NO_DELAY,         "0|1",                            0,  "Set value of TCP_NODELAY socket option"},
     {"nd",                NO_DELAY,         "0|1", OPTION_ALIAS },
-    { "wait-spin",        WAIT_SPIN,         0,                               0,  "Spin-wait instead of sleeping till next received packet"},
-    { "ws",               WAIT_SPIN,         0,  OPTION_ALIAS },
+    {"wait-spin",         WAIT_SPIN,         0,                               0,  "Spin-wait instead of sleeping till next received packet"},
+    {"ws",                WAIT_SPIN,         0, OPTION_ALIAS },
+    {"loops-per-usec",    LOOPS_PER_USEC,    "value",                         0,  "Set loops_per_usec calibration parameter (0: handle it automatically in ~/.dw_loops_per_usec; -1: use frequency-invariant mode)"},
     {"help",              HELP,              0,                               0,  "Show this help message", 1 },
     {"usage",             USAGE,             0,                               0,  "Show a short usage message", 1 },
     { 0 }
@@ -1282,6 +1333,10 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case WAIT_SPIN:
         use_wait_spinning = 1;
+        break;
+    case LOOPS_PER_USEC:
+        loops_per_usec = atof(arg);
+        check(loops_per_usec == -1 || loops_per_usec >= 0);
         break;
     case STORAGE_OPT_ARG:
         if (strlen(arg) >= MAX_STORAGE_PATH_STR) {
@@ -1510,6 +1565,34 @@ int main(int argc, char *argv[]) {
     }
 
     addr_parse(input_args.nodehostport, &serverAddr);
+
+    if (loops_per_usec == 0.0) {
+        char *dirname = getenv("HOME");
+        if (!dirname)
+            dirname = ".";
+#ifdef DW_DEBUG
+        char *lps_fname = ".dw_loops_per_usec_dbg";
+#else
+        char *lps_fname = ".dw_loops_per_usec";
+#endif
+        char *fname = malloc(strlen(dirname) + 2 + strlen(lps_fname));
+        sprintf(fname, "%s/%s", dirname, lps_fname);
+        FILE *f = fopen(fname, "r");
+        if (f) {
+            dw_log("Loading loops_per_sec from: %s\n", fname);
+            if (fscanf(f, "%lf", &loops_per_usec) != 1)
+                dw_log("Could not load loops_per_sec from: %s\n", fname);
+            fclose(f);
+        }
+        if (loops_per_usec == 0.0) {
+            loops_per_usec = compute_loops_per_usec();
+            dw_log("Storing loops_per_sec to: %s\n", fname);
+            FILE *f = fopen(fname, "w");
+            fprintf(f, "%lf\n", loops_per_usec);
+            fclose(f);
+        }
+    }
+    dw_log("Using loops_per_usec: %g\n", loops_per_usec);
 
     for (int i = 0; i < input_args.num_threads; i++) {
         /*---- Create the socket(s). The three arguments are: ----*/
