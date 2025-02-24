@@ -2,8 +2,6 @@ servers:
   hosts:
     pcroom1:
       ansible_user: adm-pcroom
-    pcroom2:
-      ansible_user: adm-pcroom
     pcroom13:
       ansible_user: adm-pcroom
     pcroom14:
