@@ -239,13 +239,66 @@ CLIENT DOCUMENTATION
 ----------------------------------------------------------------------
 The client `dw_client` supports the following command-line options:
 
+```  --to=[tcp|udp:[//]][host][:port]```
+
+Set the target node host, port and protocol. All elements can be specified or not, see the description of the -F command-line option above for details.
+
 ```  -b, --bind-addr=host[:port]|:port```
 
 Set explicitly the bind address or name, and the bind port, for the client.
 
-```      --conn-times```
+```  -n, --num-pkts=n|auto```
+
+Set the number of requests sent by each thread (across all sessions).
+
+```  --num-sessions=n, --ns=n```
+
+Set the number of sessions each client thread establishes with the (initial) distwalk node. The overall number of requests to be submitted, specified with `-n`, is evenly split across the various sessions. If this option is not used, each thread submits its overall number of requests within a single session.
+
+```  --per-session-output, --pso```
+
+Let the client output the response times obtained for each session, at the end of the session, rather than at the end of the program. this implies some extra delay between sessions, but it requires the client to save on the needed memory.
+
+```  --ps=nbytes|prob:field=val[,field=val]```
+
+Set the payload size of the sent requests, or their probability distribution (see below for details on how to specify distributions).
+
+```  --num-threads=n, --nt=n```
+
+Set the number of client threads, corresponding to parallel sessions that are opened with the (initial) distwalk node, each submitting the overall number of requests as specified with `-n`. If this option is not used, only one thread will be submitting requests.
+
+```  -p, --period=usec|prob:field=val[,field=val]``
+
+Set the inter-spacing period to be used by each sender thread, between submitting two consecutive requests.
+
+```  --rate-step-secs=sec, --rss=sec```
+
+Set the duration of each rate-step.
+
+```  -r, --rate=npkt```
+
+Set the packet sending rate (in pkts per sec).
+
+```  --stag-send```
+
+Enable staggered send among sender threads. This allows to avoid stressing the server with all requests hitting it at the same time.
+
+```  --conn-times```
 
 Add also the connect() times to the final report output by the client.
+
+```  --no-delay=0|1, --nd=0|1```
+
+Enable or disable the TCP_NODELAY socket option (default is enabled).
+
+```  --non-block```
+
+Tell each client thread to perform a busy-wait loop instead of waiting, till the point in time in which the next request is to be sent.
+This id one by setting the socket in SOCK_NONBLOCK mode.
+
+```  --wait-spin, --ws```
+
+Tell each client thread to perform a busy-wait loop instead of waiting, till the point in time in which the next request is to be sent.
 
 ```  -C, --comp-time=usec|prob:field=val[,field=val]```
 
@@ -253,13 +306,24 @@ Add to the sequence of operations submitted per-request to the server,
 a COMPUTE operation, with the specified processing time, or processing
 time distribution (see specifying distributions below).
 
-```  -f, --script-filename=path/to/file```
+```  -L, --load-data=nbytes|prob:field=val[,field=val]```
 
-Read the sequence of commands to be submitted per-request operations
-list, as well as other `dw_client` options, from the specified script
-file, as though its contents were added to the command-line in the
-point where this option is used.  This can be intermixed with other
-regular command-line options.
+Add a LOAD operation to the submitted per-request operations list,
+with the specified data payload size, in bytes (see below for details
+on how to specify distributions).
+
+```  --load-offset=nbytes|prob:field=val[,field=val]```
+
+Set the offset to be used, or the distribution it has to be drawn from,
+for the subsequent LOAD operations.
+
+```  -S, --store-data=nbytes|prob:field=val[,field=val][,nosync]```
+
+Add to the per-request operations list to be submitted, a STORE operation, specifying its payload size in bytes, or its distribution (see below for details on how to specify distributions).
+
+```  --store-offset=nbytes|prob:field=val[,field=val]```
+
+Set the offset value, or its distribution, for the subsequent STORE operations.
 
 ```  -F, --forward=ip:port[,ip:port,...][,timeout=usec][,retry=n][,branch][,nack=n]```
 
@@ -285,53 +349,9 @@ as a FORWARD operation matching its own REPLY. For example:
 
   ```-F ip1:p1,branch -C 10ms -R -F ip2:p2,branch -C 20ms -R```
 
-```  --load-offset=nbytes|prob:field=val[,field=val]```
+```  -R, --rs[=nbytes|prob:field=val[,field=val]]```
 
-Set the offset to be used, or the distribution it has to be drawn from,
-for the subsequent LOAD operations.
-
-```  -L, --load-data=nbytes|prob:field=val[,field=val]```
-
-Add a LOAD operation to the submitted per-request operations list,
-with the specified data payload size, in bytes (see below for details
-on how to specify distributions).
-
-```  --no-delay=0|1, --nd=0|1```
-
-Enable or disable the TCP_NODELAY socket option (default is enabled).
-
-```  --non-block```
-
-Tell each client thread to perform a busy-wait loop instead of waiting, till the point in time in which the next request is to be sent.
-This id one by setting the socket in SOCK_NONBLOCK mode.
-
-```  --num-sessions=n, --ns=n```
-
-Set the number of sessions each client thread establishes with the (initial) distwalk node. The overall number of requests to be submitted, specified with `-n`, is evenly split across the various sessions. If this option is not used, each thread submits its overall number of requests within a single session.
-
-```  --num-threads=n, --nt=n```
-
-Set the number of client threads, corresponding to parallel sessions that are opened with the (initial) distwalk node, each submitting the overall number of requests as specified with `-n`. If this option is not used, only one thread will be submitting requests.
-
-```  -n, --num-pkts=n|auto```
-
-Set the number of requests sent by each thread (across all sessions).
-
-```  --per-session-output, --pso```
-
-Let the client output the response times obtained for each session, at the end of the session, rather than at the end of the program. this implies some extra delay between sessions, but it requires the client to save on the needed memory.
-
-```  --ps=nbytes|prob:field=val[,field=val]```
-
-Set the payload size of the sent requests, or their probability distribution (see below for details on how to specify distributions).
-
-```  -p, --period=usec|prob:field=val[,field=val]``
-
-Set the inter-spacing period to be used by each sender thread, between submitting two consecutive requests.
-
-```  --rate-step-secs=sec, --rss=sec```
-
-Set the duration of each rate-step.
+Add to the list of per-request operations to be submitted, a REPLY command. Optionally, specify the payload size, or the distribution its value has to be drawn from (see below for details on how to specify distributions).
 
 ```  --retry-num=n```
 
@@ -341,38 +361,34 @@ Set the number of connection retries in case of failure.
 
 Set the interval between subsequent connection retries.
 
-```  -r, --rate=npkt```
-
-Set the packet sending rate (in pkts per sec).
-
-```  -R, --rs[=nbytes|prob:field=val[,field=val]]```
-
-Add to the list of per-request operations to be submitted, a REPLY command. Optionally, specify the payload size, or the distribution its value has to be drawn from (see below for details on how to specify distributions).
-
-```  --stag-send```
-
-Enable staggered send among sender threads. This allows to avoid stressing the server with all requests hitting it at the same time.
-
-```  --store-offset=nbytes|prob:field=val[,field=val]```
-
-Set the offset value, or its distribution, for the subsequent STORE operations.
-
 ```  -s, --skip=n[,prob=val]```
 
 Skip the next `n` commands (with probability val, defaults to 1.0 if unspecified).
 
-```  -S, --store-data=nbytes|prob:field=val[,field=val][,nosync]```
+```  -f, --script-filename=path/to/file```
 
-Set the payload size in bytes, or its distribution, for the subsequent STORE operations.
-
-```  --to=[tcp|udp:[//]][host][:port]```
-
-Set the target node host, port and protocol. All elements can be specified or not, see the description of the -F command-line option above for details.
-
-```  --wait-spin, --ws```
-
-Tell each client thread to perform a busy-wait loop instead of waiting, till the point in time in which the next request is to be sent.
+Read the sequence of commands to be submitted per-request operations
+list, as well as other `dw_client` options, from the specified script
+file, as though its contents were added to the command-line in the
+point where this option is used.  This can be intermixed with other
+regular command-line options.
 
 ```  --usage, -h, --help```
 
 Show a short help message.
+
+Many parameters in the `dw_client` command-line can be specified as samples to be drawn from a probability distribution. The tool has a versatile syntax allowing for a wide range of specifications:
+- constant values: just use a number, but consider using 'k' or 'm' suffixes, to shorten thousands and millions, respectively; for time quantities, the default time-unit is in microseconds, but the suffixes 'ns', 'us', 'ms' or 's' allow for a more friendly syntax;
+  for example, 1500 requests can be specified as `-n 1500` or `-n 1.5k`; a COMPUTE operation with processing time of 10ms (= 10000us) can be specified as `-C 10000`, `-C 10000us`, `-C 10ms`, or even `-C 0.01s`;
+- probability distributions: the syntax is prob:value[,param=value[,...]]; different parameters are supported depending on the distribution:
+  - `exp:avg-val[,min=a][,max=b]`: samples are drawn from an exponential distribution with the specified average; if the optional min= and/or max= specifiers are used, then the distribution is truncated on the left and/or right, respectively;
+  - `unif:min=a,max=b`: samples are drawn from a uniform between a and b;
+    for example, a request inter-arrival time uniformly distributed between 10ms and 20ms, can be specified as: `-p unif:min=10ms,max=20ms`;
+  - `norm:avg-val,std=std-val`: samples are drawn from a Gaussian distribution with the specified average and standard deviation; if the optional min= and/or max= specifiers are used, then the distribution is truncated on the left and/or right, respectively;
+  - `lognorm:avg-val,std=std-val[,xval=avg-xval][,xstd=avg-xstd]`: samples are drawn from a LogNormal distribution with the specified average and standard deviation; if preferred, parameters of the supporing Gaussian distribution can be specified with the xavg and xstd parameters; the distribution can also be truncated using the usual min= and max= specifiers;
+  - `gamma:avg-val[,std=std-val][,k=k-val][,scale=s-val]`: samples are drawn from a Gamma distribution with the specified average and standard deviation, or, if preferred, with the specified k and scale values; the distribution can be truncated with the min= and max= specifiers;
+  - `aseq:min=a,max=b[,step=s-val]`: samples picked from an arithmetic progression starting at a, and increasing by 1 each time, or by the specified step s-val each time, up to the maximum value b; in addition to ramp-up scenarios, also ramp-down ones can be specified, specifying a negative step;
+    for example, a ramp-up workload starting at 100 reqs/s, and stepping up every second bu 10 reqs/s, up to 1000 reqs/s, is specified as: `-r seq:min=100,max=1000,step=10`;
+  - `gseq:min=a,max=b[,step-s-val]`: samples picked from a geometric progression starting at a, and multiplying by the specified step s-val each time, up to the maximum value b; the multiplier can be greater or lower than one, resulting in either increasing or decreasing progressions;
+  - `file:path/to/file[,sep=sep-char][,col=col-val][,unit=]`: samples are loaded from the specified column of the specified file (defaults to the first column), where columns on each line are assumed to be separated by the specified separator character (defaults to a comma); an optional unit specifier applies to all read values, causing their automatic rescaling;
+    for example, to load inter-arrival times and execution times from the 2nd and 4th column of a data.csv file, expressed in ms, use: `-C file:data.csv,col=2,unit=ms -p file:data.csv,col=4,unit=ms`
