@@ -293,12 +293,12 @@ Enable or disable the TCP_NODELAY socket option (default is enabled).
 
 ```  --non-block```
 
-Tell each client thread to perform a busy-wait loop instead of waiting, till the point in time in which the next request is to be sent.
+Tell each client thread to perform a busy-wait loop instead of blocking, while waiting for a connection to be established.
 This id one by setting the socket in SOCK_NONBLOCK mode.
 
 ```  --wait-spin, --ws```
 
-Tell each client thread to perform a busy-wait loop instead of waiting, till the point in time in which the next request is to be sent.
+Tell each client thread to perform a busy-wait loop instead of blocking, while waiting till the point in time in which the next request is to be sent.
 
 ```  -C, --comp-time=usec|prob:field=val[,field=val]```
 
