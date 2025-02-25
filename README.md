@@ -355,7 +355,7 @@ Add to the list of per-request operations to be submitted, a REPLY command. Opti
 
 ```  --retry-num=n```
 
-Set the number of connection retries in case of failure.
+Set the number of connection retries by the client to the (initial) node in case of failure. If unused, defaults to 0. When the maximum number of retries is reached with still connect() failure, the whole session is considered aborted, but the next session will start to connect(), if there is more than 1 session configured (see --ns).
 
 ```  --retry-period=msec```
 

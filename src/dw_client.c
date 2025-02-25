@@ -42,7 +42,7 @@ unsigned long default_resp_size = 512;
 
 int no_delay = 1;
 int use_per_session_output = 0;
-int conn_retry_num = 1;
+int conn_retry_num = 0;
 int conn_retry_period_ms = 200;
 int conn_nonblock = 0;
 int conn_times = 0;
@@ -255,11 +255,12 @@ void *thread_receiver(void *data) {
             // Try to connect client socket to the server
             dw_log("Connecting to %s:%d (sess_id=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), (int) (pkt_i / pkts_per_session));
             int rv = 0;
-            for(int conn_retry = 1; conn_retry <= conn_retry_num; conn_retry++) {
-                rv = try_connect(&clientSocket[thread_id], serveraddr);
-                if (rv == 0 || (rv == -1 && errno == EINPROGRESS)) {
-                    dw_log("CONNECTED after %d tries\n", conn_retry);
-                    rv = 0;
+            for (int conn_try = 1; conn_try <= conn_retry_num + 1; conn_try++) {
+                do {
+                    rv = try_connect(&clientSocket[thread_id], serveraddr);
+                } while (conn_nonblock && rv == -1 && errno == EINPROGRESS);
+                if (rv == 0) {
+                    dw_log("CONNECTED after %d attempts\n", conn_try);
                     break;
                 } else {
                     close(clientSocket[thread_id]);
@@ -267,7 +268,6 @@ void *thread_receiver(void *data) {
                 }
             }
 
-            
             if (conn_times)
                 clock_gettime(CLOCK_MONOTONIC, &ts2);
             // check if connection succeeded
@@ -443,7 +443,7 @@ static struct argp_option argp_client_options[] = {
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
     { "num-sessions",       NUM_SESSIONS,           "n",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
     { "ns",                 NUM_SESSIONS,           "n", OPTION_ALIAS},      
-    { "retry-num",          CONN_RETRY_NUM,         "n",                                          0, "Number of connection retries to the (initial) distwalk node in case of failure"},
+    { "retry-num",          CONN_RETRY_NUM,         "n",                                          0, "Number of connection retries to the (initial) distwalk node in case of failure (defaults to 0)"},
     { "retry-period",       CONN_RETRY_PERIOD,      "msec",                                       0, "Interval between subsequent connection retries to the (initial) distwalk node"},
     { "conn-times",         CONN_TIMES,              0,                                           0, "Output also connect() times"},
     { "non-block",          CONN_NONBLOCK,           0,                                           0, "Set SOCK_NONBLOCK on connect()"},
@@ -713,7 +713,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break;
     case CONN_RETRY_NUM:
         conn_retry_num = atoi(arg);
-        check(conn_retry_num >= 1);
+        check(conn_retry_num >= 0);
         break;
     case CONN_RETRY_PERIOD:
         conn_retry_period_ms = atoi(arg);
