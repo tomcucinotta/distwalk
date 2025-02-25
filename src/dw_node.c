@@ -1405,9 +1405,9 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
 void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct sockaddr_in serverAddr) {
     if (accept_mode == AM_CHILD || i == 0) {
         if (proto == TCP) {
-            conn_worker_infos[i].listen_sock = socket(PF_INET, SOCK_STREAM, 0);
+            conn_worker_infos[i].listen_sock = socket(AF_INET, SOCK_STREAM, 0);
         } else {
-            conn_worker_infos[i].listen_sock = socket(PF_INET, SOCK_DGRAM, 0);
+            conn_worker_infos[i].listen_sock = socket(AF_INET, SOCK_DGRAM, 0);
             int conn_id = conn_alloc(conn_worker_infos[i].listen_sock, serverAddr, UDP);
             conn_set_status_by_id(conn_id, READY);
         }

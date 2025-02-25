@@ -112,12 +112,12 @@ int try_connect(int* conn_sock, struct sockaddr_in target) {
     /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
     * this case) */
     if (proto == TCP) {
-        *conn_sock = socket(PF_INET, SOCK_STREAM | (conn_nonblock ? SOCK_NONBLOCK : 0), 0);
+        sys_check(*conn_sock = socket(AF_INET, SOCK_STREAM | (conn_nonblock ? SOCK_NONBLOCK : 0), 0));
         sys_check(setsockopt(*conn_sock, IPPROTO_TCP,
                             TCP_NODELAY, (void *)&no_delay,
                             sizeof(no_delay)));
     } else {
-        *conn_sock = socket(PF_INET, SOCK_DGRAM | (conn_nonblock ? SOCK_NONBLOCK : 0), 0);
+        *conn_sock = socket(AF_INET, SOCK_DGRAM | (conn_nonblock ? SOCK_NONBLOCK : 0), 0);
     }
 
     if (ntohs(myaddr.sin_port) != 0) {
