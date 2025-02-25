@@ -497,8 +497,14 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case NUM_PKTS:
         if (strcmp(arg, "auto") == 0)
             num_pkts = 0;
-        else
-            num_pkts = atoi(arg);
+        else {
+            double val;
+            if (sscanf_unit(arg, "%lf", &val, 0) != 1) {
+                fprintf(stderr, "Wrong argument to -n option: %s\n", arg);
+                exit(EXIT_FAILURE);
+            }
+            num_pkts = (long) val;
+        }
         break;
     case PERIOD:
         check(pd_parse_time(&send_period_us_pd, arg), "Wrong period specification");
