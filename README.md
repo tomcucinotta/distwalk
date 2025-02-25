@@ -132,9 +132,9 @@ a new connection for the subsequent session)
   ./dw_client --nt 3 --ns 10 -n 5000 -r 250 -C 1000
 ```
 
-DOCUMENTATION
+NODE/SERVER DOCUMENTATION
 ----------------------------------------------------------------------
-dw_node supports the following command-line options:
+The server `dw_node` supports the following command-line options:
 
 ```  -b, --bind-addr=[tcp|udp:[//]][host][:port]```
 
@@ -230,3 +230,149 @@ Enable direct disk access for LOAD and STORE operations (bypass read/write OS ca
 
 Periodically sync the written data on disk, issueing a fsync() system call on the
 storage file.
+
+```  --usage, -h, --help```
+
+Show a short help message.
+
+CLIENT DOCUMENTATION
+----------------------------------------------------------------------
+The client `dw_client` supports the following command-line options:
+
+```  -b, --bind-addr=host[:port]|:port```
+
+Set explicitly the bind address or name, and the bind port, for the client.
+
+```      --conn-times```
+
+Add also the connect() times to the final report output by the client.
+
+```  -C, --comp-time=usec|prob:field=val[,field=val]```
+
+Add to the sequence of operations submitted per-request to the server,
+a COMPUTE operation, with the specified processing time, or processing
+time distribution (see specifying distributions below).
+
+```  -f, --script-filename=path/to/file```
+
+Read the sequence of commands to be submitted per-request operations
+list, as well as other `dw_client` options, from the specified script
+file, as though its contents were added to the command-line in the
+point where this option is used.  This can be intermixed with other
+regular command-line options.
+
+```  -F, --forward=ip:port[,ip:port,...][,timeout=usec][,retry=n][,branch][,nack=n]```
+
+Add a FORWARD operation to the submitted per-request operations list,
+specifying the ip:port to forward to, the timeout to wait for, and the
+number of retries in case of failure to receive the REPLY to the
+FORWARD.  This option allows also to specify multiple ip:port
+receivers. In this case, the FORWARD is performed in parallel to all
+the specified receivers, and by default all of their REPLY responses
+are needed, before moving on with processing the rest of the
+operations list.  However, the `nack=n` option allows for customizing
+the number of acknowledgements to wait for, before moving on. For
+example, it is possible to FORWARD to 3 different nodes, and wait for
+just 1 or 2 of their REPLY responses, to move on. This is useful to
+emulate the typical behavior of distributed quorum-based protocols.
+
+Normally, when multiple ip:port are specified, the FORWARD messages
+are sent identical to all the peers, and are extracted starting from
+the operation following the FORWARD, to the matching REPLY.  However,
+if the `branch` option is used, then different messages can be
+forwarded to the different peers, and they have to be specified each
+as a FORWARD operation matching its own REPLY. For example:
+
+  ```-F ip1:p1,branch -C 10ms -R -F ip2:p2,branch -C 20ms -R```
+
+```  --load-offset=nbytes|prob:field=val[,field=val]```
+
+Set the offset to be used, or the distribution it has to be drawn from,
+for the subsequent LOAD operations.
+
+```  -L, --load-data=nbytes|prob:field=val[,field=val]```
+
+Add a LOAD operation to the submitted per-request operations list,
+with the specified data payload size, in bytes (see below for details
+on how to specify distributions).
+
+```  --no-delay=0|1, --nd=0|1```
+
+Enable or disable the TCP_NODELAY socket option (default is enabled).
+
+```  --non-block```
+
+Tell each client thread to perform a busy-wait loop instead of waiting, till the point in time in which the next request is to be sent.
+This id one by setting the socket in SOCK_NONBLOCK mode.
+
+```  --num-sessions=n, --ns=n```
+
+Set the number of sessions each client thread establishes with the (initial) distwalk node. The overall number of requests to be submitted, specified with `-n`, is evenly split across the various sessions. If this option is not used, each thread submits its overall number of requests within a single session.
+
+```  --num-threads=n, --nt=n```
+
+Set the number of client threads, corresponding to parallel sessions that are opened with the (initial) distwalk node, each submitting the overall number of requests as specified with `-n`. If this option is not used, only one thread will be submitting requests.
+
+```  -n, --num-pkts=n|auto```
+
+Set the number of requests sent by each thread (across all sessions).
+
+```  --per-session-output, --pso```
+
+Let the client output the response times obtained for each session, at the end of the session, rather than at the end of the program. this implies some extra delay between sessions, but it requires the client to save on the needed memory.
+
+```  --ps=nbytes|prob:field=val[,field=val]```
+
+Set the payload size of the sent requests, or their probability distribution (see below for details on how to specify distributions).
+
+```  -p, --period=usec|prob:field=val[,field=val]``
+
+Set the inter-spacing period to be used by each sender thread, between submitting two consecutive requests.
+
+```  --rate-step-secs=sec, --rss=sec```
+
+Set the duration of each rate-step.
+
+```  --retry-num=n```
+
+Set the number of connection retries in case of failure.
+
+```  --retry-period=msec```
+
+Set the interval between subsequent connection retries.
+
+```  -r, --rate=npkt```
+
+Set the packet sending rate (in pkts per sec).
+
+```  -R, --rs[=nbytes|prob:field=val[,field=val]]```
+
+Add to the list of per-request operations to be submitted, a REPLY command. Optionally, specify the payload size, or the distribution its value has to be drawn from (see below for details on how to specify distributions).
+
+```  --stag-send```
+
+Enable staggered send among sender threads. This allows to avoid stressing the server with all requests hitting it at the same time.
+
+```  --store-offset=nbytes|prob:field=val[,field=val]```
+
+Set the offset value, or its distribution, for the subsequent STORE operations.
+
+```  -s, --skip=n[,prob=val]```
+
+Skip the next `n` commands (with probability val, defaults to 1.0 if unspecified).
+
+```  -S, --store-data=nbytes|prob:field=val[,field=val][,nosync]```
+
+Set the payload size in bytes, or its distribution, for the subsequent STORE operations.
+
+```  --to=[tcp|udp:[//]][host][:port]```
+
+Set the target node host, port and protocol. All elements can be specified or not, see the description of the -F command-line option above for details.
+
+```  --wait-spin, --ws```
+
+Tell each client thread to perform a busy-wait loop instead of waiting, till the point in time in which the next request is to be sent.
+
+```  --usage, -h, --help```
+
+Show a short help message.
