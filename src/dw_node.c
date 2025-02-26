@@ -875,7 +875,6 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
         infos->active_conns--;
     }
     close_and_forget(p_poll, conn->sock);
-    conn_free(conn_id);
 
     // Close associated connections
     for (int i = 0; i < MAX_CONNS; i++) {
@@ -904,7 +903,6 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
 
                     if (itr->cmd == EOM) { // brutal
                         close_and_forget(p_poll, pending_conn->sock);
-                        conn_free(i);
                     } else { // graceful
                         tmp->curr_cmd = itr;
                         m->status = -1;
