@@ -190,6 +190,17 @@ to be always ready, so to save wake-up from idle, and context switch overheads, 
 it is useful in scenarios seeking extremely low latency. However, it causes each
 worker thread to take 100% of a CPU, regardless on the amount of traffic hitting it.
 
+```  --loops-per-usec=value```
+
+Switch the implementation of COMPUTE commands from computing for exactly the amount
+of time the -C client option requires, regardless of the underlying CPU frequency,
+to the specified fixed number of repeatitions of a simple compute-intensive loop,
+which results in computations whose duration varies with the CPU frequency.
+Specifying the special value 0, lets the program benchmark itself for a fraction
+of a second when launched, causing the CPU to scale-up its frequency, then store
+number of performed loops per second in the $HOME/.dw_loops_per_usec file, then
+this value is reused for any successive invocation of dw_node with 0 as value.
+
 ```  -a, --accept-mode=child|shared|parent```
 
 Set the server accept mode:
@@ -304,7 +315,10 @@ Tell each client thread to perform a busy-wait loop instead of blocking, while w
 
 Add to the sequence of operations submitted per-request to the server,
 a COMPUTE operation, with the specified processing time, or processing
-time distribution (see specifying distributions below).
+time distribution (see specifying distributions below). The way this
+is implemented on the node side may or may not be affected by CPU
+frequency switches, see the --loops-per-usec option of the dw_node for
+details.
 
 ```  -L, --load-data=nbytes|prob:field=val[,field=val]```
 
