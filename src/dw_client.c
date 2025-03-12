@@ -14,6 +14,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <argp.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/crypto.h>
 
 #include "dw_debug.h"
 #include "distrib.h"
@@ -29,6 +32,8 @@ __thread char thread_name[16];
 int use_wait_spinning = 0;
 
 queue_t* ccmd; // chain of commands
+
+SSL_CTX *client_ssl_ctx = NULL;
 
 unsigned int default_compute_us = 1000;
 
@@ -62,6 +67,13 @@ struct argp_client_arguments {
     int fwd_scope;
     int branching_degree;
     ccmd_node_t* curr_forward_begin;
+
+    char* ssl_cert;    // --ssl-cert
+    char* ssl_key;     // --ssl-key
+    char* ssl_ca;      // --ssl-ca
+    char* ssl_ciphers; // --ssl-ciphers
+    char* ssl_ca_path; // --ssl-ca-path
+    int ssl_verify;    // --ssl-verify
 } input_args;
 
 #define MAX_THREADS 256
@@ -111,7 +123,7 @@ int try_connect(int* conn_sock, struct sockaddr_in target) {
     /*---- Create the socket. The three arguments are: ----*/
     /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in
     * this case) */
-    if (proto == TCP) {
+    if (proto == TCP || proto == TLS) {
         sys_check(*conn_sock = socket(AF_INET, SOCK_STREAM | (conn_nonblock ? SOCK_NONBLOCK : 0), 0));
         sys_check(setsockopt(*conn_sock, IPPROTO_TCP,
                             TCP_NODELAY, (void *)&no_delay,
@@ -292,7 +304,41 @@ void *thread_receiver(void *data) {
             /* spawn sender once connection is established */
             int conn_id = conn_alloc(clientSocket[thread_id], serveraddr, proto);
             check(conn_id != -1, "conn_alloc() failed, consider increasing MAX_CONNS");
-            conn_set_status_by_id(conn_id, READY);
+
+            // If the protocol is SSL, do the SSL handshake; else mark it READY
+            if (proto == TLS) {
+                extern SSL_CTX *client_ssl_ctx;  // we define this in main()
+                if (conn_enable_ssl(conn_id, client_ssl_ctx, 0) < 0) {
+                    fprintf(stderr, "SSL handshake failed\n");
+                    close(clientSocket[thread_id]);
+                    conn_free(conn_id);
+                    return 0;
+                }
+
+                // retry handshake for up to 5 seconds in non-blocking mode
+                int rv = 0;
+                for (int hs_retry = 1; hs_retry <= 25; hs_retry++) {
+                    rv = conn_do_ssl_handshake(conn_id);
+                    if (rv == 1) {
+                        dw_log("SSL HANDSHAKE SUCCESSFUL after %d tries\n", hs_retry);
+                        break;
+                    } else if (rv == -1) {
+                        fprintf(stderr, "SSL handshake error on conn_id=%d\n", thr_data.conn_id);
+                        close(clientSocket[thread_id]);
+                        conn_free(conn_id);
+                        return 0;
+                    } else {
+                        usleep(200 * 1000);
+                    }
+                }
+                if (rv == 0) {
+                    fprintf(stderr, "SSL handshake failed after 5 seconds\n");
+                    close(clientSocket[thread_id]);
+                    conn_free(conn_id);
+                    return 0;
+                }
+            } else
+                conn_set_status_by_id(conn_id, READY);
 
             thr_data.conn_id = conn_id;
             thr_data.first_pkt_id = pkt_i;
@@ -420,13 +466,20 @@ enum argp_client_option_keys {
     CONN_RETRY_PERIOD,
     CONN_TIMES,
     CONN_NONBLOCK,
-    STAG_SEND
+    STAG_SEND,
+
+    SSL_CERT_FILE,
+    SSL_KEY_FILE,
+    SSL_CA_FILE,
+    SSL_CIPHERS,
+    SSL_CA_PATH,
+    SSL_VERIFY
 };
 
 static struct argp_option argp_client_options[] = {
     // long name, short name, value name, flag, description
     { "bind-addr",          BIND_ADDR,              "host[:port]|:port",                          0, "Set client bindname and bindport"},
-    { "to",                 TO_OPT_ARG,             "[tcp|udp:[//]][host][:port]",                0, "Set distwalk target node host, port and protocol"},
+    { "to",                 TO_OPT_ARG,             "[tcp|udp|ssl:[//]][host][:port]",            0, "Set distwalk target node host, port and protocol"},
     { "num-pkts",           NUM_PKTS,               "n|auto",                                     0, "Number of packets sent by each thread (across all sessions"},
     { "period",             PERIOD,                 "usec|prob:field=val[,field=val]",            0, "Inter-send period for each thread"},
     { "rate",               RATE,                   "npkt",                                       0, "Packet sending rate (in pkts per sec)"},
@@ -459,6 +512,12 @@ static struct argp_option argp_client_options[] = {
     { "script-filename",    SCRIPT_FILENAME,        "path/to/file",                               0, "Continue reading commands from script file (can be intermixed with regular options)"},
     { "help",               HELP,                    0,                                           0, "Show this help message", 1 },
     { "usage",              USAGE,                   0,                                           0, "Show a short usage message", 1 },
+    { "ssl-cert",           SSL_CERT_FILE,           "FILE",                                      0, "Client SSL certificate file" },
+    { "ssl-key",            SSL_KEY_FILE,            "FILE",                                      0, "Client SSL key file" },
+    { "ssl-ca",             SSL_CA_FILE,             "FILE",                                      0, "Client SSL CA file" },
+    { "ssl-ciphers",        SSL_CIPHERS,             "CIPHERS",                                   0, "Allowed SSL ciphers" },
+    { "ssl-ca-path",        SSL_CA_PATH,             "DIR",                                       0, "Client SSL CA path" },
+    { "ssl-verify",         SSL_VERIFY,              0,                                           0, "Require server certificate verification" },
     { 0 }
 };
 
@@ -483,6 +542,14 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->fwd_scope = 0;
         arguments->branching_degree = 0;
         arguments->curr_forward_begin = NULL;
+
+        arguments->ssl_cert = NULL;
+        arguments->ssl_key = NULL;
+        arguments->ssl_ca = NULL;
+        arguments->ssl_ciphers = NULL;
+        arguments->ssl_ca_path = NULL;
+        arguments->ssl_verify = 0;
+
         break;
     case HELP:
         argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
@@ -742,6 +809,24 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         no_delay = atoi(arg);
         check(no_delay == 0 || no_delay == 1);
         break;
+    case SSL_CERT_FILE:
+        arguments->ssl_cert = arg;
+        break;
+    case SSL_KEY_FILE:
+        arguments->ssl_key = arg;
+        break;
+    case SSL_CA_FILE:
+        arguments->ssl_ca = arg;
+        break;
+    case SSL_CIPHERS:
+        arguments->ssl_ciphers = arg;
+        break;
+    case SSL_CA_PATH:
+        arguments->ssl_ca_path = arg;
+        break;
+    case SSL_VERIFY:
+        arguments->ssl_verify = 1;
+        break;
     case ARGP_KEY_END: // post-parsing validity checks
         addr_parse(arguments->clienthostport, &myaddr);
         addr_parse(arguments->nodehostport, &serveraddr);
@@ -857,6 +942,55 @@ int main(int argc, char *argv[]) {
 
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
 
+    // If --to ssl://..., then proto == TLS. Setup the SSL context accordingly:
+    if (proto == TLS) {
+        conn_nonblock = 1;  // match the old behavior of forcing non-block if SSL
+
+        SSL_library_init();
+        SSL_load_error_strings();
+        OpenSSL_add_all_algorithms();
+
+        client_ssl_ctx = SSL_CTX_new(TLS_client_method());
+        if (!client_ssl_ctx) {
+            fprintf(stderr, "Error: cannot create SSL context\n");
+            exit(EXIT_FAILURE);
+        }
+        if (input_args.ssl_ca && input_args.ssl_ca[0]) {
+            if (!SSL_CTX_load_verify_locations(client_ssl_ctx, input_args.ssl_ca, NULL)) {
+                fprintf(stderr, "Error: cannot load CA file '%s'\n", input_args.ssl_ca);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_ca_path && input_args.ssl_ca_path[0]) {
+            if (!SSL_CTX_load_verify_locations(client_ssl_ctx, NULL, input_args.ssl_ca_path)) {
+                fprintf(stderr, "Error: cannot load CA path '%s'\n", input_args.ssl_ca_path);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_cert && input_args.ssl_cert[0]) {
+            if (SSL_CTX_use_certificate_file(client_ssl_ctx, input_args.ssl_cert, SSL_FILETYPE_PEM) <= 0) {
+                fprintf(stderr, "Error: cannot load cert file '%s'\n", input_args.ssl_cert);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_key && input_args.ssl_key[0]) {
+            if (SSL_CTX_use_PrivateKey_file(client_ssl_ctx, input_args.ssl_key, SSL_FILETYPE_PEM) <= 0) {
+                fprintf(stderr, "Error: cannot load key file '%s'\n", input_args.ssl_key);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_ciphers && input_args.ssl_ciphers[0]) {
+            if (!SSL_CTX_set_cipher_list(client_ssl_ctx, input_args.ssl_ciphers)) {
+                fprintf(stderr, "Error: cannot set the desired SSL ciphers '%s'\n", input_args.ssl_ciphers);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_verify) {
+            SSL_CTX_set_verify(client_ssl_ctx, SSL_VERIFY_PEER, NULL);
+            SSL_CTX_set_verify_depth(client_ssl_ctx, 100);
+        }
+    }
+
     printf("Configuration:\n");
     printf("  clienthost=%s\n", input_args.clienthostport);
     printf("  serverhost=%s\n", input_args.nodehostport);
@@ -879,6 +1013,16 @@ int main(int argc, char *argv[]) {
     printf("  num_conn_retries: %d (retry_period: %d ms)\n", conn_retry_num, conn_retry_period_ms);
 
     printf("  request template: ");  ccmd_log(ccmd);
+
+    if (proto == TLS) {
+        printf("  SSL/TLS is enabled.\n");
+        if (input_args.ssl_ca && input_args.ssl_ca[0])      printf("  ssl_ca: %s\n", input_args.ssl_ca);
+        if (input_args.ssl_cert && input_args.ssl_cert[0])  printf("  ssl_cert: %s\n", input_args.ssl_cert);
+        if (input_args.ssl_key && input_args.ssl_key[0])    printf("  ssl_key: %s\n", input_args.ssl_key);
+        if (input_args.ssl_ciphers && input_args.ssl_ciphers[0]) printf("  ssl_ciphers: %s\n", input_args.ssl_ciphers);
+        if (input_args.ssl_ca_path && input_args.ssl_ca_path[0])
+            printf("  ssl_ca_path: %s\n", input_args.ssl_ca_path);
+    }
 
     // Init random number generator
     srand(time(NULL));
@@ -918,5 +1062,12 @@ int main(int argc, char *argv[]) {
     }
     
     ccmd_destroy(&ccmd);
+
+    // cleanup the client SSL context if we created one
+    if (client_ssl_ctx) {
+        SSL_CTX_free(client_ssl_ctx);
+        client_ssl_ctx = NULL;
+    }
+
     return 0;
 }

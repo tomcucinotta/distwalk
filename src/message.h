@@ -12,7 +12,7 @@
 
 typedef enum { COMPUTE, STORE, LOAD, PSKIP, FORWARD_BEGIN, FORWARD_CONTINUE, REPLY, EOM } command_type_t;
 
-typedef enum { UDP, TCP, PROTO_NUMBER } proto_t;
+typedef enum { UDP, TCP, TLS, PROTO_NUMBER } proto_t;
 
 typedef struct {
     uint32_t pkt_size;    // size of forwarded packet
