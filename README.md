@@ -17,8 +17,9 @@ or writing a configurable amount of data.
 The client provides, at the end of the experiment, all the end-to-end
 processing times for all submitted requests.
 
-The client establishes one or more TCP connections to the server,
-which is capable of handling multiple client connections via epoll(7).
+The client establishes one or more TCP (or optionally, SSL/TLS)
+connections to the server, which is capable of handling multiple client
+connections via epoll(7).
 The client can submit concurrent traffic by spawning multiple threads.
 Furthermore, each thread can emulate different sessions where the
 connection is closed and re-established for each new session.
@@ -136,7 +137,7 @@ NODE/SERVER DOCUMENTATION
 ----------------------------------------------------------------------
 The server `dw_node` supports the following command-line options:
 
-```  -b, --bind-addr=[tcp|udp:[//]][host][:port]```
+```  -b, --bind-addr=[tcp|udp|ssl:[//]][host][:port]```
 
 Set the bind name or IP address, port, and communication protocol. All
 three parts of the argument are optional:
@@ -250,9 +251,10 @@ CLIENT DOCUMENTATION
 ----------------------------------------------------------------------
 The client `dw_client` supports the following command-line options:
 
-```  --to=[tcp|udp:[//]][host][:port]```
+```  --to=[tcp|udp|ssl:[//]][host][:port]```
 
 Set the target node host, port and protocol. All elements can be specified or not, see the description of the -F command-line option above for details.
+Note: if the specified protocol is `ssl`, then the `--non-block` option is forced.
 
 ```  -b, --bind-addr=host[:port]|:port```
 
