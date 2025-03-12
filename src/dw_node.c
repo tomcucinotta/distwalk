@@ -22,6 +22,9 @@
 #include <stdbool.h>
 #include <sys/prctl.h>
 #include <argp.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/crypto.h>
 
 #include "dw_debug.h"
 #include "message.h"
@@ -35,6 +38,10 @@
 #include "dw_poll.h"
 
 #define MAX_EVENTS 10
+
+// whether there's at least one bind address with SSL enabled
+int ssl_enable = 0;
+SSL_CTX *server_ssl_ctx = NULL;
 
 static inline uint64_t i2l(uint32_t ln, uint32_t rn) {
     return ((uint64_t) ln) << 32 | rn;
@@ -87,6 +94,7 @@ static struct {
 
 typedef struct {
     int listen_socks[MAX_LISTEN_SOCKETS];
+    proto_t listen_socks_proto[MAX_LISTEN_SOCKETS];
     int n_listen_socks;
 
     int timerfd;        // special timerfd to handle forward timeouts
@@ -319,7 +327,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     if (fwd_conn_id == -1) {
         int clientSocket = 0;
 
-        if (fwd.proto == TCP) {
+        if (fwd.proto == TCP || fwd.proto == TLS) {
             clientSocket = socket(AF_INET, SOCK_STREAM, 0);
             sys_check(setsockopt(clientSocket, IPPROTO_TCP,
                                  TCP_NODELAY, (void *)&no_delay,
@@ -336,11 +344,20 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
             return NULL;
         }
 
-        if (fwd.proto == TCP) {
+        if (fwd.proto == TCP || fwd.proto == TLS) {
             check(dw_poll_add(p_poll, clientSocket, DW_POLLOUT | DW_POLLIN, i2l(CONNECT, fwd_conn_id)) == 0);
 
             dw_log("connecting to: %s:%d\n", inet_ntoa((struct in_addr) { addr.sin_addr.s_addr }),
                    ntohs(addr.sin_port));
+
+            if (fwd.proto == TLS) {
+                if (conn_enable_ssl(fwd_conn_id, server_ssl_ctx, 0) < 0) {
+                    fprintf(stderr, "SSL_connect() failed on forward connection\n");
+                    close(clientSocket);
+                    conn_free(fwd_conn_id);
+                    return NULL;
+                }
+            }
 
             int rv = connect(clientSocket, &addr, sizeof(addr));
             if (rv == -1) {
@@ -351,11 +368,19 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
 
                 dw_log("connect(): %s\n", strerror(errno));
                 // normal case of asynchronous connect
-                conn_set_status_by_id(fwd_conn_id, CONNECTING);
+                if (fwd.proto == TLS) {
+                    conn_set_status_by_id(fwd_conn_id, SSL_HANDSHAKE);
+                } else {
+                    conn_set_status_by_id(fwd_conn_id, CONNECTING);
+                }
             } else {
                 dw_log("connect(): Ready\n");
-                conn_set_status_by_id(fwd_conn_id, READY);
-                infos->active_conns++;
+                if (fwd.proto == TLS) {
+                    conn_set_status_by_id(fwd_conn_id, SSL_HANDSHAKE);
+                } else {
+                    conn_set_status_by_id(fwd_conn_id, READY);
+                    infos->active_conns++;
+                }
             }
         }
     }
@@ -835,6 +860,17 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     conn_info_t *conn = conn_get_by_id(conn_id);
     dw_log("event_type=%s, conn_id=%d\n", get_event_str(type), conn_id);
 
+    if (conn->status == SSL_HANDSHAKE) {
+        int hs = conn_do_ssl_handshake(conn_id);
+        if (hs < 0)
+            goto err;
+        else if (hs == 0) {
+            /* handshake still in progress, do not proceed with send/recv */
+            return;
+        }
+        /* handshake is complete => status=READY => continue below */
+    }
+
     if (type == TIMER) {
         handle_timeout(p_poll, infos);
         return;
@@ -1100,7 +1136,7 @@ void* conn_worker(void* args) {
             int conn_id = conn_find_sock(s);
 
             uint64_t aux;
-            if(conn_id == -1) // TCP
+            if(conn_id == -1) // TCP/TLS
                 aux = i2l(LISTEN, s);
             else // UDP
                 aux = i2l(SOCKET, conn_id);
@@ -1146,7 +1182,7 @@ void* conn_worker(void* args) {
             l2i(aux, &event_type, (uint32_t*) &event_data);
             dw_log("event_type=%s, event_data=%d (conn_id if event_type==SOCKET, polled fd otherwise)\n", get_event_str(event_type), event_data);
             
-            if (event_type == LISTEN) { // New connection (TCP)
+            if (event_type == LISTEN) { // New connection (TCP or TLS)
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);
                 int conn_sock;
@@ -1158,14 +1194,38 @@ void* conn_worker(void* args) {
                 sys_check(setsockopt(conn_sock, IPPROTO_TCP, TCP_NODELAY,
                                      (void *)&no_delay, sizeof(no_delay)));
 
-                int conn_id = conn_alloc(conn_sock, addr, TCP);
+                // find the index of the listening socket to read the protocol
+                int sock_index = -1;
+                for (int k = 0; k < infos->n_listen_socks; k++) {
+                    if (infos->listen_socks[k] == event_data) {
+                        sock_index = k;
+                        break;
+                    }
+                }
+                if (sock_index < 0) {
+                    fprintf(stderr, "Error: cannot find listening sock index\n");
+                    close(conn_sock);
+                    continue;
+                }
+                proto_t p = infos->listen_socks_proto[sock_index];
+
+                int conn_id = conn_alloc(conn_sock, addr, p);
                 if (conn_id < 0) {
                     fprintf(stderr, "Could not allocate new conn_info_t, closing...\n");
                     close_and_forget(&infos->dw_poll, conn_sock);
                     continue;
                 }
 
-                conn_set_status_by_id(conn_id, READY);
+                if (p == TLS) {
+                    if (conn_enable_ssl(conn_id, server_ssl_ctx, 1) < 0) {
+                        fprintf(stderr, "SSL_accept() failed on incoming connection\n");
+                        close_and_forget(&infos->dw_poll, conn_sock);
+                        conn_free(conn_id);
+                        continue;
+                    }
+                } else
+                    conn_set_status_by_id(conn_id, READY);
+
                 infos->active_conns++;
                 
                 int next_thread_id = accept_mode == AM_PARENT ? (atomic_fetch_add(&next_thread_cnt, 1) % conn_threads) : (infos - conn_worker_infos);
@@ -1265,6 +1325,12 @@ enum argp_node_option_keys {
     WAIT_SPIN,
     LOOPS_PER_USEC,
     BACKLOG_LENGTH,
+    SSL_CERT_FILE,
+    SSL_KEY_FILE,
+    SSL_CA_FILE,
+    SSL_CIPHERS,
+    SSL_CA_PATH,
+    SSL_VERIFY
 };
 
 struct argp_node_arguments {
@@ -1275,11 +1341,17 @@ struct argp_node_arguments {
     char* thread_affinity_list;
     int num_threads;
     struct sched_attr sched_attrs;
+    char* ssl_cert;
+    char* ssl_key;
+    char* ssl_ca;
+    char* ssl_ciphers;
+    char* ssl_ca_path;
+    int ssl_verify;
 };
 
 static struct argp_option argp_node_options[] = {
     // long name, short name, value name, flag, description
-    {"bind-addr",         BIND_ADDR,        "[tcp|udp:[//]][host][:port]",    0,  "DistWalk node bindname, bindport, and communication protocol (can be specified multiple times)"},
+    {"bind-addr",         BIND_ADDR,        "[tcp|udp|ssl:[//]][host][:port]",0,  "DistWalk node bindname, bindport, and communication protocol (can be specified multiple times)"},
     {"accept-mode",       ACCEPT_MODE,      "child|shared|parent",            0,  "Accept mode (per-worker thread, shared or parent-only listening queue)"},
     {"poll-mode",         POLL_MODE,        "epoll|poll|select",              0,  "Poll mode (defaults to epoll)"},
     {"backlog-length",    BACKLOG_LENGTH,   "n",                              0,  "Maximum pending connections queue length"},
@@ -1299,6 +1371,12 @@ static struct argp_option argp_node_options[] = {
     {"loops-per-usec",    LOOPS_PER_USEC,    "value",                         0,  "Set loops_per_usec calibration parameter (0: handle it automatically in ~/.dw_loops_per_usec; -1: use frequency-invariant mode)"},
     {"help",              HELP,              0,                               0,  "Show this help message", 1 },
     {"usage",             USAGE,             0,                               0,  "Show a short usage message", 1 },
+    {"ssl-cert",          SSL_CERT_FILE,     "FILE",                          0,  "Server SSL certificate file" },
+    {"ssl-key",           SSL_KEY_FILE,      "FILE",                          0,  "Server SSL key file" },
+    {"ssl-ca",            SSL_CA_FILE,       "FILE",                          0,  "Server SSL CA file" },
+    {"ssl-ciphers",       SSL_CIPHERS,       "CIPHERS",                       0,  "Allowed SSL ciphers" },
+    {"ssl-ca-path",       SSL_CA_PATH,       "DIR",                           0,  "Server SSL CA path" },
+    {"ssl-verify",        SSL_VERIFY,        0,                               0,  "Enable peer certificate verification"},
     { 0 }
 };
 
@@ -1418,6 +1496,24 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
             exit(EXIT_FAILURE);
         }
         break;
+    case SSL_CERT_FILE:
+        arguments->ssl_cert = arg;
+        break;
+    case SSL_KEY_FILE:
+        arguments->ssl_key = arg;
+        break;
+    case SSL_CA_FILE:
+        arguments->ssl_ca = arg;
+        break;
+    case SSL_CIPHERS:
+        arguments->ssl_ciphers = arg;
+        break;
+    case SSL_CA_PATH:
+        arguments->ssl_ca_path = arg;
+        break;
+    case SSL_VERIFY:
+        arguments->ssl_verify = 1;
+        break;
     default:
         return ARGP_ERR_UNKNOWN;
     }
@@ -1427,10 +1523,10 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
 void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct sockaddr_in serverAddr) {
     if (accept_mode == AM_CHILD || i == 0) {
         int lsock;
-        if (proto == TCP) {
-            lsock = socket(PF_INET, SOCK_STREAM, 0);
+        if (proto == TCP || proto == TLS) {
+            lsock = socket(AF_INET, SOCK_STREAM, 0);
         } else {
-            lsock = socket(PF_INET, SOCK_DGRAM, 0);
+            lsock = socket(AF_INET, SOCK_DGRAM, 0);
             int conn_id = conn_alloc(lsock, serverAddr, UDP);
             conn_set_status_by_id(conn_id, READY);
         }
@@ -1445,15 +1541,18 @@ void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct so
         dw_log("Node bound to %s:%d (with protocol: %s)\n", inet_ntoa(serverAddr.sin_addr), ntohs(serverAddr.sin_port), proto_str(proto));
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
-        if (proto == TCP)
+        /* For TLS => same as TCP. */
+        if (proto == TCP || proto == TLS)
             sys_check(listen(lsock, listen_backlog));
         dw_log("Accepting new connections (max backlog: %d)...\n", listen_backlog);
 
+        conn_worker_infos[i].listen_socks_proto[conn_worker_infos[i].n_listen_socks] = proto;
         conn_worker_infos[i].listen_socks[conn_worker_infos[i].n_listen_socks++] = lsock;
     } else if (accept_mode == AM_SHARED) {
         conn_worker_infos[i].n_listen_socks = conn_worker_infos[0].n_listen_socks;
         for (int k = 0; k < conn_worker_infos[0].n_listen_socks; k++) {
             conn_worker_infos[i].listen_socks[k] = conn_worker_infos[0].listen_socks[k];
+            conn_worker_infos[i].listen_socks_proto[k] = conn_worker_infos[0].listen_socks_proto[k];
         }
     } else if (accept_mode == AM_PARENT) {
         conn_worker_infos[i].n_listen_socks = 0;
@@ -1472,6 +1571,12 @@ int main(int argc, char *argv[]) {
     input_args.thread_affinity_list = NULL;    
     input_args.num_threads = 1;
     input_args.sched_attrs = (struct sched_attr) { .size = sizeof(struct sched_attr), .sched_policy = SCHED_OTHER, .sched_flags = 0 };
+    input_args.ssl_cert = NULL;
+    input_args.ssl_key = NULL;
+    input_args.ssl_ca = NULL;
+    input_args.ssl_ciphers = NULL;
+    input_args.ssl_ca_path = NULL;
+    input_args.ssl_verify = 0;
 
     char *home_path = getenv("HOME");
     check(home_path != NULL && strlen(home_path) + 10 < sizeof(storage_worker_info.storage_info));
@@ -1535,6 +1640,61 @@ int main(int argc, char *argv[]) {
 
     conn_init();
     req_init();
+
+    // If any bind address has TLS, we set ssl_enable = 1
+    for (int i = 0; i < n_bind_addrs; i++) {
+        if (bind_addrs[i].protocol == TLS) {
+            ssl_enable = 1;
+            break;
+        }
+    }
+
+    // if we have TLS, create an SSL_CTX
+    if (ssl_enable) {
+        SSL_library_init();
+        SSL_load_error_strings();
+        OpenSSL_add_all_algorithms();
+
+        server_ssl_ctx = SSL_CTX_new(TLS_method());
+        if (!server_ssl_ctx) {
+            fprintf(stderr, "Error: cannot create server SSL context\n");
+            exit(EXIT_FAILURE);
+        }
+        if (input_args.ssl_ca && input_args.ssl_ca[0]) {
+            if (!SSL_CTX_load_verify_locations(server_ssl_ctx, input_args.ssl_ca, NULL)) {
+                fprintf(stderr, "Error: cannot load CA file '%s'\n", input_args.ssl_ca);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_ca_path && input_args.ssl_ca_path[0]) {
+            if (!SSL_CTX_load_verify_locations(server_ssl_ctx, NULL, input_args.ssl_ca_path)) {
+                fprintf(stderr, "Error: cannot load CA path '%s'\n", input_args.ssl_ca_path);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_cert && input_args.ssl_cert[0]) {
+            if (SSL_CTX_use_certificate_file(server_ssl_ctx, input_args.ssl_cert, SSL_FILETYPE_PEM) <= 0) {
+                fprintf(stderr, "Error: cannot load cert file '%s'\n", input_args.ssl_cert);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_key && input_args.ssl_key[0]) {
+            if (SSL_CTX_use_PrivateKey_file(server_ssl_ctx, input_args.ssl_key, SSL_FILETYPE_PEM) <= 0) {
+                fprintf(stderr, "Error: cannot load key file '%s'\n", input_args.ssl_key);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_ciphers && input_args.ssl_ciphers[0]) {
+            if (!SSL_CTX_set_cipher_list(server_ssl_ctx, input_args.ssl_ciphers)) {
+                fprintf(stderr, "Error: cannot set the desired SSL ciphers '%s'\n", input_args.ssl_ciphers);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (input_args.ssl_verify) {
+            SSL_CTX_set_verify(server_ssl_ctx, SSL_VERIFY_PEER, NULL);
+            SSL_CTX_set_verify_depth(server_ssl_ctx, 100);
+        }
+    }
 
     // Open storage file, if any
     if (storage_worker_info.storage_info.storage_path[0] != '\0') {
@@ -1734,6 +1894,12 @@ int main(int argc, char *argv[]) {
             close(conn_worker_infos[i].dispatchfd[0]);
             close(conn_worker_infos[i].dispatchfd[1]);
         }
+    }
+
+    // cleanup server SSL context if allocated
+    if (server_ssl_ctx) {
+        SSL_CTX_free(server_ssl_ctx);
+        server_ssl_ctx = NULL;
     }
 
     return 0;
