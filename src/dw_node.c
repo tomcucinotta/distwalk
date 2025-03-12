@@ -78,8 +78,17 @@ const char* get_event_str(event_t event) {
 #define MAX_THREADS 256
 #define MAX_STORAGE_PATH_STR 100
 
+#define MAX_LISTEN_SOCKETS 16
+static int n_bind_addrs = 0;
+static struct {
+    char nodehostport[MAX_HOSTPORT_STRLEN];
+    proto_t protocol;
+} bind_addrs[MAX_LISTEN_SOCKETS];
+
 typedef struct {
-    int listen_sock;
+    int listen_socks[MAX_LISTEN_SOCKETS];
+    int n_listen_socks;
+
     int timerfd;        // special timerfd to handle forward timeouts
     int statfd;         // special signalfd to print statistics
     dw_poll_t dw_poll;
@@ -1084,16 +1093,19 @@ void* conn_worker(void* args) {
 
     sys_check(sched_setattr(0, &infos->sched_attrs, 0));
 
-    if (accept_mode != AM_PARENT || infos == conn_worker_infos) {
-        // Add listen socket
-        int conn_id = conn_find_sock(infos->listen_sock);
+    if (accept_mode != AM_PARENT || infos == &conn_worker_infos[0]) {
+        for (int i = 0; i < infos->n_listen_socks; i++) {
+            int s = infos->listen_socks[i];
+            if (s < 0) continue;
+            int conn_id = conn_find_sock(s);
 
-        uint64_t aux;
-        if(conn_id == -1) // TCP
-            aux = i2l(LISTEN, infos->listen_sock);
-        else // UDP
-            aux = i2l(SOCKET, conn_id);
-        check(dw_poll_add(&infos->dw_poll, infos->listen_sock, DW_POLLIN, aux) == 0);
+            uint64_t aux;
+            if(conn_id == -1) // TCP
+                aux = i2l(LISTEN, s);
+            else // UDP
+                aux = i2l(SOCKET, conn_id);
+            check(dw_poll_add(&infos->dw_poll, s, DW_POLLIN, aux) == 0);
+        }
     }
 
     // Add termination fd
@@ -1138,7 +1150,7 @@ void* conn_worker(void* args) {
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);
                 int conn_sock;
-                sys_check(conn_sock = accept(infos->listen_sock, (struct sockaddr *)&addr, &addr_size));
+                sys_check(conn_sock = accept(event_data, (struct sockaddr *)&addr, &addr_size));
 
                 dw_log("Accepted connection from: %s:%d\n",
                        inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
@@ -1256,8 +1268,6 @@ enum argp_node_option_keys {
 };
 
 struct argp_node_arguments {
-    char nodehostport[MAX_HOSTPORT_STRLEN];
-    proto_t protocol;
     int periodic_sync_msec;
     size_t max_storage_size;
     int use_odirect;
@@ -1269,7 +1279,7 @@ struct argp_node_arguments {
 
 static struct argp_option argp_node_options[] = {
     // long name, short name, value name, flag, description
-    {"bind-addr",         BIND_ADDR,        "[tcp|udp:[//]][host][:port]",    0,  "DistWalk node bindname, bindport, and communication protocol"},
+    {"bind-addr",         BIND_ADDR,        "[tcp|udp:[//]][host][:port]",    0,  "DistWalk node bindname, bindport, and communication protocol (can be specified multiple times)"},
     {"accept-mode",       ACCEPT_MODE,      "child|shared|parent",            0,  "Accept mode (per-worker thread, shared or parent-only listening queue)"},
     {"poll-mode",         POLL_MODE,        "epoll|poll|select",              0,  "Poll mode (defaults to epoll)"},
     {"backlog-length",    BACKLOG_LENGTH,   "n",                              0,  "Maximum pending connections queue length"},
@@ -1305,7 +1315,12 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         argp_state_help(state, state->out_stream, ARGP_HELP_USAGE | ARGP_HELP_EXIT_OK);
         break;
     case BIND_ADDR:
-        addr_proto_parse(arg, arguments->nodehostport, &arguments->protocol);
+        if (n_bind_addrs >= MAX_LISTEN_SOCKETS) {
+            fprintf(stderr, "Too many --bind-addr options\n");
+            exit(EXIT_FAILURE);
+        }
+        addr_proto_parse(arg, bind_addrs[n_bind_addrs].nodehostport, &bind_addrs[n_bind_addrs].protocol);
+        n_bind_addrs++;
         break;
     case ACCEPT_MODE:
         if (strcmp(arg, "child") == 0)
@@ -1411,41 +1426,37 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
 
 void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct sockaddr_in serverAddr) {
     if (accept_mode == AM_CHILD || i == 0) {
+        int lsock;
         if (proto == TCP) {
-            conn_worker_infos[i].listen_sock = socket(AF_INET, SOCK_STREAM, 0);
+            lsock = socket(PF_INET, SOCK_STREAM, 0);
         } else {
-            conn_worker_infos[i].listen_sock = socket(AF_INET, SOCK_DGRAM, 0);
-            int conn_id = conn_alloc(conn_worker_infos[i].listen_sock, serverAddr, UDP);
+            lsock = socket(PF_INET, SOCK_DGRAM, 0);
+            int conn_id = conn_alloc(lsock, serverAddr, UDP);
             conn_set_status_by_id(conn_id, READY);
         }
         int val = 1;
-        sys_check(setsockopt(conn_worker_infos[i].listen_sock, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
+        sys_check(setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
         if (accept_mode == AM_CHILD)
-            sys_check(setsockopt(conn_worker_infos[i].listen_sock, SOL_SOCKET, SO_REUSEPORT, (void *)&val, sizeof(val)));
+            sys_check(setsockopt(lsock, SOL_SOCKET, SO_REUSEPORT, (void *)&val, sizeof(val)));
 
         /*---- Bind the address struct to the socket ----*/
-        sys_check(bind(conn_worker_infos[i].listen_sock, (struct sockaddr *)&serverAddr,
-                        sizeof(serverAddr)));
+        sys_check(bind(lsock, (struct sockaddr *)&serverAddr, sizeof(serverAddr)));
 
         dw_log("Node bound to %s:%d (with protocol: %s)\n", inet_ntoa(serverAddr.sin_addr), ntohs(serverAddr.sin_port), proto_str(proto));
 
         /*---- Listen on the socket, with 5 max connection requests queued ----*/
         if (proto == TCP)
-            sys_check(listen(conn_worker_infos[i].listen_sock, listen_backlog));
+            sys_check(listen(lsock, listen_backlog));
         dw_log("Accepting new connections (max backlog: %d)...\n", listen_backlog);
+
+        conn_worker_infos[i].listen_socks[conn_worker_infos[i].n_listen_socks++] = lsock;
     } else if (accept_mode == AM_SHARED) {
-        conn_worker_infos[i].listen_sock = conn_worker_infos[0].listen_sock;
+        conn_worker_infos[i].n_listen_socks = conn_worker_infos[0].n_listen_socks;
+        for (int k = 0; k < conn_worker_infos[0].n_listen_socks; k++) {
+            conn_worker_infos[i].listen_socks[k] = conn_worker_infos[0].listen_socks[k];
+        }
     } else if (accept_mode == AM_PARENT) {
-        conn_worker_infos[i].listen_sock = -1;
-    }
-
-    // Auxiliary communication medium
-    if (accept_mode == AM_PARENT) {
-        sys_check(socketpair(AF_LOCAL, SOCK_STREAM, 0, conn_worker_infos[i].dispatchfd));
-
-    } else {
-        conn_worker_infos[i].dispatchfd[0] = -1;
-        conn_worker_infos[i].dispatchfd[1] = -1;
+        conn_worker_infos[i].n_listen_socks = 0;
     }
 }
 
@@ -1454,8 +1465,6 @@ int main(int argc, char *argv[]) {
     struct argp_node_arguments input_args;
     
     // Default argp values
-    strcpy(input_args.nodehostport, DEFAULT_ADDR ":" DEFAULT_PORT);
-    input_args.protocol = TCP;
     input_args.periodic_sync_msec = -1;
     input_args.max_storage_size = 1024 * 1024 * 1024;
     input_args.use_odirect = 0;
@@ -1571,8 +1580,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    addr_parse(input_args.nodehostport, &serverAddr);
-
     if (loops_per_usec == 0.0) {
         char *dirname = getenv("HOME");
         if (!dirname)
@@ -1601,12 +1608,13 @@ int main(int argc, char *argv[]) {
     }
     dw_log("Using loops_per_usec: %g\n", loops_per_usec);
 
+    // Initialize conn_worker_infos
     for (int i = 0; i < input_args.num_threads; i++) {
         /*---- Create the socket(s). The three arguments are: ----*/
         /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this
         * case) */
 
-        init_listen_sock(i, accept_mode, input_args.protocol, serverAddr);
+        conn_worker_infos[i].n_listen_socks = 0;
 
         check(dw_poll_init(&conn_worker_infos[i].dw_poll, poll_mode) == 0);
         conn_worker_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
@@ -1635,6 +1643,14 @@ int main(int argc, char *argv[]) {
 
         conn_worker_infos[i].active_conns = 0;
         conn_worker_infos[i].active_reqs = 0;
+
+        // Auxiliary communication medium
+        if (accept_mode == AM_PARENT) {
+            sys_check(socketpair(AF_LOCAL, SOCK_STREAM, 0, conn_worker_infos[i].dispatchfd));
+        } else {
+            conn_worker_infos[i].dispatchfd[0] = -1;
+            conn_worker_infos[i].dispatchfd[1] = -1;
+        }
     }
 
     // Init socks mutex
@@ -1645,6 +1661,21 @@ int main(int argc, char *argv[]) {
     //pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 
     //sys_check(pthread_mutex_init(&socks_mtx, &attr));
+
+    if (n_bind_addrs == 0) {
+        // user didn't provide --bind-addr => use default
+        n_bind_addrs = 1;
+        strcpy(bind_addrs[0].nodehostport, DEFAULT_ADDR ":" DEFAULT_PORT);
+        bind_addrs[0].protocol = TCP;
+    }
+
+    // For each requested bind-addr, init the listen socket(s)
+    for (int l = 0; l < n_bind_addrs; l++) {
+        addr_parse(bind_addrs[l].nodehostport, &serverAddr);
+        for (int i = 0; i < conn_threads; i++) {
+            init_listen_sock(i, accept_mode, bind_addrs[l].protocol, serverAddr);
+        }
+    }
 
     // Init storage thread
     if (storage_worker_info.storage_info.storage_path[0] != '\0') {
