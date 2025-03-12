@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <pthread.h>
 #include <netinet/in.h>
+#include <openssl/ssl.h>
 #include "message.h"
 #include "request.h"
 
@@ -14,9 +15,10 @@ typedef enum {
     NOT_INIT,
     READY,
     SENDING,
-    CONNECTING,   // used with TCP only
+    CONNECTING,    // used with TCP only
+    SSL_HANDSHAKE, // used with SSL only
     CLOSE,
-    STATUS_NUMBER // keep this as last
+    STATUS_NUMBER  // keep this as last
 } conn_status_t;
 
 typedef struct {
@@ -41,6 +43,13 @@ typedef struct {
     unsigned int serialize_request;
     pthread_t parent_thread;
     atomic_int busy;             // 1 if conn is allocated, 0 otherwise
+
+    // SSL/TLS support
+    int use_ssl;                  // 1 if SSL is enabled for this connection
+    SSL *ssl;                     // OpenSSL handle for this connection
+    int ssl_handshake_done;       // 1 if handshake is complete
+    int ssl_is_server;            // 1 if server side, 0 if client
+    pthread_mutex_t ssl_mtx;      // protects non-blocking handshake
 } conn_info_t;
 
 extern conn_info_t conns[MAX_CONNS];
@@ -78,5 +87,8 @@ int conn_del_sock(int sock);
 int conn_start_send(conn_info_t *conn, struct sockaddr_in target);
 int conn_send(conn_info_t *conn);
 int conn_recv(conn_info_t *conn);
+
+int conn_enable_ssl(int conn_id, SSL_CTX *ctx, int is_server);
+int conn_do_ssl_handshake(int conn_id);
 
 #endif /* __CONNECTION_H__ */
