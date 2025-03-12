@@ -256,10 +256,8 @@ void *thread_receiver(void *data) {
             dw_log("Connecting to %s:%d (sess_id=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), (int) (pkt_i / pkts_per_session));
             int rv = 0;
             for (int conn_try = 1; conn_try <= conn_retry_num + 1; conn_try++) {
-                do {
-                    rv = try_connect(&clientSocket[thread_id], serveraddr);
-                } while (conn_nonblock && rv == -1 && errno == EINPROGRESS);
-                if (rv == 0) {
+                rv = try_connect(&clientSocket[thread_id], serveraddr);
+                if (rv == 0 || (rv == -1 && errno == EINPROGRESS)) {
                     dw_log("CONNECTED after %d attempts\n", conn_try);
                     break;
                 } else {
