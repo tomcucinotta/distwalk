@@ -3,8 +3,8 @@ SHELL=/bin/bash
 CFLAGS=-Wall -O3 
 CFLAGS_DEBUG=-g -DDW_DEBUG -fprofile-arcs -ftest-coverage -fprofile-update=atomic
 CFLAGS_TSAN=-g -O2 -fsanitize=thread
-LDLIBS=-pthread -lm
-LDLIBS_DEBUG=-pthread -lm -lgcov
+LDLIBS=-pthread -lm -lssl -lcrypto
+LDLIBS_DEBUG=-pthread -lm -lssl -lcrypto -lgcov
 
 TEST_PROGRAMS=test_distrib test_distrib_debug test_ccmd test_message test_message_debug test_ccmd_debug test_pqueue test_pqueue_debug test_queue test_queue_debug test_timespec test_timespec_debug
 TSAN_PROGRAMS=dw_client_tsan dw_node_tsan
