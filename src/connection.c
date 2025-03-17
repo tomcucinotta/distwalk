@@ -364,10 +364,8 @@ int conn_start_send(conn_info_t *conn, struct sockaddr_in target) {
 static int conn_ssl_send(conn_info_t *conn) {
     pthread_mutex_lock(&conn->ssl_mtx);
 
-    int conn_id = conn_get_id_by_ptr(conn);
-
     ssize_t sent = SSL_write(conn->ssl, conn->curr_send_buf, conn->curr_send_size);
-    dw_log("SEND (SSL) conn_id=%d, curr_send_size=%lu\n", conn_id, conn->curr_send_size);
+    dw_log("SEND (SSL) conn_id=%d, curr_send_size=%lu\n", conn_get_id_by_ptr(conn), conn->curr_send_size);
     if (sent <= 0) {
         int err = SSL_get_error(conn->ssl, sent);
         if (err == SSL_ERROR_WANT_WRITE || err == SSL_ERROR_WANT_READ) {
@@ -401,10 +399,8 @@ static int conn_ssl_send(conn_info_t *conn) {
 static int conn_ssl_recv(conn_info_t *conn) {
     pthread_mutex_lock(&conn->ssl_mtx);
 
-    int conn_id = conn_get_id_by_ptr(conn);
-
     if (conn->status == SSL_HANDSHAKE) {
-        dw_log("Cannot receive: SSL handshake in progress on conn_id=%d\n", conn_id);
+        dw_log("Cannot receive: SSL handshake in progress on conn_id=%d\n", conn_get_id_by_ptr(conn));
         pthread_mutex_unlock(&conn->ssl_mtx);
         return 1;
     }
