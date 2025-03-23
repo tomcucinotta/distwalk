@@ -182,6 +182,15 @@ Set the scheduling policy (defaults to other), and its parameters:
   mainline Linux kernel, using the specified reservation runtime and deadline, which
   is set equal to the reservation period.
 
+Run the node in privileged mode if you wish to use `rr`, `fifo`, `dl` or `other` with
+negative niceness. Alternatively, configure unprivileged access to priorities
+and nice values in `/etc/security/limits.conf`. If you are planning to use `dl` 
+together with `--thread-affinity`, you need to disable the admission control with:
+```console
+echo -1 > /proc/sys/kernel/sched_rt_runtime_us
+```
+(Default value is 950000)
+
 ```  --wait-spin, --ws```
 
 Tell each worker thread to perform a busy-wait loop, till the next incoming request
