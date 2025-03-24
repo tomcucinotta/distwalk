@@ -1,0 +1,43 @@
+- import_playbook: dl-setup.yaml
+
+- name: Run DistWalk client (no stress)
+  hosts: clients
+  tasks:
+    - name: Run workload (Compute)
+      command: /tmp/dw_src/dw_client --to pcroom13 -C 10000 -F pcroom14 -C 10000 -r 10 -n 50
+      register: out1
+
+    - name: Print output to file (Compute)
+      copy:
+        content: "{{out1.stdout}}"
+        dest: /tmp/compute-nostress.log
+      delegate_to: localhost
+
+- name: Run yes stress
+  hosts: nodes
+  tasks:
+     - name: Run yes on core 2
+       shell: taskset -c 2 nohup yes > /dev/null &
+     - name: Run yes on core 3
+       shell: taskset -c 3 nohup yes > /dev/null &
+     - name: pause for 5 seconds
+       pause:
+         seconds: 5
+- name: Run DistWalk client (stress)
+  hosts: clients
+  tasks:
+    - name: Run workload (Compute)
+      command: /tmp/dw_src/dw_client --to pcroom13 -C 10000 -F pcroom14 -C 10000 -r 10 -n 50
+      register: out1
+
+    - name: Print output to file (Compute)
+      copy:
+        content: "{{out1.stdout}}"
+        dest: /tmp/compute-stress.log
+      delegate_to: localhost
+- name: Kill yes stress
+  hosts: nodes
+  tasks:
+     - name: Kill 
+       shell: kill -9 `pgrep yes`
+       ignore_errors: true
