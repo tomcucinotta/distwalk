@@ -90,7 +90,9 @@ static int n_bind_addrs = 0;
 static struct {
     char nodehostport[MAX_HOSTPORT_STRLEN];
     proto_t protocol;
-} bind_addrs[MAX_LISTEN_SOCKETS];
+} bind_addrs[MAX_LISTEN_SOCKETS] = {
+    [0 ... MAX_LISTEN_SOCKETS-1] = { .nodehostport = DEFAULT_ADDR ":" DEFAULT_PORT, .protocol = TCP }
+};
 
 typedef struct {
     int listen_socks[MAX_LISTEN_SOCKETS];
@@ -1825,8 +1827,6 @@ int main(int argc, char *argv[]) {
     if (n_bind_addrs == 0) {
         // user didn't provide --bind-addr => use default
         n_bind_addrs = 1;
-        strcpy(bind_addrs[0].nodehostport, DEFAULT_ADDR ":" DEFAULT_PORT);
-        bind_addrs[0].protocol = TCP;
     }
 
     // For each requested bind-addr, init the listen socket(s)
