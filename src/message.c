@@ -14,6 +14,7 @@ inline const char *proto_str(proto_t proto) {
     static const char *proto_str[PROTO_NUMBER] = {
         "UDP",
         "TCP",
+        "SSL",
     };
     return proto_str[proto];
 }
