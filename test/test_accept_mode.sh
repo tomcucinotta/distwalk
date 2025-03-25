@@ -25,17 +25,17 @@ kill_all SIGINT
 ## check with netstat
 
 node_bg --wait-bind-num 2 -a child --num-threads=2
-[ $(netstat --inet -an | grep -c 7891) -eq 2 ]
+[ $(netstat --inet -an | grep -v "TIME_WAIT" | grep -c 7891) -eq 2 ]
 
 kill_all SIGINT
 
 node_bg -a parent --num-threads=2
-[ $(netstat --inet -an | grep -c 7891) -eq 1 ]
+[ $(netstat --inet -an | grep -v "TIME_WAIT" | grep -c 7891) -eq 1 ]
 
 kill_all SIGINT
 
 node_bg -a shared --num-threads=2
-[ $(netstat --inet -an | grep -c 7891) -eq 1 ]
+[ $(netstat --inet -an | grep -v "TIME_WAIT" | grep -c 7891) -eq 1 ]
 
 kill_all SIGINT
 
