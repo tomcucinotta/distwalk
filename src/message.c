@@ -136,7 +136,7 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
 inline const void cmd_log(command_t* cmd) {
     command_t *c = cmd, *pre_c;
     while (c->cmd != EOM) {
-        char opts[64] = "";
+        char opts[256] = "";
 
         switch (c->cmd) {
         case STORE:
