@@ -408,11 +408,13 @@ void *thread_receiver(void *data) {
                 memset(&usecs_send[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
                 memset(&usecs_elapsed[thread_id][0], 0, sizeof(usecs_send[thread_id][0]) * MAX_PKTS);
             }
-            dw_log("Joining sender thread\n");
-            pthread_join(sender[thread_id], NULL);
+            if (thr_data.conn_id != -1) {
+                dw_log("Joining sender thread\n");
+                pthread_join(sender[thread_id], NULL);
 
-            close(clientSocket[thread_id]);
-            conn_free(thr_data.conn_id);
+                close(clientSocket[thread_id]);
+                conn_free(thr_data.conn_id);
+            }
         }
     }
 
