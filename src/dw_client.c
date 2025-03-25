@@ -269,8 +269,12 @@ void *thread_receiver(void *data) {
             int rv = 0;
             for (int conn_try = 1; conn_try <= conn_retry_num + 1; conn_try++) {
                 rv = try_connect(&clientSocket[thread_id], serveraddr);
-                if (rv == 0 || (rv == -1 && errno == EINPROGRESS)) {
+                if (rv == 0) {
                     dw_log("CONNECTED after %d attempts\n", conn_try);
+                    break;
+                } else if (rv == -1 && errno == EINPROGRESS) {
+                    dw_log("NON-BLOCKING CONNECT after %d attempts\n", conn_try);
+                    rv = 0;
                     break;
                 } else {
                     close(clientSocket[thread_id]);
