@@ -1,10 +1,17 @@
 - import_playbook: dl-setup.yaml
 
+- name: Prioritize wifi kernel thread (setup)
+  hosts: nodes
+  become: yes
+  tasks:
+    - name: chrt setup
+      shell: chrt -d --sched-runtime 5000000 --sched-deadline 5000000 -p 0 `pgrep iwlwifi`
+
 - name: Run DistWalk client (no stress)
   hosts: clients
   tasks:
     - name: Run workload (Compute)
-      command: /tmp/dw_src/dw_client --to pcroom13 -C 10000 -F pcroom14 -C 10000 -r 10 -n 50
+      command: /tmp/dw_src/dw_client --to pcroom13 -C 10000 -F pcroom14 -C 10000 -r 10 -n 1500
       register: out1
 
     - name: Print output to file (Compute)
@@ -27,7 +34,7 @@
   hosts: clients
   tasks:
     - name: Run workload (Compute)
-      command: /tmp/dw_src/dw_client --to pcroom13 -C 10000 -F pcroom14 -C 10000 -r 10 -n 50
+      command: /tmp/dw_src/dw_client --to pcroom13 -C 10000 -F pcroom14 -C 10000 -r 10 -n 1500
       register: out1
 
     - name: Print output to file (Compute)
@@ -41,3 +48,10 @@
      - name: Kill 
        shell: kill -9 `pgrep yes`
        ignore_errors: true
+
+- name: Prioritize wifi kernel thread (teardown)
+  hosts: nodes
+  become: yes
+  tasks:
+    - name: chrt teardown
+      shell: chrt -f -p 50 `pgrep iwlwifi`
