@@ -1,0 +1,14 @@
+- name: Host setup
+  hosts: all
+  become: yes
+  tasks:
+    - name: Run script/cpu-setup.sh (block CPU frequency, disable turbo-boosting, etc.)
+      shell: /tmp/dw_script/cpu-setup.sh 
+
+
+# - name: Prioritize wifi kernel thread
+#  hosts: nodes
+#  become: yes
+#  tasks:
+#    - name: chrt setup
+#      shell: chrt -d --sched-runtime 5000000 --sched-deadline 5000000 -p 0 `pgrep iwlwifi

@@ -1,4 +1,4 @@
-#- import_playbook: dw-startup.yaml
+#- import_playbook: dw-service-startup.yaml
 #- import_playbook: play-lb-teardown.yaml
 
 - name: Setup DistWalk clients

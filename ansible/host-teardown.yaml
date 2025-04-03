@@ -1,0 +1,13 @@
+- name: Host setup
+  hosts: all
+  become: yes
+  tasks:
+    - name: Run script/cpu-teardown.sh (unblock CPU frequency, enable turbo-boosting, etc.)
+      shell: /tmp/dw_script/cpu-teardown.sh 
+
+# - name: Deprioritize wifi kernel thread
+#  hosts: nodes
+#  become: yes
+#  tasks:
+#    - name: chrt teardown
+#      shell: chrt -f -p 50 `pgrep iwlwifi`

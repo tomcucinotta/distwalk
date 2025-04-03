@@ -1,4 +1,4 @@
-- import_playbook: dw-startup.yaml
+- import_playbook: dw-service-startup.yaml
 
 - name: Setup DistWalk clients
   hosts: clients

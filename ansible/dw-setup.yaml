@@ -1,4 +1,4 @@
-- name: Common setup
+- name: Common DistWalk setup
   hosts: all
   become: yes
   tasks:
@@ -9,7 +9,7 @@
     - name: Install gcc-10 alternative
       command: update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10
 
-    - name: Transfer DistWalk source files
+    - name: Transfer DistWalk source files from this localhost
       synchronize:
         src: ../src/
         dest: /tmp/dw_src/
@@ -19,13 +19,18 @@
           - "--include='*.c'"
           - "--include='Makefile'"
           - "--exclude='*'" # exclude all other files
+    
+    - name: Transfer DistWalk auxiliary scripts from this localhost
+      synchronize:
+        src: ../script/
+        dest: /tmp/dw_script/
 
     - name: Compile DistWalk
       make:
         chdir: /tmp/dw_src/
         target: all
 
-    - name: Ensure local DistWalk node service is stopped
+    - name: Ensure DistWalk node's systemd service is stopped (if present)
       systemd:
         name: node.service
         enabled: no
@@ -34,7 +39,7 @@
       failed_when:
         - node_service_stop.failed == true
         - '"Could not find the requested service" not in node_service_stop.msg'
-    - name: Ensure local DistWalk client service is stopped
+    - name: Ensure DistWalk client's systemd service is stopped (if present)
       systemd:
         name: client.service
         enabled: no
@@ -44,15 +49,20 @@
         - client_service_stop.failed == true
         - '"Could not find the requested service" not in client_service_stop.msg'
     - name: Kill previous process, if any
-      shell: pkill -f "dw_node|dw_node_debug|dw_client|dw_client_debug" || true
-      ignore_errors: true
+      shell: pkill -f "dw_node|dw_node_debug|dw_node_tsan|dw_client|dw_client_debug|dw_client_tsan"
+      register: pkill_result
+      failed_when: pkill_result.rc > 1 
 
-- name: DistWalk node setup
+- name: DistWalk node setup (specify more parameters with --extra-vars "dw='<standard-dw-node-parameters>'" when running the playbook)
   hosts: nodes
   become: yes
   tasks:
-    - name: Run 
-      shell: nohup /tmp/dw_src/dw_node -b {{ inventory_hostname }} -c 2-3 --sched-policy=dl:30000,100000 &
+    - name: Run DistWalk node
+      shell: nohup /tmp/dw_src/dw_node -b {{ inventory_hostname }} {{ dw | default('') }} &
+    - name: DistWalk parameters (with extra variables)
+      debug: 
+        msg: "/tmp/dw_src/dw_node -b {{ inventory_hostname }} {{ dw | default('') }}"
+
     - name: Check if dw_node ready
       command: lsof -i :7891
       register: port_check
