@@ -435,7 +435,7 @@ static struct argp_option argp_client_options[] = {
     { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val][,nosync]", 0, "Per-store data payload size"},
     { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
-    { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands (with probability val, defaults to 1.0)"},
+    { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands with probability val in (0,1.0], defaults to 1.0"},
     { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,branch][,nack=n]", 0, "Send a number of FORWARD messages to the ip:port list"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests; Optionally specify timeout and connection retries, as well as specify if its a continued/branched multi-forward"},
     { "rs",                 REPLY_CMD,              "nbytes|prob:field=val[,field=val]", OPTION_ARG_OPTIONAL, "Add a Reply command; Optionally specify payload size"},

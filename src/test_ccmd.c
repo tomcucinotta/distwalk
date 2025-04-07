@@ -316,7 +316,7 @@ bool test_ccmd_skip_4() {
     return res;
 }
 
-bool test_ccmd_dump() {
+bool test_ccmd_dump_1() {
     queue_t* ccmd = queue_alloc(9);
 
     pd_spec_t val = pd_build_fixed(100);
@@ -389,6 +389,56 @@ bool test_ccmd_dump() {
         return res;
 }  
 
+bool test_ccmd_dump_2() {
+    queue_t* ccmd = queue_alloc(10);
+
+    pd_spec_t val = pd_build_fixed(2000);
+    ccmd_add(ccmd, COMPUTE, &val);
+    
+    //
+    val = pd_build_fixed(100);
+    ccmd_add(ccmd, FORWARD_BEGIN, &val);
+
+    val = pd_build_fixed(3000);
+    ccmd_add(ccmd, COMPUTE, &val);
+
+    //
+    val = pd_build_fixed(100);
+    ccmd_add(ccmd, PSKIP, &val);
+    ccmd_last(ccmd)->n_skip = 1;
+
+    val = pd_build_fixed(100);
+    ccmd_add(ccmd, FORWARD_BEGIN, &val);
+
+    val = pd_build_fixed(4000);
+    ccmd_add(ccmd, COMPUTE, &val);
+
+
+    val = pd_build_fixed(512);
+    ccmd_add(ccmd, REPLY, &val);
+
+    val = pd_build_fixed(512);
+    ccmd_add(ccmd, REPLY, &val);
+
+    val = pd_build_fixed(612);
+    ccmd_add(ccmd, REPLY, &val);
+
+    //
+    unsigned char *send_buf = malloc(BUF_SIZE);
+    message_t *m = (message_t *)send_buf;
+    m->req_size = BUF_SIZE;
+    ccmd_dump(ccmd, m);
+
+
+    bool res = true;
+    if (queue_size(ccmd) != 9 || msg_num_cmd(m) != 5) {
+        res = false;
+    }
+
+    ccmd_destroy(&ccmd);
+    return res;
+}
+
 int main() {
     int rv = 0;
     perform_test(test_ccmd_init_destroy(), rv);
@@ -404,6 +454,7 @@ int main() {
     perform_test(test_ccmd_skip_2(), rv);
     perform_test(test_ccmd_skip_3(), rv);
     perform_test(test_ccmd_skip_4(), rv);
-    perform_test(test_ccmd_dump(), rv);
+    perform_test(test_ccmd_dump_1(), rv);
+    perform_test(test_ccmd_dump_2(), rv);
     return !rv;
 }
