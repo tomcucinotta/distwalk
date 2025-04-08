@@ -1,0 +1,27 @@
+pcrooms:
+  hosts:
+    pcroom1:
+      ansible_user: adm-pcroom
+    pcroom13:
+      ansible_user: adm-pcroom
+    pcroom14:
+      ansible_user: adm-pcroom
+    pcroom15:
+      ansible_user: adm-pcroom
+#
+nodes:
+  hosts:
+    pcroom13:
+    pcroom14:
+    pcroom15:
+edge:
+  hosts:
+    pcroom13:
+    pcroom14:
+cloud:
+  hosts:
+    pcroom15:
+#
+clients:
+  hosts:
+    pcroom1:

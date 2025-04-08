@@ -1,0 +1,19 @@
+- import_playbook: dw-setup.yaml
+- import_playbook: ic2e-setup.yaml
+- import_playbook: host-setup.yaml
+
+- name: Run DistWalk client
+  hosts: clients
+  tasks:
+    - name: Run workload
+      command: /tmp/dw_src/dw_client --to pcroom13 -C 2ms -F pcroom14 -C 2ms --skip 1,prob=0.1 -F pcroom15 -C 2ms -r 10 -n 50
+      register: out1
+
+    - name: Print output to file
+      copy:
+        content: "{{out1.stdout}}"
+        dest: /tmp/ic2e.log
+      delegate_to: localhost
+
+- import_playbook: host-teardown.yaml
+- import_playbook: ic2e-teardown.yaml

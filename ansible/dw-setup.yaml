@@ -2,9 +2,11 @@
   hosts: all
   become: yes
   tasks:
-    - name: Install gcc-10
+    - name: Install APT packages
       apt:
-        name: gcc-10
+        name: 
+          - gcc-10
+          - cpufrequtils
         state: present
     - name: Install gcc-10 alternative
       command: update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10
@@ -69,4 +71,3 @@
       retries: 10
       delay: 1
       until: port_check.rc == 0
-
