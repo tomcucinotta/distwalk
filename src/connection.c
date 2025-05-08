@@ -264,7 +264,7 @@ unsigned char *get_send_buf(conn_info_t *pc, size_t size) {
 }
 
 message_t* conn_prepare_send_message(conn_info_t *conn) {
-    message_t* m = (message_t*) conn->send_buf + conn->curr_send_size;
+    message_t* m = (message_t*) (conn->send_buf + conn->curr_send_size);
     m->req_size = BUF_SIZE - (conn->curr_send_buf - conn->send_buf + conn->curr_send_size);
     return m;
 }
@@ -297,7 +297,7 @@ message_t* conn_prepare_recv_message(conn_info_t *conn) {
 // start sending a message, assume the head of the curr_send_buffer is a message_t type
 // returns the number of bytes sent, -1 if an error occured
 int conn_start_send(conn_info_t *conn, struct sockaddr_in target) {
-    message_t *m = (message_t*) conn->send_buf + conn->curr_send_size;
+    message_t *m = (message_t*) (conn->send_buf + conn->curr_send_size);
     conn->target = target;
     dw_log("SEND starting, conn_id: %d, status: %s, msg_size: %d\n", conn_get_id_by_ptr(conn), conn_status_str(conn->status), m->req_size);
     if (conn->curr_send_size == 0)
