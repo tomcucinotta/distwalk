@@ -773,14 +773,23 @@ void setnonblocking(int fd) {
 
 // @TODO: in case of multi-forward (branched or not), this has to distinguish among who replied and who not, rather than just counting retries in req->fwd_retries
 void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
-    if (!pqueue_size(infos->timeout_queue))
+    struct itimerspec disarmspec = {0};
+    disarmspec = us_to_its(0);
+
+    if (!pqueue_size(infos->timeout_queue)) {
+        sys_check(timerfd_settime(infos->timerfd, 0, &disarmspec, NULL));
+        dw_log("Empty TIMEOUT queue, timer disarmed.\n");
         return;
+    }
 
     int req_id = pqueue_node_data(pqueue_top(infos->timeout_queue)).value;
     req_info_t *req = req_get_by_id(req_id);
-    if (!req)
+    if (!req) {
+        sys_check(timerfd_settime(infos->timerfd, 0, &disarmspec, NULL));
+        dw_log("Request req_id: %d missing, timer disarmed.\n", req_id);
         return;
-
+    }
+    
     message_t *m = req_get_message(req);
     conn_info_t *conn = conn_get_by_id(req->conn_id);
 
