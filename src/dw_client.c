@@ -566,7 +566,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             if (sscanf(tok, "%d", &n_skip) == 1)
                 check(n_skip >=1, "arg to --skip must be a positive integer");
             else if (sscanf(tok, "prob=%lf", &val.val) == 1)
-                check(val.val > 0.0 && val.val <= 1.0, "prob= in --skip needs a value > 0 and <= 1.0\n");
+                check(val.val >= 0.0 && val.val <= 1.0, "prob= in --skip needs a value >= 0 and <= 1.0\n");
             else {
                 fprintf(stderr, "Wrong syntax for --skip args\n");
                 exit(EXIT_FAILURE);
