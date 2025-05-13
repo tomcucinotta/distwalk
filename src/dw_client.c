@@ -155,7 +155,6 @@ void *thread_sender(void *data) {
     for (int i = 0; i < num_send_pkts; i++) {
         int pkt_id = first_pkt_id + i;
         m = conn_prepare_send_message(conn);
-        ccmd_dump(ccmd, m);
 
         // remember time of send relative to ts_start
         struct timespec ts_send;
@@ -168,7 +167,8 @@ void *thread_sender(void *data) {
         // Issue a request to the server
         m->req_id = pkt_id;
         m->req_size = pd_sample(&send_pkt_size_pd);
-
+        ccmd_dump(ccmd, m);
+        
         dw_log("sending %u bytes...\n", m->req_size);
         assert(m->req_size <= BUF_SIZE);
         #ifdef DW_DEBUG
