@@ -85,7 +85,7 @@ static void conn_reset(conn_info_t *conn) {
             } else
                 dw_log("\n");
         }
-    for (req_info_t *temp = conn->req_list; temp != NULL; temp = req_free(temp)) {
+    for (req_info_t *temp = conn->req_list; temp != NULL; temp = req_unlink(temp)) {
         dw_log("conn_reset(): freeing req_id: %d, conn_id: %d, .conn_id: %d -> ",
                temp->req_id, conn_get_id_by_ptr(conn), temp->conn_id);
         if (temp->message_ptr) {
@@ -104,7 +104,6 @@ req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
 
     dw_log("DEFRAGMENT remove, conn_id:%d empty memory [%p, %p[\n", req->conn_id, req->message_ptr, req->message_ptr + req_size);
 
-    req->message_ptr = NULL;
     conn->curr_recv_buf -= req_size;
     conn->curr_proc_buf -= req_size;
     conn->curr_recv_size += req_size;
@@ -120,7 +119,7 @@ req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
 
     if (conn->req_list == req)
         conn->req_list = conn->req_list->next;
-    return req_free(req);
+    return req_unlink(req);
 }
 
 // return index in conns[] of conn_info_t associated to inaddr:port, or -1 if not found

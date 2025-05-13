@@ -14,7 +14,7 @@ void req_init() {
     }
 }
 
-req_info_t* req_free(req_info_t* r) {
+req_info_t* req_unlink(req_info_t* r) {
     dw_log("REQUEST remove req_id:%d\n", r->req_id);
 
     req_info_t *next = r->next;
@@ -25,6 +25,7 @@ req_info_t* req_free(req_info_t* r) {
     r->next = NULL;
     r->prev = NULL;
     r->req_id = -1;
+    r->message_ptr = NULL;
 
     return next;
 }

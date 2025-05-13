@@ -32,7 +32,7 @@ extern atomic_int last_reqs;
 void req_init();
 
 req_info_t* req_alloc();
-req_info_t* req_free(req_info_t *r);
+req_info_t* req_unlink(req_info_t *r);
 
 static inline message_t* req_get_message(req_info_t *r) {
     return (message_t*)r->message_ptr;
