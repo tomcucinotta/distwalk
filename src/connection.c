@@ -100,9 +100,10 @@ static void conn_reset(conn_info_t *conn) {
 req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
     unsigned long req_size = req_get_message(req)->req_size;
     unsigned long leftover = conn->curr_recv_buf - (req->message_ptr + req_size);
+    
     memmove(req->message_ptr, req->message_ptr + req_size, leftover);
-
-    dw_log("DEFRAGMENT remove, conn_id:%d empty memory [%p, %p[\n", req->conn_id, req->message_ptr, req->message_ptr + req_size);
+    dw_log("DEFRAGMENT remove req_id:%d, conn_id:%d [%p, %p[\n", req->req_id, req->conn_id, 
+                                                                 req->message_ptr, req->message_ptr + req_size);
 
     conn->curr_recv_buf -= req_size;
     conn->curr_proc_buf -= req_size;
