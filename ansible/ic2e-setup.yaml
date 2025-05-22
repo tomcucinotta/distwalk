@@ -1,12 +1,16 @@
-- name: Add network impairment to cloud service
-  hosts: cloud
+- name: Teardown any network impairment previously applied to the hosts
+  hosts: all
   become: yes
   tasks:
-    - name:  netem teardown previously applied network conditions, if any
+    - name:  netem teardown
       shell: tc qdisc del dev wlp2s0 root netem
       register: netem_result
       failed_when: netem_result.rc == 1
 
+- name: Add network impairment to cloud service
+  hosts: cloud
+  become: yes
+  tasks:
     - name:  netem setup
       shell: tc qdisc add dev wlp2s0 root netem delay 150ms
       register: netem_result
