@@ -29,7 +29,7 @@ More information on the objectives, motivations, design, architecture
 and internals of DistWalk can be found in the paper:
 
 R. Andreoli, T. Cucinotta. "DistWalk: a Distributed Workload Emulator,"
-(to appear) in Proceedings of the 25th IEEE international Symposium on
+in Proceedings of the 25th IEEE international Symposium on
 Cluster, Cloud and Internet Computing (IEEE CCGRID 2025), May 19-22,
 2025, Tromsø, Norway.
 See also: https://retis.santannapisa.it/~tommaso/papers/ccgrid25.php
