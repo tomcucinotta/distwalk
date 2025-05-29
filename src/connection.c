@@ -131,24 +131,26 @@ static void conn_reset(conn_info_t *conn) {
 }
 
 req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
-    unsigned long req_size = req_get_message(req)->req_size;
-    unsigned long leftover = conn->curr_recv_buf - (req->message_ptr + req_size);
+    if (conn->enable_defrag) {
+        unsigned long req_size = req_get_message(req)->req_size;
+        unsigned long leftover = conn->curr_recv_buf - (req->message_ptr + req_size);
     
-    memmove(req->message_ptr, req->message_ptr + req_size, leftover);
-    dw_log("DEFRAGMENT remove req_id:%d, conn_id:%d [%p, %p[\n", req->req_id, req->conn_id, 
+        memmove(req->message_ptr, req->message_ptr + req_size, leftover);
+        dw_log("DEFRAGMENT remove req_id:%d, conn_id:%d [%p, %p[\n", req->req_id, req->conn_id, 
                                                                  req->message_ptr, req->message_ptr + req_size);
 
-    conn->curr_recv_buf -= req_size;
-    conn->curr_proc_buf -= req_size;
-    conn->curr_recv_size += req_size;
-    for (req_info_t *temp = req->prev; temp != NULL; temp = temp->prev) {
-        dw_log("DEFRAGMENT update ptr, req_id:%d message [%p, %p[ -> [%p, %p[\n", 
+        conn->curr_recv_buf -= req_size;
+        conn->curr_proc_buf -= req_size;
+        conn->curr_recv_size += req_size;
+        for (req_info_t *temp = req->prev; temp != NULL; temp = temp->prev) {
+            dw_log("DEFRAGMENT update ptr, req_id:%d message [%p, %p[ -> [%p, %p[\n", 
                temp->req_id,
                temp->message_ptr,
                temp->message_ptr + req_get_message(temp)->req_size,
                temp->message_ptr - req_size,
                temp->message_ptr - req_size + req_get_message(temp)->req_size);
-        temp->message_ptr -= req_size;
+            temp->message_ptr -= req_size;
+        }
     }
 
     if (conn->req_list == req)

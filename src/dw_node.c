@@ -173,6 +173,7 @@ int conn_threads = 1;
 int no_delay = 1;
 atomic_int next_thread_cnt = 0;
 int use_wait_spinning = 0;
+int enable_defrag = 1;
 
 typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
 accept_mode_t accept_mode = AM_CHILD;
@@ -346,6 +347,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
             return NULL;
         }
 
+        conn_get_by_id(fwd_conn_id)->enable_defrag = enable_defrag;
         if (fwd.proto == TCP || fwd.proto == TLS) {
             check(dw_poll_add(p_poll, clientSocket, DW_POLLOUT | DW_POLLIN, i2l(CONNECT, fwd_conn_id)) == 0);
 
@@ -1228,6 +1230,7 @@ void* conn_worker(void* args) {
                 } else
                     conn_set_status_by_id(conn_id, READY);
 
+                conn_get_by_id(conn_id)->enable_defrag = enable_defrag;
                 infos->active_conns++;
                 
                 int next_thread_id = accept_mode == AM_PARENT ? (atomic_fetch_add(&next_thread_cnt, 1) % conn_threads) : (infos - conn_worker_infos);
@@ -1323,6 +1326,7 @@ enum argp_node_option_keys {
     SCHED_POLICY = 0x102,
     SYNC,
     ODIRECT,
+    NO_DEFRAG,
     NO_DELAY,
     WAIT_SPIN,
     LOOPS_PER_USEC,
@@ -1368,6 +1372,7 @@ static struct argp_option argp_node_options[] = {
     {"sched-policy",      SCHED_POLICY,     "other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us", 0,  "Scheduling policy (defaults to other)"},
     {"no-delay",          NO_DELAY,         "0|1",                            0,  "Set value of TCP_NODELAY socket option"},
     {"nd",                NO_DELAY,         "0|1", OPTION_ALIAS },
+    {"no-defrag",         NO_DEFRAG,         0,                               0,  "Disable defragmentation of connection buffers for incoming messages (defaults to defrag enabled)"},
     {"wait-spin",         WAIT_SPIN,         0,                               0,  "Spin-wait instead of sleeping till next received packet"},
     {"ws",                WAIT_SPIN,         0, OPTION_ALIAS },
     {"loops-per-usec",    LOOPS_PER_USEC,    "value",                         0,  "Set loops_per_usec calibration parameter (0: handle it automatically in ~/.dw_loops_per_usec; -1: use frequency-invariant mode)"},
@@ -1432,6 +1437,9 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
     case NO_DELAY:
         no_delay = atoi(arg);
         check(no_delay == 0 || no_delay == 1);
+        break;
+    case NO_DEFRAG:
+        enable_defrag = 0;
         break;
     case WAIT_SPIN:
         use_wait_spinning = 1;
@@ -1531,6 +1539,7 @@ void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct so
             lsock = socket(AF_INET, SOCK_DGRAM, 0);
             int conn_id = conn_alloc(lsock, serverAddr, UDP);
             conn_set_status_by_id(conn_id, READY);
+            conn_get_by_id(conn_id)->enable_defrag = enable_defrag;
         }
         int val = 1;
         sys_check(setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));

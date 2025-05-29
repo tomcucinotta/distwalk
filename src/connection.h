@@ -43,6 +43,8 @@ typedef struct {
     unsigned int serialize_request;
     pthread_t parent_thread;
     atomic_int busy;             // 1 if conn is allocated, 0 otherwise
+    
+    int enable_defrag;            // Defragment receive buffer to reduce memory usage
 
     // SSL/TLS support
     int use_ssl;                  // 1 if SSL is enabled for this connection
