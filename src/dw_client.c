@@ -496,7 +496,7 @@ static struct argp_option argp_client_options[] = {
     { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val][,nosync]", 0, "Per-store data payload size"},
     { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
     { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
-    { "skip",               SKIP_CMD,               "n[,prob=val]",                               0, "Skip the next n commands with probability val in (0,1.0], defaults to 1.0"},
+    { "skip",               SKIP_CMD,               "n[,prob=val,every=m]",                       0, "Skip the next n commands with probability val in (0,1.0] (defaults to 1.0), every m requests (defaults to 1)"},
     { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,branch][,nack=n]", 0, "Send a number of FORWARD messages to the ip:port list"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests; Optionally specify timeout and connection retries, as well as specify if its a continued/branched multi-forward"},
     { "rs",                 REPLY_CMD,              "nbytes|prob:field=val[,field=val]", OPTION_ARG_OPTIONAL, "Add a Reply command; Optionally specify payload size"},
@@ -636,12 +636,15 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case SKIP_CMD: {
         pd_spec_t val = pd_build_fixed(1.0);
         int n_skip = -1;
+        int n_every = 1;
         char *tok;
         while ((tok = strsep(&arg, ",")) != NULL) {
             if (sscanf(tok, "%d", &n_skip) == 1)
                 check(n_skip >=1, "arg to --skip must be a positive integer");
             else if (sscanf(tok, "prob=%lf", &val.val) == 1)
                 check(val.val >= 0.0 && val.val <= 1.0, "prob= in --skip needs a value >= 0 and <= 1.0\n");
+            else if (sscanf(tok, "every=%d", &n_every) == 1)
+                check(n_every >= 1, "every= in --skip needs a value >= 1\n");
             else {
                 fprintf(stderr, "Wrong syntax for --skip args\n");
                 exit(EXIT_FAILURE);
@@ -650,6 +653,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         check(n_skip != -1, "--skip needs a positive integer as arg\n");
         ccmd_add(ccmd, PSKIP, &val);
         ccmd_last(ccmd)->n_skip = n_skip;
+        ccmd_last(ccmd)->n_every = n_every;
         break; }
     case FORWARD_CMD: {
         if (arguments->branching_degree > 0 && ccmd_last(ccmd)->cmd != REPLY) { // automatically close previous fwd branch

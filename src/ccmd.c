@@ -91,11 +91,11 @@ int ccmd_dump(queue_t* q, message_t* m) {
                 break;
             case PSKIP:
                 drand48_r(&rnd_buf, &x);
-                dw_log("skip: x=%g, prob=%g\n", x, ccmd_itr->pd_val.val);
-                if (x <= ccmd_itr->pd_val.val)
+                dw_log("skip: x=%g,prob=%g,every=%d\n", x, ccmd_itr->pd_val.val, ccmd_itr->n_every);
+                if (m->req_id % ccmd_itr->n_every == 0 && x <= ccmd_itr->pd_val.val)
                     ccmd_itr = ccmd_skip(ccmd_itr->next, ccmd_itr->n_skip);
                 else
-                    ccmd_itr = ccmd_itr -> next;
+                    ccmd_itr = ccmd_itr->next;
                 continue;
             case FORWARD_BEGIN:
             case FORWARD_CONTINUE:

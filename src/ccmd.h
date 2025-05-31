@@ -18,7 +18,7 @@ typedef struct ccmd_node_t {
     load_opts_t load;
     fwd_opts_t fwd;
     reply_opts_t resp;
-    int n_skip;
+    int n_skip, n_every;
     struct ccmd_node_t* next;
 } ccmd_node_t;
 

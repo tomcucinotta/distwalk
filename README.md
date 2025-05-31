@@ -386,9 +386,9 @@ Set the number of connection retries by the client to the (initial) node in case
 
 Set the interval between subsequent connection retries.
 
-```  -s, --skip=n[,prob=val]```
+```  -s, --skip=n[,prob=val|,every=m]```
 
-Skip the next `n` commands (with probability val, defaults to 1.0 if unspecified).
+Skip the next `n` commands with probability val (defaults to 1.0 if unspecified), every m requests (defaults to 1 if unspecified).
 
 ```  -f, --script-filename=path/to/file```
 
