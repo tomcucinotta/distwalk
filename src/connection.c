@@ -140,8 +140,10 @@ req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
                                                                  req->message_ptr, req->message_ptr + req_size);
 
         conn->curr_recv_buf -= req_size;
-        conn->curr_proc_buf -= req_size;
         conn->curr_recv_size += req_size;
+        assert(conn->curr_proc_buf >= req->message_ptr + req_size);
+        conn->curr_proc_buf -= req_size;
+
         for (req_info_t *temp = req->prev; temp != NULL; temp = temp->prev) {
             dw_log("DEFRAGMENT update ptr, req_id:%d message [%p, %p[ -> [%p, %p[\n", 
                temp->req_id,
@@ -149,6 +151,7 @@ req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
                temp->message_ptr + req_get_message(temp)->req_size,
                temp->message_ptr - req_size,
                temp->message_ptr - req_size + req_get_message(temp)->req_size);
+            assert(temp->message_ptr >= req->message_ptr + req_size);
             temp->message_ptr -= req_size;
         }
     }

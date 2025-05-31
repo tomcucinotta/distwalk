@@ -771,13 +771,14 @@ int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos) {
 
             req->message_ptr = (unsigned char*) m;
             req->curr_cmd = message_first_cmd(m);
+            unsigned long req_size = m->req_size;
             int executed = process_single_message(req, p_poll, infos);
 
             if (executed < 0)
                 return 0;
 
             if (!executed && conns[conn_id].serialize_request) {
-                conns[conn_id].curr_proc_buf += m->req_size;
+                conns[conn_id].curr_proc_buf += req_size;
                 return 1;
             }
         }
