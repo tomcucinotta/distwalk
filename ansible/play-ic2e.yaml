@@ -6,7 +6,7 @@
   hosts: clients
   tasks:
     - name: Run workload
-      command: /tmp/dw_src/dw_client --to pcroom13 -C 2ms -F pcroom14 -C 2ms --skip 1,prob=0.1 -F pcroom15 -C 2ms -r 10 -n 50
+      command: /tmp/dw_src/dw_client --to pcroom13 -C 2k -F pcroom14 -C 2k --skip 1,prob=0.75 -F pcroom15 -C 2k -r 10 -n 100
       register: out1
 
     - name: Print output to file
