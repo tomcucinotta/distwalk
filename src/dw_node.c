@@ -890,7 +890,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
 
     if (pflags & DW_POLLIN) {
         dw_log("calling recv_mesg()\n");
-        if (!conn_recv(conn))
+        if (conn_recv(conn) == 0)
             goto err;
     }
     if ((pflags & DW_POLLOUT) && (type == CONNECT)) {

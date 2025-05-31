@@ -352,42 +352,43 @@ void *thread_receiver(void *data) {
 
         do {
             recv = conn_recv(conn);
-            m = conn_prepare_recv_message(conn);
-        } while (recv > 0 && !m);
+            if (recv == 0) {
+                printf("Error: cannot read received message\n");
+                unsigned long skip_pkts =
+                    pkts_per_session - (pkt_i % pkts_per_session);
+                printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
+                num_failed += skip_pkts;
+                i_incr = skip_pkts;
+                goto skip;
+            }
+        } while (recv == -1);
 
-        if (!recv) {
-            printf("Error: cannot read received message\n");
-            unsigned long skip_pkts =
-                pkts_per_session - (pkt_i % pkts_per_session);
-            printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
-            num_failed += skip_pkts;
-            i_incr = skip_pkts;
-            goto skip;
-        }
+        while ((m = conn_prepare_recv_message(conn))) {
+            dw_log("thread_id: %d\n", thread_id);
 
-        #ifdef DW_DEBUG
+#ifdef DW_DEBUG
             msg_log(m, "received message: ");
-        #endif
+#endif
 
-        unsigned pkt_id = m->req_id;
-        if (m->status != 0) {
-            dw_log("REPLY reported an error\n");
-            num_failed++;
-            i_incr = 1;
-            goto skip;
+            unsigned pkt_id = m->req_id;
+            if (m->status != 0) {
+                dw_log("REPLY reported an error\n");
+                num_failed++;
+                i_incr = 1;
+            } else {
+                struct timespec ts_now;
+                clock_gettime(clk_id, &ts_now);
+                unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
+                    (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
+                usecs_elapsed[thread_id][idx(pkt_id)] =
+                    usecs - usecs_send[thread_id][idx(pkt_id)];
+                dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
+                       usecs_elapsed[thread_id][idx(pkt_id)]);
+
+                num_success++;
+                i_incr = 1;
+            }
         }
-
-        struct timespec ts_now;
-        clock_gettime(clk_id, &ts_now);
-        unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
-                            (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
-        usecs_elapsed[thread_id][idx(pkt_id)] =
-            usecs - usecs_send[thread_id][idx(pkt_id)];
-        dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
-            usecs_elapsed[thread_id][idx(pkt_id)]);
-
-        num_success++;
-        i_incr = 1;
 
     skip:
         if ((pkt_i + i_incr) % pkts_per_session == 0) {

@@ -418,7 +418,7 @@ static int conn_ssl_recv(conn_info_t *conn) {
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
             dw_log("SSL_read() got WANT_{READ,WRITE}, ignoring...\n");
             pthread_mutex_unlock(&conn->ssl_mtx);
-            return 1;
+            return -1;
         }
         fprintf(stderr, "SSL_read() error: %d\n", err);
         ERR_print_errors_fp(stderr);
@@ -470,6 +470,7 @@ int conn_send(conn_info_t *conn) {
     return (int)sent;
 }
 
+// return 1 if received succesfully, -1 on EAGAIN or EWOULDBLOCK, and 0 on other errors
 int conn_recv(conn_info_t *conn) {
     int sock = conn->sock;
     socklen_t recvsize = sizeof(conn->target);
@@ -485,7 +486,7 @@ int conn_recv(conn_info_t *conn) {
         return 0;
     } else if (received == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         dw_log("RECV Got EAGAIN or EWOULDBLOCK, ignoring...\n");
-        return 1;
+        return -1;
     } else if (received == -1) {
         fprintf(stderr, "RECV Unexpected error: %s\n", strerror(errno));
         return 0;
