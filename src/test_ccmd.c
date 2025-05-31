@@ -328,6 +328,7 @@ bool test_ccmd_dump_1() {
     val = pd_build_fixed(300);
     ccmd_add(ccmd, PSKIP, &val);
     ccmd_last(ccmd)->n_skip = 2;
+    ccmd_last(ccmd)->n_every = 1;
 
     val = pd_build_fixed(400);
     ccmd_add(ccmd, LOAD, &val);
@@ -406,6 +407,7 @@ bool test_ccmd_dump_2() {
     val = pd_build_fixed(100);
     ccmd_add(ccmd, PSKIP, &val);
     ccmd_last(ccmd)->n_skip = 1;
+    ccmd_last(ccmd)->n_every = 1;
 
     val = pd_build_fixed(100);
     ccmd_add(ccmd, FORWARD_BEGIN, &val);
