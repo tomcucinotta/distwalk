@@ -26,6 +26,16 @@ kill_all SIGINT
 #
 node_bg &> $TMP
 
+client --skip 1,every=2 -C 100 -C 200 -n 2
+
+grep "COMPUTE....us" $TMP | head -1 | grep -q " COMPUTE(200us)->REPLY"
+grep "COMPUTE....us" $TMP | tail -1 | grep -q " COMPUTE(100us)->COMPUTE(200us)->REPLY"
+
+kill_all SIGINT
+
+#
+node_bg &> $TMP
+
 client -C 10 --skip 1,prob=0.5 -C 20 -n 100
 
 [ $(grep -c "COMPUTE.10us" $TMP) -eq 100 ]
