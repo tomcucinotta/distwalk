@@ -35,8 +35,6 @@ int main(int argc, char **argv) {
 
     // TODO: We need a way to verify that our probability distribution implementations are correct w.r.t the theoretical ones
     //printf("distrib=%s\n", pd_str(&val));
-    for (int i = 0; i < num_samples; i++) {
-        pd_sample(&val);
+    for (int i = 0; i < num_samples; i++)
         printf("%g\n", pd_sample(&val));
-    }
-}   
+}
