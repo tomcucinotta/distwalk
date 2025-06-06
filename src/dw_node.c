@@ -39,6 +39,8 @@
 
 #define MAX_EVENTS 10
 
+volatile uint8_t running = 1;
+
 // whether there's at least one bind address with SSL enabled
 int ssl_enable = 0;
 SSL_CTX *server_ssl_ctx = NULL;
@@ -533,7 +535,7 @@ void compute_for_freqinv(unsigned long usecs) {
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_beg);
     do {
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
-    } while (ts_sub_us(ts_end, ts_beg) < usecs);
+    } while (running && ts_sub_us(ts_end, ts_beg) < usecs);
 }
 
 unsigned long __attribute__((optimize("O0"))) loop() {
@@ -548,6 +550,8 @@ double __attribute__((optimize("O0"))) compute_loops_per_usec() {
     struct timespec ts_beg, ts_end;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_beg);
     for (int i = 0; i < 100000; i++) {
+        if (!running)
+            break;
         loop();
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
         unsigned long elapsed_ns = ts_sub_ns(ts_end, ts_beg);
@@ -571,6 +575,8 @@ void compute_for(unsigned long usecs) {
     struct timespec ts_beg, ts_end;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_beg);
     for (int i = 0; i < nloops; i++) {
+        if (!running)
+            break;
         loop();
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
         unsigned long elapsed_ns = ts_sub_ns(ts_end, ts_beg);
@@ -981,8 +987,6 @@ void* storage_worker(void* args) {
     storage_worker_info_t *infos = (storage_worker_info_t *)args;
     infos->sync_waiting_queue = pqueue_alloc(MAX_REQS);
 
-    volatile int running = 1;
-
     sprintf(thread_name, "storagew");
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
@@ -1121,7 +1125,6 @@ void* storage_worker(void* args) {
 
 void* conn_worker(void* args) {
     conn_worker_info_t *infos = (conn_worker_info_t *)args;
-    volatile int running = 1;
 
     sprintf(thread_name, "connw-%d", infos->worker_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
