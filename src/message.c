@@ -19,6 +19,15 @@ inline const char *proto_str(proto_t proto) {
     return proto_str[proto];
 }
 
+inline const char* msg_status_str(msg_status_t msg_status) {
+    static const char *proto_str[MSG_STATUS_NUMBER] = {
+        "SUCCESS",
+        "TIMEOUT",
+        "ERROR",
+    };
+    return proto_str[msg_status];
+}
+
 inline const char* get_command_name(command_type_t cmd) {
     switch (cmd) {
     case COMPUTE: return "COMPUTE";
@@ -181,6 +190,6 @@ inline const void cmd_log(command_t* cmd) {
 
 inline const void msg_log(message_t* m, char* padding) {
     printf("%s", padding);
-    printf("message (req_id: %u, req_size: %u, num: %u, status: %d): ", m->req_id, m->req_size, msg_num_cmd(m), m->status);
+    printf("message (req_id: %u, req_size: %u, num: %u, status: %s): ", m->req_id, m->req_size, msg_num_cmd(m), msg_status_str(m->status));
     cmd_log(message_first_cmd(m));
 }

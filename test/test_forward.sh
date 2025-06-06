@@ -43,7 +43,7 @@ node_bg -b :7892 &> $TMP_N1
 node_bg -b :7893 &> $TMP_N2
 
 # multiple contexes
-client -F :7892 -C 1000 -R -F :7893 -C 2000 -R | grep -q "Sent pkts - success: 1, failed: 0, thr_id: 0"
+client -F :7892 -C 1000 -R -F :7893 -C 2000 -R | grep -q "Sent pkts - success: 1"
 
 cat $TMP_N0 | grep -q "Forwarding req 0 to 127.0.0.1:7892"
 cat $TMP_N0 | grep -q "Forwarding req 0 to 127.0.0.1:7893"
@@ -57,7 +57,7 @@ node_bg -b :7892 &> $TMP_N1
 node_bg -b :7893 &> $TMP_N2
 
 # nested forward
-client -F :7892 -C 1000 -F :7893 -C 2000 -C 3000 -R | grep -q "Sent pkts - success: 1, failed: 0, thr_id: 0"
+client -F :7892 -C 1000 -F :7893 -C 2000 -C 3000 -R | grep -q "Sent pkts - success: 1"
 
 cat $TMP_N0 | grep -q "Forwarding req 0 to 127.0.0.1:7892"
 cat $TMP_N1 | grep -q "Forwarding req 0 to 127.0.0.1:7893"

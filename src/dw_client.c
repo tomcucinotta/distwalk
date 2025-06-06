@@ -254,11 +254,12 @@ void *thread_receiver(void *data) {
     thr_data.num_send_pkts = pkts_per_session;
 
     int num_success = 0;
-    int num_failed = 0;
-   
+    int num_error = 0;
+    int num_timedout = 0;
+
     int i_incr = 0;
     int pkt_i;
-    while ((pkt_i = num_success + num_failed) < num_pkts) {
+    while ((pkt_i = num_success + num_error + num_timedout) < num_pkts) {
         if (pkt_i % pkts_per_session == 0) {
             struct timespec ts1, ts2;
             if (conn_times)
@@ -292,7 +293,7 @@ void *thread_receiver(void *data) {
                     pkts_per_session - (pkt_i % pkts_per_session);
                 printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
                 i_incr = skip_pkts;
-                num_failed += skip_pkts;
+                num_error += skip_pkts;
                 goto skip;
             }
 
@@ -357,7 +358,7 @@ void *thread_receiver(void *data) {
                 unsigned long skip_pkts =
                     pkts_per_session - (pkt_i % pkts_per_session);
                 printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
-                num_failed += skip_pkts;
+                num_error += skip_pkts;
                 i_incr = skip_pkts;
                 goto skip;
             }
@@ -371,9 +372,13 @@ void *thread_receiver(void *data) {
 #endif
 
             unsigned pkt_id = m->req_id;
-            if (m->status != 0) {
-                dw_log("REPLY reported an error\n");
-                num_failed++;
+            if (m->status != SUCCESS) {
+                dw_log("REPLY reported an error - %s\n", msg_status_str(m->status));
+
+                if (m->status == ERR)
+                    num_error++;
+                else
+                    num_timedout++;
                 i_incr = 1;
             } else {
                 struct timespec ts_now;
@@ -434,7 +439,7 @@ void *thread_receiver(void *data) {
         }
     }
 
-    printf("Sent pkts - success: %d, failed: %d, thr_id: %d\n", num_success, num_failed, thread_id);
+    printf("Sent pkts - success: %d, error: %d, timeout: %d, thr_id: %d\n", num_success, num_error, num_timedout, thread_id);
     dw_log("Receiver thread terminating\n");
     return 0;
 }

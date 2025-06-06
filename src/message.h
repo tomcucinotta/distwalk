@@ -14,6 +14,8 @@ typedef enum { COMPUTE, STORE, LOAD, PSKIP, FORWARD_BEGIN, FORWARD_CONTINUE, REP
 
 typedef enum { UDP, TCP, TLS, PROTO_NUMBER } proto_t;
 
+typedef enum { SUCCESS, TIMEOUT, ERR, MSG_STATUS_NUMBER } msg_status_t;
+
 typedef struct {
     uint32_t pkt_size;    // size of forwarded packet
     in_addr_t fwd_host;   // target IP of host to forward to (network encoding)
@@ -57,11 +59,12 @@ typedef struct {
 typedef struct {
     uint32_t req_id;   // Client-side request id
     uint32_t req_size; // Overall message size in bytes, including commands and payload
-    int8_t status;     // 0 success, error otherwise (tipically set by dw_node)
+    msg_status_t status;
     command_t cmds[];  // Series of command_t with variable size
 } message_t;
 
-const char *proto_str(proto_t proto);
+const char* proto_str(proto_t proto);
+const char* msg_status_str(msg_status_t msg_status);
 const char* get_command_name(command_type_t cmd);
 
 command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd);

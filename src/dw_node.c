@@ -463,7 +463,7 @@ int find_forward_reply_id(command_t *cmd, struct sockaddr_in from_addr) {
 }
 
 // Call this once we received a REPLY from a socket matching a req_id we forwarded
-int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* infos, int fwd_m_status, struct sockaddr_in from_addr) {
+int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* infos, msg_status_t fwd_m_status, struct sockaddr_in from_addr) {
     req_info_t *req = req_get_by_id(req_id);
 
     if (!req) {
@@ -855,12 +855,12 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
         dw_log("TIMEOUT expired, req_id: %d, failed, skipping: %d\n", req->req_id, req->fwd_on_fail_skip);
         
         req->curr_cmd = cmd_skip(req->curr_cmd, req->fwd_on_fail_skip);
-        m->status = -1;
+        m->status = TIMEOUT;
         process_messages(req, p_poll, infos);
     } else {
         dw_log("TIMEOUT expired, req_id: %d, failed\n", req->req_id);
 
-        m->status = -1;
+        m->status = TIMEOUT;
         conn_req_remove(conn, req);
         infos->active_reqs--;
     }
@@ -969,7 +969,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
                         close_and_forget(p_poll, pending_conn->sock);
                     } else { // graceful
                         tmp->curr_cmd = itr;
-                        m->status = -1;
+                        m->status = ERR;
                         process_messages(tmp, p_poll, infos);
                     }
                     break;
