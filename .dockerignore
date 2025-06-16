@@ -1,3 +1,5 @@
 venv/
 *.csv
 *.log
+*.pdf
+*.data
