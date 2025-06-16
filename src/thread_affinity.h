@@ -1,5 +1,5 @@
 #ifndef __AFF_H__
-#define __AFF__H__
+#define __AFF_H__
 
 #include <sched.h>
 

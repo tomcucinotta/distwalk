@@ -164,8 +164,6 @@ conn_worker_info_t conn_worker_infos[MAX_THREADS];
 int fds[MAX_THREADS][2];
 int fds2[MAX_THREADS][2];
 
-__thread char thread_name[16];
-
 pthread_t storer;
 storage_worker_info_t storage_worker_info;
 

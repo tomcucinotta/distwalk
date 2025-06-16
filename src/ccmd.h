@@ -1,7 +1,7 @@
 /** @file */
 
 #ifndef __CCMD_H__
-#define __CMD__H__
+#define __CCMD_H__
 
 #include "queue.h"
 #include "message.h"
@@ -31,4 +31,4 @@ void ccmd_log(queue_t* q);
 static inline ccmd_node_t *ccmd_first(queue_t* q) { return (!q->size) ? NULL : (ccmd_node_t*) queue_node_data(queue_head(q)).ptr; }
 static inline ccmd_node_t *ccmd_last(queue_t* q) { return (!q->size) ? NULL : (ccmd_node_t*) queue_node_data(queue_tail(q)).ptr; }
 
-#endif /* __CMD_H__ */
+#endif /* __CCMD_H__ */

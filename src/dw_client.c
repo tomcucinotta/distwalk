@@ -27,7 +27,7 @@
 #include "address_utils.h"
 #include "queue.h"
 
-__thread char thread_name[16];
+//__thread char thread_name[16];
 
 int use_wait_spinning = 0;
 
