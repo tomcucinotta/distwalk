@@ -17,3 +17,13 @@
 
 - import_playbook: host-teardown.yaml
 - import_playbook: ic2e-teardown.yaml
+
+
+- name: Retrieve DistWalk node logs
+  hosts: nodes
+  tasks:
+    - name: Retrieve
+      copy:
+        content: "{{node_out.stdout}}"
+        dest: /tmp/dw_node_{{ inventory_hostname }}.log
+      delegate_to: localhost

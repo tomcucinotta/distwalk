@@ -61,6 +61,7 @@
   tasks:
     - name: Run DistWalk node
       shell: nohup /tmp/dw_src/dw_node -b {{ inventory_hostname }} {{ dw | default('') }} &
+      register: node_out
     - name: DistWalk parameters (with extra variables)
       debug: 
         msg: "/tmp/dw_src/dw_node -b {{ inventory_hostname }} {{ dw | default('') }}"
