@@ -162,8 +162,10 @@ bool test_queue_drop() {
 	queue_drop(queue);
 
 	if (queue_head(queue) != NULL
-		|| queue_tail(queue) != NULL)
+		|| queue_tail(queue) != NULL) {
+		queue_free(queue);
 		return false;
+	}
 
 	queue_free(queue);
 	return true;
@@ -185,8 +187,10 @@ bool test_queue_iterator_1() {
 			return false;
 	}
 
-	if (queue_itr_has_next(queue, itr))
+	if (queue_itr_has_next(queue, itr)) {
+		queue_free(queue);
 		return false;
+	}
 
 	queue_free(queue);
 	return true;
@@ -207,12 +211,16 @@ bool test_queue_iterator_2() {
 		node_t *node = queue_itr_next(queue, &itr);
 
 		if (queue_node_key(node) != i+1
-			|| queue_node_data(node).value != (i+1)*10)
+			|| queue_node_data(node).value != (i+1)*10) {
+			queue_free(queue);
 			return false;
+		}
 	}
 
-	if (queue_itr_has_next(queue, itr))
+	if (queue_itr_has_next(queue, itr)) {
+		queue_free(queue);
 		return false;
+	}
 
 	queue_free(queue);
 	return true;
