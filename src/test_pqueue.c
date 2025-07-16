@@ -79,7 +79,7 @@ err:
 }  
 
 int main() {
-	int rv = 0;
-	perform_test(check_pqueue(), rv);
-	return !rv;
+	bool rv = true;
+	rv &= perform_test(check_pqueue());
+	return rv ? EXIT_SUCCESS : EXIT_FAILURE;
 }

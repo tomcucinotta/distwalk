@@ -193,10 +193,10 @@ bool test_message_copy_fragment() {
 }
 
 int main() {
-    int rv = 0;
-    perform_test(test_message_construct(), rv);
-    perform_test(test_message_copy_no_append(), rv);
-    perform_test(test_message_copy_with_reply(), rv);
-    perform_test(test_message_copy_fragment(), rv);
-    return !rv;
+    bool rv = true;
+    rv &= perform_test(test_message_construct());
+    rv &= perform_test(test_message_copy_no_append());
+    rv &= perform_test(test_message_copy_with_reply());
+    rv &= perform_test(test_message_copy_fragment());
+    return rv ? EXIT_SUCCESS : EXIT_FAILURE;
 }

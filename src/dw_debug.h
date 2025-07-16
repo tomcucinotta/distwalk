@@ -65,14 +65,14 @@ __attribute__((weak)) __thread char thread_name[16];
   } while (0)
 
 // Execute a test function
-#define perform_test(fun, rv)                    \
-    do {                                         \
-        rv = (fun);                        \
-        printf("TEST " #fun ": ");               \
-        if (rv)                                 \
-            printf("SUCCESS\n");                 \
-        else                                     \
-            printf("FAILED\n");                  \
-    } while (0)
+#define perform_test(fun) ({                     \
+    int __rv = (fun);                            \
+    printf("TEST " #fun ": ");                   \
+    if (__rv)                                    \
+        printf("SUCCESS\n");                     \
+    else                                         \
+        printf("FAILED\n");                      \
+    __rv;                                        \
+  })
 
 #endif /* __DW_DEBUG_H__ */

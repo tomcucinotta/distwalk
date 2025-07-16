@@ -76,10 +76,10 @@ bool test_ts_leq() {
 
 
 int main() {
-    int rv = 0;
-    perform_test(test_ts_add(), rv);
-    perform_test(test_ts_sub(), rv);
-    perform_test(test_ts_sub_us(), rv);
-    perform_test(test_ts_leq(),rv );
-    return !rv;
+    bool rv = true;
+    rv &= perform_test(test_ts_add());
+    rv &= perform_test(test_ts_sub());
+    rv &= perform_test(test_ts_sub_us());
+    rv &= perform_test(test_ts_leq());
+    return rv ? EXIT_SUCCESS : EXIT_FAILURE;
 }

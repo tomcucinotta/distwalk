@@ -442,21 +442,21 @@ bool test_ccmd_dump_2() {
 }
 
 int main() {
-    int rv = 0;
-    perform_test(test_ccmd_init_destroy(), rv);
-    perform_test(test_ccmd_add_1(), rv);
-    perform_test(test_ccmd_add_2(), rv);
-    perform_test(test_ccmd_add_3(), rv);
-    perform_test(test_ccmd_add_4(), rv);
-    perform_test(test_ccmd_last(), rv);
-    perform_test(test_ccmd_last_reply(), rv);
-    perform_test(test_ccmd_attach_last_reply_1(), rv);
-    perform_test(test_ccmd_attach_last_reply_2(), rv);
-    perform_test(test_ccmd_skip_1(), rv);
-    perform_test(test_ccmd_skip_2(), rv);
-    perform_test(test_ccmd_skip_3(), rv);
-    perform_test(test_ccmd_skip_4(), rv);
-    perform_test(test_ccmd_dump_1(), rv);
-    perform_test(test_ccmd_dump_2(), rv);
-    return !rv;
+    bool rv = true;
+    rv &= perform_test(test_ccmd_init_destroy());
+    rv &= perform_test(test_ccmd_add_1());
+    rv &= perform_test(test_ccmd_add_2());
+    rv &= perform_test(test_ccmd_add_3());
+    rv &= perform_test(test_ccmd_add_4());
+    rv &= perform_test(test_ccmd_last());
+    rv &= perform_test(test_ccmd_last_reply());
+    rv &= perform_test(test_ccmd_attach_last_reply_1());
+    rv &= perform_test(test_ccmd_attach_last_reply_2());
+    rv &= perform_test(test_ccmd_skip_1());
+    rv &= perform_test(test_ccmd_skip_2());
+    rv &= perform_test(test_ccmd_skip_3());
+    rv &= perform_test(test_ccmd_skip_4());
+    rv &= perform_test(test_ccmd_dump_1());
+    rv &= perform_test(test_ccmd_dump_2());
+    return rv ? EXIT_SUCCESS : EXIT_FAILURE;
 }
