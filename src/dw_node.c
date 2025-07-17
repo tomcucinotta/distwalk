@@ -688,6 +688,7 @@ void close_and_forget(dw_poll_t *p_poll, int sock) {
 // returns 1 if the message has been completely executed, 0 if the message need more time, -1 if some error occured
 int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t *infos) {
     message_t *m = req_get_message(req);
+    int conn_id = req->conn_id;
 
     for (command_t *cmd = req->curr_cmd; cmd->cmd != EOM; cmd = cmd_skip(cmd, 1)) {
         dw_log("PROCESS conn_id: %d, req_id: %d,  command: %s\n", req->conn_id, req->req_id, get_command_name(cmd->cmd));
@@ -708,7 +709,7 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
         case REPLY:
             dw_log("Handling REPLY: req_id=%d\n", m->req_id);
             if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd, infos)) {
-                fprintf(stderr, "reply() failed, conn_id: %d\n", req->conn_id);
+                fprintf(stderr, "reply() failed, conn_id: %d\n", conn_id);
                 return -1;
             }
             // any further cmds[] for replied-to hop, not me
@@ -743,9 +744,11 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
 }
 
 int process_messages(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t *infos) {
+    // process_single_message() may call reply() -> conn_req_remove() -> req_unlink() + defrag -> req and m invalid
+    int conn_id = req->conn_id;
     int executed = process_single_message(req, p_poll, infos);
-    if (executed && conns[req->conn_id].serialize_request)
-        return obtain_messages(req->conn_id, p_poll, infos);
+    if (executed && conns[conn_id].serialize_request)
+        return obtain_messages(conn_id, p_poll, infos);
     return executed;
 }
 
@@ -775,13 +778,15 @@ int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos) {
 
             req->message_ptr = (unsigned char*) m;
             req->curr_cmd = message_first_cmd(m);
+            // process_single_message() may call reply() -> conn_req_remove() -> req_unlink() + defrag -> req and m invalid
+            int req_size = m->req_size;
             int executed = process_single_message(req, p_poll, infos);
 
             if (executed < 0)
                 return 0;
 
             if (!executed && conns[conn_id].serialize_request) {
-                conns[conn_id].curr_proc_buf += m->req_size;
+                conns[conn_id].curr_proc_buf += req_size;
                 return 1;
             }
         }
