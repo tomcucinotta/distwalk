@@ -42,8 +42,8 @@ ccmd_node_t* ccmd_skip(ccmd_node_t* node, int to_skip) {
                 if (nested_fwd > 0) {
                     if (itr->next && itr->next->cmd != FORWARD_CONTINUE) // must have branched=1
                         nested_fwd--;
-                } else { // edge-case: no matching FORWARD -- break
-                    break;
+                } else { // edge-case: found REPLY with no matching FORWARD -- return NULL
+                    return NULL;
                 }
             }
             itr = itr->next;
