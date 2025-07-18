@@ -20,27 +20,30 @@ bool test_queue_insert() {
 
 	node_t *top = queue_head(queue);
 	if (queue_node_key(top) != 0 || queue_node_data(top).value != 10)
-		return false;
+		goto err;
 
 	node_t *bottom = queue_tail(queue);
 	if (queue_node_key(bottom) != 1 || queue_node_data(bottom).value != 20)
-		return false;
+		goto err;
 
 	if (queue_size(queue) != 2)
-		return false;
+		goto err;
 
 	queue_free(queue);
 	return true;
+
+ err:
+	queue_free(queue);
+	return false;
 }
 
 bool test_queue_insert_complex() {
 	queue_t *queue = queue_alloc(N);
-	
-	
+
 	ccmd_node_t* ccmd_node = calloc(1, sizeof(ccmd_node_t));
 	pd_spec_t val = pd_build_fixed(1000);
 
-    ccmd_node->cmd = STORE;
+	ccmd_node->cmd = STORE;
 	ccmd_node->pd_val = val;
 
 	data_t data = {.ptr=ccmd_node};
@@ -50,9 +53,14 @@ bool test_queue_insert_complex() {
 	ccmd_node_t* ccmd_data = queue_node_data(top).ptr;
 
 	if (queue_node_key(top) != 0 || ccmd_data->cmd != STORE)
-		return false;
+		goto err;
 
+	queue_free(queue);
 	return true;
+
+ err:
+	queue_free(queue);
+	return false;
 }
 
 bool test_queue_remove() {
@@ -73,7 +81,7 @@ bool test_queue_remove() {
 		|| queue_node_key(bottom) != 1 
 		|| queue_node_data(bottom).value != 20
 		|| queue_size(queue) != 1)
-		return false;
+		goto err;
 
 	queue_dequeue_head(queue);
 	queue_dequeue_tail(queue);
@@ -81,25 +89,28 @@ bool test_queue_remove() {
 	queue_dequeue_tail(queue);
 
 	if (queue_size(queue) != 0)
-		return false;
+		goto err;
 
 	if (queue_head(queue)!= NULL 
 		|| queue_tail(queue) !=NULL)
-		return false;
+		goto err;
 
 	queue_free(queue);
 	return true;
+
+ err:
+	queue_free(queue);
+	return false;
 }
 
 bool test_queue_remove_complex() {
 	queue_t *queue = queue_alloc(N);
-	
-	
+
 	for (int i=0; i < 2; i ++) {
 		ccmd_node_t* ccmd_node = calloc(1, sizeof(ccmd_node_t));
 		pd_spec_t val = pd_build_fixed(i * 10);
 
-    	ccmd_node->cmd = STORE;
+		ccmd_node->cmd = STORE;
 		ccmd_node->pd_val = val;
 
 		data_t data = {.ptr=ccmd_node};
@@ -111,15 +122,19 @@ bool test_queue_remove_complex() {
 	node_t *bottom = queue_tail(queue);
 	ccmd_node_t* ccmd_data = queue_node_data(bottom).ptr;
 
-
 	if (top != bottom 
 		|| queue_node_key(bottom) != 1
 		|| ccmd_data->cmd != STORE
 		|| ccmd_data->pd_val.val != 10
 		|| queue_size(queue) != 1)
-		return false;
+		goto err;
 
+	queue_free(queue);
 	return true;
+
+ err:
+	queue_free(queue);
+	return false;
 }
 
 bool test_queue_capacity() {
@@ -141,13 +156,17 @@ bool test_queue_capacity() {
 	while(queue_size(queue) > 0) {
 		if (queue_node_key(queue_tail(queue)) != i
 			|| queue_node_data(queue_tail(queue)).value != i*10)
-			return false;
+			goto err;
 		queue_dequeue_tail(queue);
 		i--;
 	}
 
 	queue_free(queue);
 	return true;
+
+ err:
+	queue_free(queue);
+	return false;
 }
 
 bool test_queue_drop() {
@@ -161,14 +180,15 @@ bool test_queue_drop() {
 
 	queue_drop(queue);
 
-	if (queue_head(queue) != NULL
-		|| queue_tail(queue) != NULL) {
-		queue_free(queue);
-		return false;
-	}
+	if (queue_head(queue) != NULL || queue_tail(queue) != NULL)
+		goto err;
 
 	queue_free(queue);
 	return true;
+
+ err:
+	queue_free(queue);
+	return false;
 }
 
 bool test_queue_iterator_1() {
@@ -182,18 +202,19 @@ bool test_queue_iterator_1() {
 	for (int i = 0; i < queue_size(queue); i++) {
 		node_t *node = queue_itr_next(queue, &itr);
 
-		if (queue_node_key(node) != i 
-			|| queue_node_data(node).value != i*10)
-			return false;
+		if (queue_node_key(node) != i || queue_node_data(node).value != i*10)
+			goto err;
 	}
 
-	if (queue_itr_has_next(queue, itr)) {
-		queue_free(queue);
-		return false;
-	}
+	if (queue_itr_has_next(queue, itr))
+		goto err;
 
 	queue_free(queue);
 	return true;
+
+ err:
+	queue_free(queue);
+	return false;
 }
 
 bool test_queue_iterator_2() {
@@ -211,19 +232,19 @@ bool test_queue_iterator_2() {
 		node_t *node = queue_itr_next(queue, &itr);
 
 		if (queue_node_key(node) != i+1
-			|| queue_node_data(node).value != (i+1)*10) {
-			queue_free(queue);
-			return false;
-		}
+			|| queue_node_data(node).value != (i+1)*10)
+			goto err;
 	}
 
-	if (queue_itr_has_next(queue, itr)) {
-		queue_free(queue);
-		return false;
-	}
+	if (queue_itr_has_next(queue, itr))
+		goto err;
 
 	queue_free(queue);
 	return true;
+
+ err:
+	queue_free(queue);
+	return false;
 }
 
 int main() {
