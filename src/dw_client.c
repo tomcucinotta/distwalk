@@ -923,7 +923,9 @@ int script_parse(char *fname, struct argp_state *state) {
             }
         }
     }
-    
+
+    fclose(f);
+
     for (int i=0; i<argc-1; i++) {
         // Find the option for the current input argument 
         int j = 0;
