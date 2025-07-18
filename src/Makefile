@@ -1,8 +1,8 @@
 SHELL=/bin/bash
 
-CFLAGS=-Wall -O3 
-CFLAGS_DEBUG=-g -DDW_DEBUG -fprofile-arcs -ftest-coverage -fprofile-update=atomic
-CFLAGS_TSAN=-g -O2 -fsanitize=thread
+CFLAGS=-Wall -O3
+CFLAGS_DEBUG=-g -DDW_DEBUG -Wall -fprofile-arcs -ftest-coverage -fprofile-update=atomic
+CFLAGS_TSAN=-g -Wall -O2 -fsanitize=thread
 LDLIBS=-pthread -lm -lssl -lcrypto
 LDLIBS_DEBUG=-pthread -lm -lssl -lcrypto -lgcov
 
