@@ -13,6 +13,7 @@ bool test_ccmd_init_destroy() {
     ccmd_destroy(&ccmd);
     if (ccmd) 
         return false;
+
     return true;
 }
 
@@ -384,11 +385,11 @@ bool test_ccmd_dump_1() {
 
     res = true;
 
-    err:
-        ccmd_destroy(&ccmd);
-        free(m);
-        return res;
-}  
+ err:
+    ccmd_destroy(&ccmd);
+    free(send_buf);
+    return res;
+}
 
 bool test_ccmd_dump_2() {
     queue_t* ccmd = queue_alloc(10);
@@ -431,13 +432,13 @@ bool test_ccmd_dump_2() {
     m->req_size = BUF_SIZE;
     ccmd_dump(ccmd, m);
 
-
     bool res = true;
-    if (queue_size(ccmd) != 9 || msg_num_cmd(m) != 5) {
+
+    if (queue_size(ccmd) != 9 || msg_num_cmd(m) != 5)
         res = false;
-    }
 
     ccmd_destroy(&ccmd);
+    free(send_buf);
     return res;
 }
 
