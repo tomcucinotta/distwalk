@@ -722,16 +722,20 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
 
             // Deep-copy command to avoid data-race with conn worker
             int cmds_len = ((unsigned char*)cmd_next(cmd) - (unsigned char*)cmd);
+            // will be free()ed by the storage thread
             w.cmd = calloc(1, cmds_len);
             memcpy(w.cmd, cmd, cmds_len);
 
             if (write(infos->storefd, &w, sizeof(w)) < 0) {
                 perror("storage worker write() failed");
+                free(w.cmd);
                 return -1;
             }
 
             if (cmd->cmd == STORE && !cmd_get_opts(store_opts_t, cmd)->wait_sync)
+                /* coverity[leaked_storage : false] w.cmd freed by storage thread */
                 break;
+
             req->curr_cmd = cmd_next(cmd);
             return 0; }
         default:
