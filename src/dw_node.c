@@ -204,8 +204,8 @@ int safe_write(int fd, unsigned char *buf, size_t len) {
 int safe_read(int fd, unsigned char *buf, size_t len) {
     size_t len_on_last_seek = 0;
     while (len > 0) {
-        int received;
-        if ((received = read(fd, buf, len)) < 0) {
+        ssize_t received = read(fd, buf, len);
+        if (received < 0) {
             perror("read() failed");
             return -1;
         }
@@ -1601,7 +1601,7 @@ int main(int argc, char *argv[]) {
 
     char *home_path = getenv("HOME");
     check(home_path != NULL && strlen(home_path) + 10 < sizeof(storage_worker_info.storage_info));
-    strcpy(storage_worker_info.storage_info.storage_path, getenv("HOME"));
+    strcpy(storage_worker_info.storage_info.storage_path, home_path);
     strcat(storage_worker_info.storage_info.storage_path, "/.dw_store");
     storage_worker_info.storage_info.storage_fd = -1;
 
