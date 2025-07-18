@@ -18,7 +18,7 @@ __attribute__((weak)) __thread char thread_name[16];
 #define dw_log(msg, ...) do { \
     struct timespec __ts; \
     clock_gettime(CLOCK_MONOTONIC, &__ts);\
-    if (thread_name) \
+    if (thread_name[0] != 0) \
       printf("[%ld.%09ld][%s][%s:%d] " msg, __ts.tv_sec, __ts.tv_nsec, thread_name, __FILE__, __LINE__, ## __VA_ARGS__); \
     else \
       printf("[%ld.%09ld][%s:%d] " msg, __ts.tv_sec, __ts.tv_nsec, __FILE__, __LINE__, ## __VA_ARGS__); \
