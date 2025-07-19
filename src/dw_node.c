@@ -1548,6 +1548,7 @@ void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct so
         } else {
             sys_check(lsock = socket(AF_INET, SOCK_DGRAM, 0));
             int conn_id = conn_alloc(lsock, serverAddr, UDP);
+            check(conn_id != -1, "conn_alloc() failed, terminating!");
             conn_set_status_by_id(conn_id, READY);
             conn_get_by_id(conn_id)->enable_defrag = enable_defrag;
         }
