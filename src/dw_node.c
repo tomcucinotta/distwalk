@@ -557,7 +557,7 @@ double __attribute__((optimize("O0"))) compute_loops_per_usec() {
             elapsed_min_ns = elapsed_ns;
         ts_beg = ts_end;
     }
-    return 1000.0 / elapsed_min_ns;
+    return elapsed_min_ns > 0 ? 1000.0 / elapsed_min_ns : 0;
 }
 
 void compute_for(unsigned long usecs) {
