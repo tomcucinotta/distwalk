@@ -316,7 +316,10 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     addr.sin_addr.s_addr = fwd.fwd_host;
     addr.sin_port = fwd.fwd_port;
 
-    if (req->fwd_replies_left != -1 && (req->fwd_replies_mask & (1 << find_forward_reply_id(req->curr_cmd, addr)))) {
+    int fwd_reply_id = find_forward_reply_id(req->curr_cmd, addr);
+    if (fwd_reply_id == -1)
+        return NULL;
+    if (req->fwd_replies_left != -1 && (req->fwd_replies_mask & (1 << fwd_reply_id))) {
         // avoid retransmissions of already acknowledged FORWARD branches
         dw_log("Found reply for fwd to: %s:%d\n", inet_ntoa((struct in_addr) {addr.sin_addr.s_addr}), ntohs(addr.sin_port));
         cmd = cmd_next_forward(cmd);
