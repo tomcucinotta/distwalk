@@ -51,6 +51,7 @@ bool test_message_copy_no_append() {
     c_itr = cmd_next(c_itr);
     c_itr->cmd = EOM;
 
+    // coverity[suspicious_sizeof:false]
     message_t *m_dst = (message_t *) malloc(BUF_SIZE);
     m_dst->req_size = BUF_SIZE;
     message_first_cmd(m_dst)->cmd = EOM;
@@ -101,6 +102,7 @@ bool test_message_copy_with_reply() {
     c_itr = cmd_next(c_itr);
     c_itr->cmd = EOM;
 
+    // coverity[suspicious_sizeof:false]
     message_t *m_dst = (message_t *) malloc(BUF_SIZE);
     m_dst->req_size = BUF_SIZE;
     message_first_cmd(m_dst)->cmd = EOM;
