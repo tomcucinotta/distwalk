@@ -31,7 +31,7 @@
 
 int use_wait_spinning = 0;
 
-queue_t* ccmd; // chain of commands
+queue_t* ccmd = NULL; // chain of commands
 
 SSL_CTX *client_ssl_ctx = NULL;
 
@@ -535,6 +535,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         know is a pointer to our arguments structure. */
     struct argp_client_arguments *arguments = state->input;
 
+    if (!ccmd)
+        ccmd = queue_alloc(100);
+
     switch(key) {
     case ARGP_KEY_INIT: // Default values
         strcpy(arguments->clienthostport, "0.0.0.0:0");
@@ -545,7 +548,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->last_resp_size = pd_build_fixed(default_resp_size);
 
         arguments->reserved_fwd_replies = queue_alloc(100);
-        ccmd = queue_alloc(100);
 
         arguments->last_reserved_used = NULL;
         arguments->fwd_scope = 0;

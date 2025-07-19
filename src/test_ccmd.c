@@ -222,9 +222,8 @@ bool test_ccmd_skip_1() {
     ccmd_node_t* cmd = ccmd_skip(ccmd_first(ccmd), 2);
 
     bool res = false;
-    if (cmd->cmd == REPLY && cmd->pd_val.val == 300) {
+    if (cmd && cmd->cmd == REPLY && cmd->pd_val.val == 300)
         res = true;
-    }
 
     ccmd_destroy(&ccmd);
     return res;
@@ -245,9 +244,8 @@ bool test_ccmd_skip_2() {
     ccmd_node_t* cmd = ccmd_skip((ccmd_node_t*) queue_node_data(queue_head(ccmd)).ptr, 10);
 
     bool res = false;
-    if (cmd == NULL) {
+    if (cmd == NULL)
         res = true;
-    }
 
     ccmd_destroy(&ccmd);
     return res;
@@ -277,9 +275,8 @@ bool test_ccmd_skip_3() {
     ccmd_node_t* cmd = ccmd_skip((ccmd_node_t*) queue_node_data(queue_head(ccmd)).ptr, 1);
 
     bool res = false;
-    if (cmd != NULL && cmd->cmd == FORWARD_BEGIN && cmd->pd_val.val == 200) {
+    if (cmd && cmd->cmd == FORWARD_BEGIN && cmd->pd_val.val == 200)
         res = true;
-    }
 
     ccmd_destroy(&ccmd);
     return res;
