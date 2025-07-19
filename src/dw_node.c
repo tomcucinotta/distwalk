@@ -1544,9 +1544,9 @@ void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct so
     if (accept_mode == AM_CHILD || i == 0) {
         int lsock;
         if (proto == TCP || proto == TLS) {
-            lsock = socket(AF_INET, SOCK_STREAM, 0);
+            sys_check(lsock = socket(AF_INET, SOCK_STREAM, 0));
         } else {
-            lsock = socket(AF_INET, SOCK_DGRAM, 0);
+            sys_check(lsock = socket(AF_INET, SOCK_DGRAM, 0));
             int conn_id = conn_alloc(lsock, serverAddr, UDP);
             conn_set_status_by_id(conn_id, READY);
             conn_get_by_id(conn_id)->enable_defrag = enable_defrag;
