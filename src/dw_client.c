@@ -303,30 +303,30 @@ void *thread_receiver(void *data) {
                        pkt_i, thread_id, pkt_i / (int)pkts_per_session);
 
             /* spawn sender once connection is established */
-            int conn_id = conn_alloc(clientSocket[thread_id], serveraddr, proto);
-            check(conn_id != -1, "conn_alloc() failed, consider increasing MAX_CONNS");
+            thr_data.conn_id = conn_alloc(clientSocket[thread_id], serveraddr, proto);
+            check(thr_data.conn_id != -1, "conn_alloc() failed, consider increasing MAX_CONNS");
 
             // If the protocol is SSL, do the SSL handshake; else mark it READY
             if (proto == TLS) {
                 extern SSL_CTX *client_ssl_ctx;  // we define this in main()
-                if (conn_enable_ssl(conn_id, client_ssl_ctx, 0) < 0) {
+                if (conn_enable_ssl(thr_data.conn_id, client_ssl_ctx, 0) < 0) {
                     fprintf(stderr, "SSL handshake failed\n");
                     close(clientSocket[thread_id]);
-                    conn_free(conn_id);
+                    conn_free(thr_data.conn_id);
                     return 0;
                 }
 
                 // retry handshake for up to 5 seconds in non-blocking mode
                 int rv = 0;
                 for (int hs_retry = 1; hs_retry <= 25; hs_retry++) {
-                    rv = conn_do_ssl_handshake(conn_id);
+                    rv = conn_do_ssl_handshake(thr_data.conn_id);
                     if (rv == 1) {
                         dw_log("SSL HANDSHAKE SUCCESSFUL after %d tries\n", hs_retry);
                         break;
                     } else if (rv == -1) {
                         fprintf(stderr, "SSL handshake error on conn_id=%d\n", thr_data.conn_id);
                         close(clientSocket[thread_id]);
-                        conn_free(conn_id);
+                        conn_free(thr_data.conn_id);
                         return 0;
                     } else {
                         usleep(200 * 1000);
@@ -335,13 +335,12 @@ void *thread_receiver(void *data) {
                 if (rv == 0) {
                     fprintf(stderr, "SSL handshake failed after 5 seconds\n");
                     close(clientSocket[thread_id]);
-                    conn_free(conn_id);
+                    conn_free(thr_data.conn_id);
                     return 0;
                 }
             } else
-                conn_set_status_by_id(conn_id, READY);
+                conn_set_status_by_id(thr_data.conn_id, READY);
 
-            thr_data.conn_id = conn_id;
             thr_data.first_pkt_id = pkt_i;
             sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
                                   (void *)&thr_data));
@@ -424,6 +423,7 @@ void *thread_receiver(void *data) {
 
                 close(clientSocket[thread_id]);
                 conn_free(thr_data.conn_id);
+                thr_data.conn_id = -1;
             }
         }
     }
