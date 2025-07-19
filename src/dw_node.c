@@ -154,7 +154,11 @@ typedef struct {
 typedef struct {
     int worker_id;
     int req_id;
-    command_t *cmd;
+    command_t cmd;
+    union {
+        load_opts_t load_opts;
+        store_opts_t store_opts;
+    };
 } storage_req_t;
 
 pthread_t workers[MAX_THREADS];
@@ -723,20 +727,15 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             w.worker_id = infos->worker_id;
             w.req_id = req->req_id;
 
-            // Deep-copy command to avoid data-race with conn worker
             int cmds_len = ((unsigned char*)cmd_next(cmd) - (unsigned char*)cmd);
-            // will be free()ed by the storage thread
-            w.cmd = calloc(1, cmds_len);
-            memcpy(w.cmd, cmd, cmds_len);
+            memcpy(&w.cmd, cmd, cmds_len);
 
-            if (write(infos->storefd, &w, sizeof(w)) < 0) {
+            if (safe_write(infos->storefd, (unsigned char*) &w, sizeof(w)) < 0) {
                 perror("storage worker write() failed");
-                free(w.cmd);
                 return -1;
             }
 
             if (cmd->cmd == STORE && !cmd_get_opts(store_opts_t, cmd)->wait_sync)
-                /* coverity[leaked_storage : false] w.cmd freed by storage thread */
                 break;
 
             req->curr_cmd = cmd_next(cmd);
@@ -1091,25 +1090,23 @@ void* storage_worker(void* args) {
                 dw_log("storage sync...\n");
             } else if (type == STORAGE) {
                 storage_req_t w;
-                command_t *storage_cmd;
                 int worker_id;
                 int req_id;
 
-                if (read(fd, &w, sizeof(w)) < 0) {
-                    perror("storage worker read()");
+                if (safe_read(fd, (unsigned char*) &w, sizeof(w)) < 0) {
+                    perror("storage worker safe_read()");
                     running = 0;
                     break;
                 }
 
-                storage_cmd = w.cmd;
                 worker_id = w.worker_id;
                 req_id = w.req_id;
 
                 dw_log("STORAGE cmd from conn_id %d\n", req_id);
                 
-                if (storage_cmd->cmd == STORE) {
-                    store(infos, infos->store_buf, cmd_get_opts(store_opts_t, storage_cmd));
-                    if (cmd_get_opts(store_opts_t, storage_cmd)->wait_sync) { 
+                if (w.cmd.cmd == STORE) {
+                    store(infos, infos->store_buf, cmd_get_opts(store_opts_t, &w.cmd));
+                    if (cmd_get_opts(store_opts_t, &w.cmd)->wait_sync) { 
                         if (infos->periodic_sync_msec <= 0) {
                             safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
                         } else {
@@ -1117,13 +1114,12 @@ void* storage_worker(void* args) {
                             pqueue_insert(infos->sync_waiting_queue, worker_id, data);
                         }
                     }
-                } else if (storage_cmd->cmd == LOAD) {
-                    load(infos, infos->store_buf, cmd_get_opts(load_opts_t, storage_cmd));
+                } else if (w.cmd.cmd == LOAD) {
+                    load(infos, infos->store_buf, cmd_get_opts(load_opts_t, &w.cmd));
                     safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
                 } else { // error
                     fprintf(stderr, "Unknown command sent to storage server - skipping");
                 }
-                free(storage_cmd);
             } else {
                 fprintf(stderr, "Unknown event in storage server - skipping");
             }
