@@ -52,7 +52,7 @@ typedef struct {
     command_type_t cmd;  
     unsigned char opts[];
 } command_t;
-#define cmd_get_opts(type, cmd) ((type*)&(cmd->opts[0]))
+#define cmd_get_opts(type, cmd) ((type*)&((cmd)->opts[0]))
 
 // Data structure containing the data sent by the DistWalk Client
 // TODO: Here we need all quantities to be network-ordered
