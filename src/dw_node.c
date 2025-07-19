@@ -1265,8 +1265,10 @@ void* conn_worker(void* args) {
                 }
 
                 dw_log("STORAGE ACK for req_id %d\n", req_id_ACK);
-                process_messages(req_get_by_id(req_id_ACK), &infos->dw_poll, infos);
-                //exec_request(infos->epollfd, &events[i], infos);
+                if (req_get_by_id(req_id_ACK))
+                    process_messages(req_get_by_id(req_id_ACK), &infos->dw_poll, infos);
+                else
+                    dw_log("Could not find req_info_t for req_id_ACK %d\n", req_id_ACK);
             } else if (event_type == DISPATCH) {
                 check(event_data == infos->dispatchfd[1]);
 
