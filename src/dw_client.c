@@ -205,6 +205,7 @@ void *thread_sender(void *data) {
             while (step_prev++ < step) {
                 int old_rate = 1000000.0 / send_period_us_pd.val;
                 rate = pd_sample(&send_rate_pd);
+                check(rate > 0, "Invalid rate %d sampled from %s", rate, pd_str(&send_rate_pd));
                 send_period_us_pd.val = 1000000.0 / rate;
                 if (rate != old_rate) {
                     dw_log("pkt_id: %d, old_rate: %d, rate: %d\n", pkt_id, old_rate, rate);
