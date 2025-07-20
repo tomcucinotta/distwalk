@@ -535,8 +535,10 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         know is a pointer to our arguments structure. */
     struct argp_client_arguments *arguments = state->input;
 
-    if (!ccmd)
+    if (!ccmd) {
         ccmd = queue_alloc(100);
+        check(ccmd != NULL, "queue_alloc() failed!");
+    }
 
     switch(key) {
     case ARGP_KEY_INIT: // Default values
@@ -548,6 +550,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->last_resp_size = pd_build_fixed(default_resp_size);
 
         arguments->reserved_fwd_replies = queue_alloc(100);
+        check(arguments->reserved_fwd_replies != NULL, "queue_alloc() failed!");
 
         arguments->last_reserved_used = NULL;
         arguments->fwd_scope = 0;
