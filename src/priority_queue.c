@@ -1,7 +1,9 @@
+#include "dw_debug.h"
 #include "priority_queue.h"
 
 pqueue_t* pqueue_alloc(uint32_t capacity) {
 	pqueue_t *res = (pqueue_t*) malloc(sizeof(pqueue_t));
+	check(res != NULL, "malloc() failed!");
 	res->nodes = (node_t*) malloc(capacity * sizeof(node_t));
 	res->heap  = (uint32_t*) malloc(capacity * sizeof(uint32_t));
 	res->stack = (uint32_t*) malloc(capacity * sizeof(uint32_t));
