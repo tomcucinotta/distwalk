@@ -596,7 +596,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break;
     case RATE:
         check(pd_parse(&send_rate_pd, arg), "Wrong rate specification");
-        send_period_us_pd = pd_build_fixed(1000000.0 / pd_sample(&send_rate_pd));
+        double rate = pd_sample(&send_rate_pd);
+        check(rate > 0.0);
+        send_period_us_pd = pd_build_fixed(1000000.0 / rate);
         break;
     case WAIT_SPIN:
         use_wait_spinning = 1;
