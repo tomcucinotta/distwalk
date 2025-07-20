@@ -44,15 +44,18 @@ bool check_pqueue() {
 	int n = 0, insert = 0, remove = 0, checks = 0;
 
 	for (int i = 0; i < 1000; i++) {
+		/* coverity[dont_call] */
 		int rnd = rand() % 100;
 		data_t data = {.value=0};
 
 		if (rnd < 30 && n < N) {
+			/* coverity[dont_call] */
 			arr[n] = rand() % 100;
 			nodes[n] = pqueue_insert(queue, arr[n], data);
 			n++;
 			insert++;
 		} else if (rnd < 60 && n > 0) {
+			/* coverity[dont_call] */
 			int idx = rand() % n;
 			pqueue_remove(queue, nodes[idx]);
 			nodes[idx] = nodes[n - 1];

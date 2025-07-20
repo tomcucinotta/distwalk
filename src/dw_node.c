@@ -546,6 +546,7 @@ void compute_for_freqinv(unsigned long usecs) {
 unsigned long __attribute__((optimize("O0"))) loop() {
     long acc = 0;
     for (int i = 0; i < 100; i++)
+        /* coverity[dont_call] */
         acc += rand();
     return acc;
 }
