@@ -5,7 +5,7 @@
 #include "dw_debug.h"
 
 bool test_message_construct() {
-    // coverity[suspicious_sizeof:false]
+    /* coverity[suspicious_sizeof] */
     message_t *m = (message_t *) calloc(BUF_SIZE, sizeof(unsigned char));
     m->req_size = BUF_SIZE;
     m->req_id = 0;
@@ -41,7 +41,7 @@ bool test_message_construct() {
 }
 
 bool test_message_copy_no_append() {
-    // coverity[suspicious_sizeof:false]
+    /* coverity[suspicious_sizeof] */
     message_t *m = (message_t *) calloc(BUF_SIZE, sizeof(unsigned char));
     m->req_size = BUF_SIZE;
     m->req_id = 0;
@@ -53,7 +53,7 @@ bool test_message_copy_no_append() {
     c_itr = cmd_next(c_itr);
     c_itr->cmd = EOM;
 
-    // coverity[suspicious_sizeof:false]
+    /* coverity[suspicious_sizeof] */
     message_t *m_dst = (message_t *) malloc(BUF_SIZE);
     m_dst->req_size = BUF_SIZE;
     message_first_cmd(m_dst)->cmd = EOM;
@@ -89,7 +89,7 @@ bool test_message_copy_no_append() {
 }
 
 bool test_message_copy_with_reply() {
-    // coverity[suspicious_sizeof:false]
+    /* coverity[suspicious_sizeof] */
     message_t *m = (message_t *) (message_t *) calloc(BUF_SIZE, sizeof(unsigned char));;
     m->req_size = BUF_SIZE;
     m->req_id = 0;
@@ -105,7 +105,7 @@ bool test_message_copy_with_reply() {
     c_itr = cmd_next(c_itr);
     c_itr->cmd = EOM;
 
-    // coverity[suspicious_sizeof:false]
+    /* coverity[suspicious_sizeof] */
     message_t *m_dst = (message_t *) malloc(BUF_SIZE);
     m_dst->req_size = BUF_SIZE;
     message_first_cmd(m_dst)->cmd = EOM;
@@ -132,7 +132,7 @@ bool test_message_copy_with_reply() {
 }
 
 bool test_message_copy_fragment() {
-    // coverity[suspicious_sizeof:false]
+    /* coverity[suspicious_sizeof] */
     message_t *m = (message_t *) calloc(BUF_SIZE, sizeof(unsigned char));
     m->req_size = BUF_SIZE;
     m->req_id = 0;
@@ -168,7 +168,7 @@ bool test_message_copy_fragment() {
     c_itr = cmd_next(c_itr);
     c_itr->cmd = EOM;
 
-    // coverity[suspicious_sizeof:false]
+    /* coverity[suspicious_sizeof] */
     message_t *m_branch1 = (message_t *) calloc(BUF_SIZE, sizeof(unsigned char));
     m_branch1->req_size = BUF_SIZE;
     m->req_id = 0;

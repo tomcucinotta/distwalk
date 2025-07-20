@@ -348,7 +348,7 @@ bool test_ccmd_dump_1() {
     val = pd_build_fixed(900);
     ccmd_add(ccmd, REPLY, &val);
 
-    // coverity[suspicious_sizeof:false]
+    /* coverity[suspicious_sizeof] */
     unsigned char *send_buf = malloc(BUF_SIZE);
     message_t *m = (message_t *)send_buf;
     m->req_size = BUF_SIZE;
@@ -424,7 +424,7 @@ bool test_ccmd_dump_2() {
     val = pd_build_fixed(612);
     ccmd_add(ccmd, REPLY, &val);
 
-    // coverity[suspicious_sizeof:false]
+    /* coverity[suspicious_sizeof] */
     unsigned char *send_buf = malloc(BUF_SIZE);
     message_t *m = (message_t *)send_buf;
     m->req_size = BUF_SIZE;
