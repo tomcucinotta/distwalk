@@ -723,10 +723,7 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             return 1;
         case STORE:
         case LOAD: {
-            storage_req_t w;
-            w.worker_id = infos->worker_id;
-            w.req_id = req->req_id;
-
+            storage_req_t w = { .worker_id = infos->worker_id, .req_id = req->req_id };
             int cmds_len = ((unsigned char*)cmd_next(cmd) - (unsigned char*)cmd);
             memcpy(&w.cmd, cmd, cmds_len);
 
