@@ -338,12 +338,12 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
         int clientSocket = 0;
 
         if (fwd.proto == TCP || fwd.proto == TLS) {
-            clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+            sys_check(clientSocket = socket(AF_INET, SOCK_STREAM, 0));
             sys_check(setsockopt(clientSocket, IPPROTO_TCP,
                                  TCP_NODELAY, (void *)&no_delay,
                                  sizeof(no_delay)));
         } else {
-            clientSocket = socket(AF_INET, SOCK_DGRAM, 0);
+            sys_check(clientSocket = socket(AF_INET, SOCK_DGRAM, 0));
         }
 
         setnonblocking(clientSocket);
