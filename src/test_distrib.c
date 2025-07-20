@@ -19,6 +19,7 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[0], "-n") == 0) {
             check(argc >= 2);
             num_samples = atol(argv[1]);
+            check(num_samples > 0);
             --argc;
             ++argv;
         } else if (strcmp(argv[0], "-d") == 0) {
