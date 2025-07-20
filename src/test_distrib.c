@@ -1,10 +1,10 @@
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "distrib.h"
+#include "dw_debug.h"
 
 int main(int argc, char **argv) {
     long unsigned num_samples = 1000;
@@ -17,13 +17,13 @@ int main(int argc, char **argv) {
             printf("Usage: test_distrib [-h|--help] [-n <num_samples> = 1000] [-d distrib = 10.0]\n");
             exit(0);
         } else if (strcmp(argv[0], "-n") == 0) {
-            assert(argc >= 2);
+            check(argc >= 2);
             num_samples = atol(argv[1]);
             --argc;
             ++argv;
         } else if (strcmp(argv[0], "-d") == 0) {
-            assert(argc >= 2);
-            assert(pd_parse(&val, argv[1]));
+            check(argc >= 2);
+            check(pd_parse(&val, argv[1]));
             --argc;
             ++argv;
         }
