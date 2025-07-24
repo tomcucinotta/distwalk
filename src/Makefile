@@ -7,7 +7,7 @@ LDLIBS=-pthread -lm -lssl -lcrypto
 LDLIBS_DEBUG=-pthread -lm -lssl -lcrypto -lgcov
 
 TEST_PROGRAMS=test_distrib test_distrib_debug test_ccmd test_message test_message_debug test_ccmd_debug test_pqueue test_pqueue_debug test_queue test_queue_debug test_timespec test_timespec_debug
-TSAN_PROGRAMS=dw_client_tsan dw_node_tsan
+TSAN_PROGRAMS=dw_client_tsan dw_node_tsan dw_proxy
 DEBUG_PROGRAMS=dw_client_debug dw_node_debug
 MAIN_PROGRAMS=dw_client dw_node
 
@@ -35,6 +35,9 @@ dw_client_tsan: dw_client_tsan.o ccmd_tsan.o dw_client_tsan.o distrib_tsan.o thr
 dw_node: dw_node.o thread_affinity.o priority_queue.o request.o connection.o message.o address_utils.o dw_poll.o
 dw_node_debug: dw_node_debug.o thread_affinity_debug.o priority_queue_debug.o request_debug.o connection_debug.o message_debug.o address_utils_debug.o dw_poll_debug.o
 dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request.o connection.o message.o address_utils_tsan.o dw_poll_tsan.o
+
+dw_proxy: dw_proxy.o address_utils.o
+dw_proxy_debug: dw_proxy_debug.o address_utils_debug.o
 
 test_distrib: test_distrib.o distrib.o
 test_distrib_debug: test_distrib_debug.o distrib_debug.o
