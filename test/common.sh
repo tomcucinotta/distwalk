@@ -3,7 +3,7 @@ kill_all() {
     if [ "$1" != "" ]; then
         sig="$1"
     fi
-    for p in dw_client dw_node dw_client_debug dw_node_debug; do
+    for p in dw_client dw_node dw_client_debug dw_node_debug dw_proxy dw_proxy_debug; do
         if $(pidof $p > /dev/null 2>&1); then
             kill -$sig $(pidof $p)
         fi
@@ -96,6 +96,18 @@ strace_node_bg() {
         echo "dw_node_debug showing up $n times, not $n_exp ones up on netstat on netstat, waiting..."
         sleep 0.2
     done
+}
+
+proxy() {
+    check_executable dw_proxy || { exit -1; }
+    run dw_proxy "$@"
+    id=$[$id+1]
+}
+
+proxy_bg() {
+    check_executable dw_proxy || { exit -1; }
+    run dw_proxy "$@" &
+    id=$[$id+1]
 }
 
 kill_all SIGKILL
