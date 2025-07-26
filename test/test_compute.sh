@@ -2,8 +2,8 @@
 
 . common.sh
 
-tmp_node=$(mktemp /tmp/log-node-XXX.dat)
-tmp_client=$(mktemp /tmp/log-client-XXX.dat)
+tmp_node=$(mktemp /tmp/log-node-XXX.txt)
+tmp_client=$(mktemp /tmp/log-client-XXX.txt)
 
 node_bg > $tmp_node
 

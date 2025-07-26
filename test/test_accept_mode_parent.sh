@@ -4,7 +4,7 @@
 
 . common.sh
 
-tmp=$(mktemp /tmp/test_accept_mode_parent-XXX.dat)
+tmp=$(mktemp /tmp/test_accept_mode_parent-XXX.txt)
 
 node_bg -a parent --nt 3 &> $tmp
 

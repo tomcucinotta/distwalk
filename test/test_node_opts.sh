@@ -10,7 +10,7 @@ kill_all SIGINT
 node_bg --num-threads=2
 [ $(ps H -o 'pid tid cmd comm' | grep connw | grep -v grep | wc -l) -eq 2 ]
 
-tmp=$(mktemp /tmp/test_node_opts-XXX.dat)
+tmp=$(mktemp /tmp/test_node_opts-XXX.txt)
 
 node_bg -b :7000 &> $tmp
 cat $tmp | grep -q "Node bound to 127.0.0.1:7000 (with protocol: TCP)"

@@ -2,8 +2,8 @@
 
 . common.sh
 
-tmp_node=$(mktemp /tmp/dw-node-XXX.dat)
-tmp_client=$(mktemp /tmp/dw-client-XXX.dat)
+tmp_node=$(mktemp /tmp/dw-node-XXX.txt)
+tmp_client=$(mktemp /tmp/dw-client-XXX.txt)
 
 node_bg -b :7892 &> $tmp_node
 ../src/dw_proxy -b :7891 --to :7892 &

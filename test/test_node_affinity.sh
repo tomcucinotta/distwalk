@@ -2,7 +2,7 @@
 
 . common.sh
 
-tmp=$(mktemp /tmp/test_affinity-XXX.dat)
+tmp=$(mktemp /tmp/test_affinity-XXX.txt)
 
 strace_node_bg --thread-affinity=auto &> $tmp
 kill_all SIGINT

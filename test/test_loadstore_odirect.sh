@@ -2,7 +2,7 @@
 
 . common.sh
 
-TMP=$(mktemp /tmp/dw-store-XXX.dat)
+TMP=$(mktemp /tmp/dw-store-XXX.txt)
 
 node_bg -s $TMP --odirect
 client -S 33554432

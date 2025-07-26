@@ -2,7 +2,7 @@
 
 . common.sh
 
-TMP=$(mktemp /tmp/dw-node-skip-XXX.dat)
+TMP=$(mktemp /tmp/dw-node-skip-XXX.txt)
 
 node_bg &> $TMP
 
@@ -48,8 +48,8 @@ client -C 15 --skip 1,prob=0.3 -C 25 -n 100
 kill_all SIGINT
 
 #
-TMP1=$(mktemp /tmp/dw-node1-fwd-skip-XXX.dat)
-TMP2=$(mktemp /tmp/dw-node2-fwd-skip-XXX.dat)
+TMP1=$(mktemp /tmp/dw-node1-fwd-skip-XXX.txt)
+TMP2=$(mktemp /tmp/dw-node2-fwd-skip-XXX.txt)
 
 node_bg -b :7891 &> $TMP1
 node_bg -b :7892 &> $TMP2
@@ -61,9 +61,9 @@ client -C 10 --skip 1,prob=0.5 -F :7892 -C 20 -n 100
 kill_all SIGINT
 
 #
-TMP1=$(mktemp /tmp/dw-node1-fwd-fwd-skip-XXX.dat)
-TMP2=$(mktemp /tmp/dw-node2-fwd-fwd-skip-XXX.dat)
-TMP3=$(mktemp /tmp/dw-node3-fwd-fwd-skip-XXX.dat)
+TMP1=$(mktemp /tmp/dw-node1-fwd-fwd-skip-XXX.txt)
+TMP2=$(mktemp /tmp/dw-node2-fwd-fwd-skip-XXX.txt)
+TMP3=$(mktemp /tmp/dw-node3-fwd-fwd-skip-XXX.txt)
 
 node_bg -b :7891 &> $TMP1
 node_bg -b :7892 &> $TMP2

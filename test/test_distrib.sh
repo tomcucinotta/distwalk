@@ -18,7 +18,7 @@ for dist in unif:min=20,max=40 exp:20 exp:20,min=10,max=40 norm:20,std=5 norm:20
     run test_distrib_debug -d $dist
 done
 
-tmp=$(mktemp /tmp/samples-XXX.dat)
+tmp=$(mktemp /tmp/samples-XXX.txt)
 echo -e "10\n20\n30\n" > $tmp
 run test_distrib_debug -d file:$tmp
 rm $tmp

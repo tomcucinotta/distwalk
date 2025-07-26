@@ -2,8 +2,8 @@
 
 . common.sh
 
-TMP_N0=$(mktemp /tmp/dw-node-fwd-1-XXX.dat)
-TMP_C0=$(mktemp /tmp/dw-client-fwd-XXX.dat)
+TMP_N0=$(mktemp /tmp/dw-node-fwd-1-XXX.txt)
+TMP_C0=$(mktemp /tmp/dw-client-fwd-XXX.txt)
 
 node_bg -b :7891 &> $TMP_N0
 

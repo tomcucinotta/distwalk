@@ -2,7 +2,7 @@
 
 . common.sh
 
-TMP=$(mktemp /tmp/dw-store-XXX.dat)
+TMP=$(mktemp /tmp/dw-store-XXX.txt)
 trace_log=/tmp/dw-log.txt
 
 node_bg -s $TMP

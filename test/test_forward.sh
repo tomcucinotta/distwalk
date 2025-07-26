@@ -2,9 +2,9 @@
 
 . common.sh
 
-TMP_N0=$(mktemp /tmp/dw-node-fwd-1-XXX.dat)
-TMP_N1=$(mktemp /tmp/dw-node-fwd-2-XXX.dat)
-TMP_C0=$(mktemp /tmp/dw-client-fwd-XXX.dat)
+TMP_N0=$(mktemp /tmp/dw-node-fwd-1-XXX.txt)
+TMP_N1=$(mktemp /tmp/dw-node-fwd-2-XXX.txt)
+TMP_C0=$(mktemp /tmp/dw-client-fwd-XXX.txt)
 
 node_bg -b :7891 &> $TMP_N0
 node_bg -b :7892 &> $TMP_N1
@@ -32,11 +32,11 @@ kill_all SIGINT
 cat $TMP_N0 | grep -q "Connection to remote peer refused, conn_id=1"
 
 #
-TMP_N0=$(mktemp /tmp/dw-node-fwd-1-XXX.dat)
-TMP_N1=$(mktemp /tmp/dw-node-fwd-2-XXX.dat)
-TMP_N2=$(mktemp /tmp/dw-node-fwd-3-XXX.dat)
+TMP_N0=$(mktemp /tmp/dw-node-fwd-1-XXX.txt)
+TMP_N1=$(mktemp /tmp/dw-node-fwd-2-XXX.txt)
+TMP_N2=$(mktemp /tmp/dw-node-fwd-3-XXX.txt)
 
-TMP_C0=$(mktemp /tmp/dw-client-fwd-XXX.dat)
+TMP_C0=$(mktemp /tmp/dw-client-fwd-XXX.txt)
 
 node_bg -b :7891 &> $TMP_N0
 node_bg -b :7892 &> $TMP_N1
