@@ -37,7 +37,7 @@ int do_connect(flow_t *p_flow) {
   dw_log("Establishing connection to %s:%d ...\n",
          inet_ntoa(dest_addr.sin_addr), ntohs(dest_addr.sin_port));
   int rv = connect(p_flow->fd_server, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
-  dw_log("connect() returned: %d\n", rv);
+  dw_log("connect(%d) returned: %d\n", p_flow->fd_server, rv);
   return rv != -1;
 }
 
@@ -48,6 +48,7 @@ void *receiver(void *arg) {
     int bytes_read;
     do {
         bytes_read = read(p_flow->fd_server, recv_buf, BUF_SIZE);
+        dw_log("receiver(): read(%d) returned: %d\n", p_flow->fd_server, bytes_read);
         if (bytes_read == -1) {
             perror("read() failed: ");
             exit(1);
@@ -55,6 +56,7 @@ void *receiver(void *arg) {
             int to_write = bytes_read;
             do {
                 int n = write(p_flow->fd_client, recv_buf + bytes_read - to_write, to_write);
+                dw_log("receiver(): write(%d) returned: %d\n", p_flow->fd_client, n);
                 check (n >= 0);
                 to_write -= n;
             } while (to_write > 0);
@@ -78,6 +80,7 @@ void *sender(void *arg) {
     int bytes_read;
     do {
         bytes_read = read(p_flow->fd_client, send_buf, BUF_SIZE);
+        dw_log("sender(): read(%d) returned: %d\n", p_flow->fd_client, bytes_read);
         if (bytes_read == -1) {
             perror("read() failed: ");
             exit(1);
@@ -86,6 +89,7 @@ void *sender(void *arg) {
             int to_write = bytes_read;
             do {
                 int n = write(p_flow->fd_server, send_buf + bytes_read - to_write, to_write);
+                dw_log("sender(): write(%d) returned: %d\n", p_flow->fd_server, n);
                 check (n >= 0);
                 to_write -= n;
             } while (to_write > 0);
@@ -150,7 +154,7 @@ int main(int argc, char *argv[]) {
     while (1) {
         dw_log("Accepting new connections...\n");
         int new_fd = accept(fd, NULL, NULL);
-        dw_log("accept() returned: %d\n", new_fd);
+        dw_log("accept(%d) returned: %d\n", fd, new_fd);
         if (new_fd == -1) {
             perror("accept() failed: ");
             exit(1);
