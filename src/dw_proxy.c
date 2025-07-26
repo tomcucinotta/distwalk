@@ -36,8 +36,10 @@ int do_connect(flow_t *p_flow) {
   p_flow->fd_server = socket(AF_INET, SOCK_STREAM, 0);
   check(p_flow->fd_server != -1);
 
-  printf("Establishing connection to server...\n");
+  dw_log("Establishing connection to %s:%d ...\n",
+         inet_ntoa(dest_addr.sin_addr), ntohs(dest_addr.sin_port));
   int rv = connect(p_flow->fd_server, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+  dw_log("connect() returned: %d\n", rv);
   return rv != -1;
 }
 
@@ -136,13 +138,16 @@ int main(int argc, char *argv[]) {
         perror("bind() failed: ");
         exit(1);
     }
+    dw_log("Proxy bound to %s:%d\n",
+           inet_ntoa(bind_addr.sin_addr), ntohs(bind_addr.sin_port));
     if (listen(fd, 5) == -1) {
         perror("listen() failed: ");
         exit(1);
     }
     while (1) {
-        printf("Accepting new connections...\n");
+        dw_log("Accepting new connections...\n");
         int new_fd = accept(fd, NULL, NULL);
+        dw_log("accept() returned: %d\n", new_fd);
         if (new_fd == -1) {
             perror("accept() failed: ");
             exit(1);
