@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <signal.h>
 
 #include "address_utils.h"
 #include "dw_debug.h"
@@ -28,6 +29,7 @@ int n_flows = 0;
 struct sockaddr_in bind_addr, dest_addr;
 
 unsigned long delay_us = 0;
+size_t frag_size = BUF_SIZE;
 
 // return 1 on success, 0 on failure
 int do_connect(flow_t *p_flow) {
@@ -42,16 +44,16 @@ int do_connect(flow_t *p_flow) {
 }
 
 void *receiver(void *arg) {
-    unsigned char *recv_buf = malloc(BUF_SIZE);
+    unsigned char *recv_buf = malloc(frag_size);
     check(recv_buf != NULL);
     flow_t *p_flow = (flow_t *) arg;
     int bytes_read;
     do {
-        bytes_read = read(p_flow->fd_server, recv_buf, BUF_SIZE);
+        bytes_read = read(p_flow->fd_server, recv_buf, frag_size);
         dw_log("receiver(): read(%d) returned: %d\n", p_flow->fd_server, bytes_read);
         if (bytes_read == -1) {
             perror("read() failed: ");
-            exit(1);
+            goto end;
         } else if (bytes_read > 0) {
             int to_write = bytes_read;
             do {
@@ -62,6 +64,7 @@ void *receiver(void *arg) {
             } while (to_write > 0);
         }
     } while (bytes_read > 0);
+ end:
     close(p_flow->fd_server);
     close(p_flow->fd_client);
 
@@ -69,7 +72,7 @@ void *receiver(void *arg) {
 }
 
 void *sender(void *arg) {
-    unsigned char *send_buf = malloc(BUF_SIZE);
+    unsigned char *send_buf = malloc(frag_size);
     check(send_buf != NULL);
 
     flow_t *p_flow = (flow_t *) arg;
@@ -79,11 +82,11 @@ void *sender(void *arg) {
     check(pthread_create(&p_flow->thr_receiver, NULL, receiver, (void*)p_flow) == 0);
     int bytes_read;
     do {
-        bytes_read = read(p_flow->fd_client, send_buf, BUF_SIZE);
+        bytes_read = read(p_flow->fd_client, send_buf, frag_size);
         dw_log("sender(): read(%d) returned: %d\n", p_flow->fd_client, bytes_read);
         if (bytes_read == -1) {
             perror("read() failed: ");
-            exit(1);
+            goto end;
         } else if (bytes_read > 0) {
             usleep(delay_us);
             int to_write = bytes_read;
@@ -95,8 +98,10 @@ void *sender(void *arg) {
             } while (to_write > 0);
         }
     } while (bytes_read > 0);
+ end:
     close(p_flow->fd_server);
     close(p_flow->fd_client);
+    check(pthread_kill(p_flow->thr_receiver, SIGUSR1) == 0);
     pthread_join(p_flow->thr_receiver, NULL);
 
     return NULL;
@@ -110,7 +115,7 @@ int main(int argc, char *argv[]) {
     argc--;  argv++;
     while (argc > 0) {
         if (strcmp(*argv, "-h") == 0 || strcmp(*argv, "--help") == 0) {
-            printf("Usage: proxy [-b bindaddr[:port]] [--to connectaddr[:port]] [-d|--delay delay_ms]\n");
+            printf("Usage: proxy [-b bindaddr[:port]] [--to connectaddr[:port]] [-d|--delay delay_ms] [-f|--frag size]\n");
             exit(0);
         } else if (strcmp(*argv, "-b") == 0 || strcmp(*argv, "--bind") == 0) {
             argc--;  argv++;
@@ -124,12 +129,18 @@ int main(int argc, char *argv[]) {
             argc--;  argv++;
             check(argc > 0);
             delay_us = atol(*argv) * 1000;
+        } else if (strcmp(*argv, "-f") == 0 || strcmp(*argv, "--frag") == 0) {
+            argc--;  argv++;
+            check(argc > 0);
+            frag_size = atol(*argv);
         } else {
             fprintf(stderr, "Wrong option: %s\n", *argv);
             exit(1);
         }
         argc--;  argv++;
     }
+
+    signal(SIGUSR1, SIG_IGN);
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == -1) {
