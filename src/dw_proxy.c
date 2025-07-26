@@ -12,6 +12,7 @@
 
 #include "address_utils.h"
 #include "dw_debug.h"
+#include "message.h"
 
 typedef struct {
     pthread_t thr_sender;
@@ -25,9 +26,6 @@ flow_t flows[MAX_FLOWS];
 int n_flows = 0;
 
 struct sockaddr_in bind_addr, dest_addr;
-
-unsigned char buf_send[1024];
-unsigned char buf_recv[1024];
 
 unsigned long delay_us = 0;
 
@@ -44,17 +42,19 @@ int do_connect(flow_t *p_flow) {
 }
 
 void *receiver(void *arg) {
+    unsigned char *recv_buf = malloc(BUF_SIZE);
+    check(recv_buf != NULL);
     flow_t *p_flow = (flow_t *) arg;
     int bytes_read;
     do {
-        bytes_read = read(p_flow->fd_server, buf_recv, sizeof(buf_recv));
+        bytes_read = read(p_flow->fd_server, recv_buf, BUF_SIZE);
         if (bytes_read == -1) {
             perror("read() failed: ");
             exit(1);
         } else if (bytes_read > 0) {
             int to_write = bytes_read;
             do {
-                int n = write(p_flow->fd_client, buf_recv + bytes_read - to_write, to_write);
+                int n = write(p_flow->fd_client, recv_buf + bytes_read - to_write, to_write);
                 check (n >= 0);
                 to_write -= n;
             } while (to_write > 0);
@@ -67,6 +67,9 @@ void *receiver(void *arg) {
 }
 
 void *sender(void *arg) {
+    unsigned char *send_buf = malloc(BUF_SIZE);
+    check(send_buf != NULL);
+
     flow_t *p_flow = (flow_t *) arg;
     usleep(delay_us);
     if (!do_connect(p_flow))
@@ -74,7 +77,7 @@ void *sender(void *arg) {
     check(pthread_create(&p_flow->thr_receiver, NULL, receiver, (void*)p_flow) == 0);
     int bytes_read;
     do {
-        bytes_read = read(p_flow->fd_client, buf_send, sizeof(buf_send));
+        bytes_read = read(p_flow->fd_client, send_buf, BUF_SIZE);
         if (bytes_read == -1) {
             perror("read() failed: ");
             exit(1);
@@ -82,7 +85,7 @@ void *sender(void *arg) {
             usleep(delay_us);
             int to_write = bytes_read;
             do {
-                int n = write(p_flow->fd_server, buf_send + bytes_read - to_write, to_write);
+                int n = write(p_flow->fd_server, send_buf + bytes_read - to_write, to_write);
                 check (n >= 0);
                 to_write -= n;
             } while (to_write > 0);
