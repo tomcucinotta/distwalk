@@ -6,8 +6,9 @@ CFLAGS_TSAN=-g -Wall -O2 -fsanitize=thread
 LDLIBS=-pthread -lm -lssl -lcrypto
 LDLIBS_DEBUG=-pthread -lm -lssl -lcrypto -lgcov
 
-TEST_PROGRAMS=test_distrib test_distrib_debug test_ccmd test_message test_message_debug test_ccmd_debug test_pqueue test_pqueue_debug test_queue test_queue_debug test_timespec test_timespec_debug
-TSAN_PROGRAMS=dw_client_tsan dw_node_tsan dw_proxy
+TEST_PROGRAMS=test_distrib test_distrib_debug test_ccmd test_ccmd_debug test_message test_message_debug test_pqueue test_pqueue_debug
+TEST_PROGRAMS+=test_queue test_queue_debug test_timespec test_timespec_debug dw_proxy dw_proxy_debug
+TSAN_PROGRAMS=dw_client_tsan dw_node_tsan
 DEBUG_PROGRAMS=dw_client_debug dw_node_debug
 MAIN_PROGRAMS=dw_client dw_node
 
