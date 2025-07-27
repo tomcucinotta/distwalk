@@ -2,19 +2,19 @@
 #include "priority_queue.h"
 
 pqueue_t* pqueue_alloc(uint32_t capacity) {
-	pqueue_t *res = (pqueue_t*) malloc(sizeof(pqueue_t));
-	check(res != NULL, "malloc() failed!");
-	res->nodes = (node_t*) malloc(capacity * sizeof(node_t));
-	res->heap  = (uint32_t*) malloc(capacity * sizeof(uint32_t));
-	res->stack = (uint32_t*) malloc(capacity * sizeof(uint32_t));
-	res->size = 0;
-	res->capacity = capacity;
+	pqueue_t *queue = (pqueue_t*) malloc(sizeof(pqueue_t));
+	check(queue != NULL, "malloc() failed!");
+	queue->nodes = (node_t*) malloc(capacity * sizeof(node_t));
+	queue->heap  = (uint32_t*) malloc(capacity * sizeof(uint32_t));
+	queue->stack = (uint32_t*) malloc(capacity * sizeof(uint32_t));
+	queue->size = 0;
+	queue->capacity = capacity;
 
-	for(int i = 0; i < capacity; i++) {
-		res->stack[i] = i;
+	for (int i = 0; i < capacity; i++) {
+		queue->stack[i] = i;
 	}
 
-	return res;
+	return queue;
 }
 
 void pqueue_free(pqueue_t *queue) {
@@ -36,7 +36,7 @@ static void swap_node(pqueue_t *queue, node_t *node0, node_t *node1) {
 }
 
 static node_t* get_parent_node(pqueue_t *queue, node_t* node) {
-	if(node->heap_id == 0)
+	if (node->heap_id == 0)
 		return NULL;
 	uint32_t parent_idx = (node->heap_id - 1) / 2;
 	return &queue->nodes[queue->heap[parent_idx]];
@@ -46,9 +46,9 @@ static node_t* get_child_node(pqueue_t *queue, node_t* node) {
 	uint32_t child1_idx, child2_idx;
 	child1_idx = 2 * node->heap_id + 1;
 	child2_idx = 2 * node->heap_id + 2;
-	if(child1_idx >= queue->size)
+	if (child1_idx >= queue->size)
 		return NULL;
-	if(child2_idx >= queue->size)
+	if (child2_idx >= queue->size)
 		return &queue->nodes[queue->heap[child1_idx]];
 	node_t *child1, *child2;
 	child1 = &queue->nodes[queue->heap[child1_idx]];
