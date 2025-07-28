@@ -323,6 +323,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     int fwd_reply_id = find_forward_reply_id(req->curr_cmd, addr);
     if (fwd_reply_id == -1)
         return NULL;
+
     if (req->fwd_replies_left != -1 && (req->fwd_replies_mask & (1 << fwd_reply_id))) {
         // avoid retransmissions of already acknowledged FORWARD branches
         dw_log("Found reply for fwd to: %s:%d\n", inet_ntoa((struct in_addr) {addr.sin_addr.s_addr}), ntohs(addr.sin_port));
@@ -334,6 +335,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
         return cmd == NULL ? cmd_skip(req->curr_cmd, 1) : cmd;
     }
     int fwd_conn_id = conn_find_existing(addr, fwd.proto);
+    conn_info_t *fwd_conn;
     if (fwd_conn_id == -1) {
         int clientSocket = 0;
 
@@ -353,8 +355,9 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
             close(clientSocket);
             return NULL;
         }
+        fwd_conn = conn_get_by_id(fwd_conn_id);
 
-        conn_get_by_id(fwd_conn_id)->enable_defrag = enable_defrag;
+        fwd_conn->enable_defrag = enable_defrag;
         if (fwd.proto == TCP || fwd.proto == TLS) {
             check(dw_poll_add(p_poll, clientSocket, DW_POLLOUT | DW_POLLIN, i2l(CONNECT, fwd_conn_id)) == 0);
 
@@ -394,11 +397,13 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
                 }
             }
         }
+    } else {
+        fwd_conn = conn_get_by_id(fwd_conn_id);
     }
 
-    int sock = conns[fwd_conn_id].sock;
+    int sock = fwd_conn->sock;
     assert(sock != -1);
-    message_t *m_dst = conn_prepare_send_message(&conns[fwd_conn_id]);
+    message_t *m_dst = conn_prepare_send_message(fwd_conn);
     assert(m_dst->req_size >= fwd.pkt_size);
 
     // skip possible FORWARD_CONTINUE cmds in non-branched multi-fwd
@@ -422,7 +427,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     msg_log(m_dst, "  f: ");
 #endif
 
-    if (conn_start_send(&conns[fwd_conn_id], addr) < 0)
+    if (conn_start_send(fwd_conn, addr) < 0)
         return NULL;
         
     if (req->fwd_timeout) {
