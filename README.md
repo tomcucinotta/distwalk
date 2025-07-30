@@ -145,6 +145,9 @@ three parts of the argument are optional:
 - if the host is not specified, then localhost is assumed by default
 - if the port is not specified, then 7891 is assumed by default
 
+This option can be used multiple times, to let the same `dw_node`
+instance bind to multiple IPs, ports or protocols.
+
 Not using this option, is equivalent to calling dw_node with `-b tcp://localhost:7891`.
 
 ```  --backlog-length=n, --bl=n```
