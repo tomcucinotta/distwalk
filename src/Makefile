@@ -12,12 +12,24 @@ TSAN_PROGRAMS=dw_client_tsan dw_node_tsan
 DEBUG_PROGRAMS=dw_client_debug dw_node_debug
 MAIN_PROGRAMS=dw_client dw_node
 
+DW_CLIENT_SOURCES=dw_client.c ccmd.c distrib.c thread_affinity.c connection.c request.c message.c queue.c address_utils.c
+DW_NODE_SOURCES=dw_node.c thread_affinity.c priority_queue.c request.c connection.c message.c address_utils.c dw_poll.c
+DW_PROXY_SOURCES=dw_proxy.c address_utils.c
+
+TEST_SCRIPTS=$(wildcard test_*.sh)
 TOOLS=bash gcovr
+
+#BUILD_DIR=.build
+BUILD_DIR=.
+.PRECIOUS: $(BUILD_DIR)
 
 all: main debug tests
 main: $(MAIN_PROGRAMS)
 debug: $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
 tests: $(TEST_PROGRAMS)
+
+$(BUILD_DIR):
+	@mkdir -p $(BUILD_DIR)
 
 run-tests: all
 	$(foreach exec,$(TOOLS),$(if $(shell which $(exec)),,$(error "No $(exec) in PATH. Please install it")))
@@ -28,67 +40,55 @@ doc:
 
 clean:
 	rm -f *.o *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
-	rm -rf html latex gcov
+	rm -rf html latex gcov $(ifneq $(BUILD_DIR),.,$(BUILD_DIR))
 
-dw_client: dw_client.o ccmd.o distrib.o thread_affinity.o connection.o request.o message.o queue.o address_utils.o
-dw_client_debug: dw_client_debug.o ccmd_debug.o distrib_debug.o thread_affinity_debug.o connection_debug.o queue_debug.o request_debug.o message_debug.o address_utils_debug.o
-dw_client_tsan: dw_client_tsan.o ccmd_tsan.o dw_client_tsan.o distrib_tsan.o thread_affinity_tsan.o queue.o connection.o request.o message.o address_utils_tsan.o
-dw_node: dw_node.o thread_affinity.o priority_queue.o request.o connection.o message.o address_utils.o dw_poll.o
-dw_node_debug: dw_node_debug.o thread_affinity_debug.o priority_queue_debug.o request_debug.o connection_debug.o message_debug.o address_utils_debug.o dw_poll_debug.o
-dw_node_tsan: dw_node_tsan.o thread_affinity_tsan.o priority_queue.o request.o connection.o message.o address_utils_tsan.o dw_poll_tsan.o
+dw_client: $(patsubst %.c,$(BUILD_DIR)/%.o,$(DW_CLIENT_SOURCES))
+dw_client_debug: $(patsubst %.c,$(BUILD_DIR)/%_debug.o,$(DW_CLIENT_SOURCES))
+dw_client_tsan: $(patsubst %.c,$(BUILD_DIR)/%_tsan.o,$(DW_CLIENT_SOURCES))
 
-dw_proxy: dw_proxy.o address_utils.o
-dw_proxy_debug: dw_proxy_debug.o address_utils_debug.o
+dw_node: $(patsubst %.c,$(BUILD_DIR)/%.o,$(DW_NODE_SOURCES))
+dw_node_debug: $(patsubst %.c,$(BUILD_DIR)/%_debug.o,$(DW_NODE_SOURCES))
+dw_node_tsan: $(patsubst %.c,$(BUILD_DIR)/%_tsan.o,$(DW_NODE_SOURCES))
 
-test_distrib: test_distrib.o distrib.o
-test_distrib_debug: test_distrib_debug.o distrib_debug.o
-test_ccmd: ccmd.o queue.o test_ccmd.o distrib.o message.o
-test_ccmd_debug: ccmd_debug.o queue_debug.o test_ccmd_debug.o distrib.o message_debug.o
-test_message: queue.o test_message.o message.o
-test_message_debug: queue_debug.o test_message_debug.o message_debug.o
-test_pqueue: test_pqueue.o priority_queue.o
-test_pqueue_debug: test_pqueue_debug.o priority_queue_debug.o
-test_queue: test_queue.o queue.o
-test_queue_debug: test_queue_debug.o queue_debug.o
+dw_proxy: $(patsubst %.c,$(BUILD_DIR)/%.o,$(DW_PROXY_SOURCES))
+dw_proxy_debug: $(patsubst %.c,$(BUILD_DIR)/%_debug.o,$(DW_PROXY_SOURCES))
 
-%_tsan: %_tsan.o
-	$(CC) -fsanitize=thread -o $@ $^ $(LDLIBS)
-%_debug: %_debug.o
-	$(CC) -o $@ $^ $(LDLIBS_DEBUG)
+test_distrib: $(patsubst %,$(BUILD_DIR)/%,test_distrib.o distrib.o)
+test_distrib_debug: $(patsubst %,$(BUILD_DIR)/%,test_distrib_debug.o distrib_debug.o)
+test_ccmd: $(patsubst %,$(BUILD_DIR)/%,ccmd.o queue.o test_ccmd.o distrib.o message.o)
+test_ccmd_debug: $(patsubst %,$(BUILD_DIR)/%,ccmd_debug.o queue_debug.o test_ccmd_debug.o distrib.o message_debug.o)
+test_message: $(patsubst %,$(BUILD_DIR)/%,queue.o test_message.o message.o)
+test_message_debug: $(patsubst %,$(BUILD_DIR)/%,queue_debug.o test_message_debug.o message_debug.o)
+test_pqueue: $(patsubst %,$(BUILD_DIR)/%,test_pqueue.o priority_queue.o)
+test_pqueue_debug: $(patsubst %,$(BUILD_DIR)/%,test_pqueue_debug.o priority_queue_debug.o)
+test_queue: $(patsubst %,$(BUILD_DIR)/%,test_queue.o queue.o)
+test_queue_debug: $(patsubst %,$(BUILD_DIR)/%,test_queue_debug.o queue_debug.o)
 
-%_debug.o: %.c
+$(BUILD_DIR)/%.d: %.c | $(BUILD_DIR)
+	@$(CC) $(CFLAGS) -MM -MT '$(BUILD_DIR)/'$(<:.c=.o) -MF $@ $<
+
+$(BUILD_DIR)/%_debug.d: %.c | $(BUILD_DIR)
+	@$(CC) $(CFLAGS_DEBUG) -MM -MF $@ $<
+
+$(BUILD_DIR)/%_tsan.d: %.c | $(BUILD_DIR)
+	@$(CC) $(CFLAGS_TSAN) -MM -MF $@ $<
+
+$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+$(BUILD_DIR)/%_debug.o: %.c | $(BUILD_DIR)
 	$(CC) -c $(CFLAGS_DEBUG) -o $@ $<
-%_tsan.o: %.c
-	$(CC) -c $(CFLAGS_TSAN)  -o $@ $<
 
-TEST_SCRIPTS=$(wildcard test_*.sh)
+$(BUILD_DIR)/%_tsan.o: %.c | $(BUILD_DIR)
+	$(CC) -c $(CFLAGS_TSAN) -o $@ $<
 
-dep:
-	makedepend -- -Y *.c
+%: $(BUILD_DIR)/%.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
-# DO NOT DELETE
+%_debug: $(BUILD_DIR)/%_debug.o
+	$(CC) $(CFLAGS_DEBUG) -o $@ $^ $(LDLIBS_DEBUG)
 
-address_utils.o: address_utils.h message.h dw_debug.h
-ccmd.o: queue.h queueing_common.h ccmd.h message.h distrib.h dw_debug.h
-connection.o: connection.h message.h request.h priority_queue.h
-connection.o: queueing_common.h dw_debug.h
-distrib.o: distrib.h dw_debug.h
-dw_client.o: dw_debug.h distrib.h message.h connection.h request.h
-dw_client.o: priority_queue.h queueing_common.h timespec.h ccmd.h queue.h
-dw_client.o: address_utils.h
-dw_node.o: dw_debug.h message.h timespec.h thread_affinity.h priority_queue.h
-dw_node.o: queueing_common.h sched_attr.h request.h connection.h
-dw_node.o: address_utils.h dw_poll.h
-dw_poll.o: dw_poll.h dw_debug.h
-message.o: message.h dw_debug.h
-priority_queue.o: priority_queue.h queueing_common.h
-queue.o: queue.h queueing_common.h
-request.o: request.h message.h priority_queue.h queueing_common.h dw_debug.h
-test_ccmd.o: ccmd.h queue.h queueing_common.h message.h distrib.h dw_debug.h
-test_distrib.o: distrib.h
-test_message.o: message.h dw_debug.h
-test_pqueue.o: priority_queue.h queueing_common.h dw_debug.h
-test_queue.o: queue.h queueing_common.h dw_debug.h ccmd.h message.h distrib.h
-test_thread_affinity.o: thread_affinity.h dw_debug.h
-test_timespec.o: timespec.h dw_debug.h
-thread_affinity.o: thread_affinity.h dw_debug.h
+%_tsan: $(BUILD_DIR)/%_tsan.o
+	$(CC) $(CFLAGS_TSAN) -o $@ $^ $(LDLIBS)
+
+-include $(patsubst %.c,$(BUILD_DIR)/%.d $(BUILD_DIR)/%_debug.d $(BUILD_DIR)/%_tsan.d,$(wildcard *.c))
