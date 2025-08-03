@@ -5,6 +5,7 @@
 tmp=$(mktemp /tmp/test_retry_success-XXX.txt)
 
 client_bg --to=tcp://127.0.0.1:7894 --retry-num 10 --retry-period 1000 &> $tmp
+client_pid=$!
 
 sleep 2
 node_bg -b :7894
@@ -15,9 +16,11 @@ while ! grep -q "CONN allocated" $tmp; do
     sleep 1
 
     if [[ $attempt -eq 5 ]]; then
-        exit -1
+        exit 1
     fi
     ((attempt++))
 done
+
+wait $client_pid
 
 rm $tmp

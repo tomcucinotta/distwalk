@@ -4,9 +4,7 @@ kill_all() {
         sig="$1"
     fi
     for p in dw_client dw_node dw_client_debug dw_node_debug dw_proxy dw_proxy_debug; do
-        if $(pidof $p > /dev/null 2>&1); then
-            kill -$sig $(pidof $p)
-        fi
+        kill -$sig $(pidof $p) &> /dev/null || true
     done
     wait
 
