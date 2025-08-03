@@ -10,9 +10,9 @@ client -S 32000000
 [ $(du -b $TMP | cut -f1) -eq 32000000 ]
 
 client -L 1024
-client -L unif:min=1024,max=2048
+client -L unif:min=1024,max=2047
 client --load-offset 0 -L 1024
-client --load-offset unif:min=0,max=3072 -L 1024
+client --load-offset unif:min=0,max=3071 -L 1024
 
 kill_all SIGKILL
 
@@ -22,6 +22,11 @@ grep -e " 17, SEEK_SET" $trace_log
 
 client --store-offset 31 -S 65536
 grep -e " 31, SEEK_SET" $trace_log
+
+client --store-offset 0 -S sync,65536
+client --store-offset 0 -S nosync,65536
+
+client --store-offset unif:min=0,max=3071 -S 1024
 
 kill_all SIGINT
 
