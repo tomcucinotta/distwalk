@@ -43,8 +43,9 @@ __attribute__((weak)) __thread char thread_name[16];
 // Exit immediately if cond is violated
 #define check(cond, ...) do {	 \
     if (!(cond)) {		 \
-      fprintf(stderr, "Error:" #cond ": " __VA_ARGS__);       \
-      fprintf(stderr, " [%s:%d]\n", __FILE__, __LINE__);     \
+      fprintf(stderr, "Error:" #cond); \
+      fprintf(stderr, ": " __VA_ARGS__); \
+      fprintf(stderr, " [%s:%d]\n", __FILE__, __LINE__); \
       exit(EXIT_FAILURE);	 \
     }				 \
   } while (0)
