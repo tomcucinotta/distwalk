@@ -6,6 +6,7 @@
 
 // Probabilistic distribution types
 typedef enum {
+    PD_NONE,            // Invalid/uninitialized pd_spec_t
     FIXED,              // fixed value .val
     UNIF,               // uniformly distributed value in range [.min, .max)
     EXPON,              // exponentially distributed value with average .val
@@ -35,6 +36,10 @@ double expon(double lambda);
 void pd_init(long int seed);
 
 static inline pd_spec_t pd_build_fixed(double val) { return (pd_spec_t) { .prob = FIXED, .val = val, .min = NAN, .max = NAN }; }
+
+static inline pd_spec_t pd_build_none() { return (pd_spec_t) { .prob = PD_NONE, .val = NAN, .min = NAN, .max = NAN }; }
+
+static inline int pd_is_none(pd_spec_t *p) { return p->prob == PD_NONE; }
 
 // sample probability distribution specified by *p
 double pd_sample(pd_spec_t *p);

@@ -153,7 +153,9 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
     double xavg = NAN;  // used by LOGNORM
     double xstd = NAN;  // used by LOGNORM
     check(tok, "Wrong value/distribution syntax\n");
-    if (strcmp(tok, "unif") == 0)
+    if (strcmp(tok, "none") == 0)
+        p->prob = PD_NONE;
+    else if (strcmp(tok, "unif") == 0)
         p->prob = UNIF;
     else if (strcmp(tok, "exp") == 0)
         p->prob = EXPON;
@@ -279,6 +281,8 @@ double pd_sample(pd_spec_t *p) {
     double m2, s2, xavg, xdev;
  retry:
     switch (p->prob) {
+    case PD_NONE:
+        check(0, "Attempt of sampling from PD_NONE");
     case FIXED:
         // no need to check boundaries in this case
         return p->val;
@@ -339,6 +343,9 @@ char *pd_str(pd_spec_t *p) {
     double scale;
     int k;
     switch (p->prob) {
+    case PD_NONE:
+        sprintf(s, "none");
+        break;
     case FIXED:
         sprintf(s, "%g", p->val);
         break;
