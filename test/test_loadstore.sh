@@ -14,6 +14,15 @@ client -L unif:min=1024,max=2047
 client --load-offset 0 -L 1024
 client --load-offset unif:min=0,max=3071 -L 1024
 
+client -L size=[1024],offset=[unif:min=0,max=3071]
+client -L offset=[unif:min=0,max=3071],size=[1024]
+
+client -L size=[unif:min=0,max=1023],offset=[unif:min=0,max=3071]
+client -L offset=[unif:min=0,max=3071],size=[unif:min=0,max=1023]
+
+client -L offset=[unif:min=0,max=3071],1024
+client -L offset=[unif:min=0,max=3071],unif:min=0,max=3071
+
 kill_all SIGKILL
 
 strace_node_bg -s $TMP &> $trace_log
@@ -27,6 +36,15 @@ client --store-offset 0 -S sync,65536
 client --store-offset 0 -S nosync,65536
 
 client --store-offset unif:min=0,max=3071 -S 1024
+
+client -S size=[1024],offset=[unif:min=0,max=3071]
+client -S offset=[unif:min=0,max=3071],size=[1024]
+
+client -S size=[unif:min=0,max=1023],offset=[unif:min=0,max=3071]
+client -S offset=[unif:min=0,max=3071],size=[unif:min=0,max=1023]
+
+client -S offset=[unif:min=0,max=3071],1024
+client -S offset=[unif:min=0,max=3071],unif:min=0,max=3071
 
 kill_all SIGINT
 

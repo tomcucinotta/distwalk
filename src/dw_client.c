@@ -619,32 +619,63 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         check(pd_parse_bytes(&store_offset_pd, arg), "Wrong store-offset specification");
         break; }
     case STORE_DATA: {        
+        pd_spec_t val = pd_build_none();
+        pd_spec_t off = store_offset_pd;
         uint8_t sync = 1;
-        char* reserve;
-        char *tok = strtok_r(arg, ",", &reserve);
-        while (tok != NULL) {
-            if (strncmp(tok, "nosync", 6) == 0) {
+        do {
+            if (strncmp(arg, "nosync", 6) == 0) {
+                arg += 6;
                 sync = 0;
-            } else if (strncmp(tok, "sync", 4) == 0) {
+            } else if (strncmp(arg, "sync", 4) == 0) {
+                arg += 4;
                 sync = 1;
+            } else if (strncmp(arg, "offset=[", 8) == 0) {
+                arg += 8;
+                char *tok = strsep(&arg, "]");
+                check(arg != NULL, "Missing closing ] bracket in %s", arg);
+                check(pd_parse_bytes(&off, tok), "Wrong store offset specification");
+            } else if (strncmp(arg, "size=[", 6) == 0) {
+                arg += 6;
+                char *tok = strsep(&arg, "]");
+                check(arg != NULL, "Missing closing ] bracket in %s", arg);
+                check(pd_parse_bytes(&val, tok), "Wrong store size specification");
             } else {
-                pd_spec_t val;
                 check(pd_parse_bytes(&val, arg), "Wrong store data size specification");
-                ccmd_add(ccmd, STORE, &val);
-                ccmd_last(ccmd)->pd_val2 = store_offset_pd;
+                break;
             }
-
-            tok = strtok_r(NULL, ",", &reserve);
-        }
-
+            if (arg != NULL && *arg == ',')
+                arg++;
+        } while (arg != NULL && *arg != '\0');
+        check(!pd_is_none(&val), "Wrong store data size specification");
+        ccmd_add(ccmd, STORE, &val);
+        ccmd_last(ccmd)->pd_val2 = off;
         ccmd_last(ccmd)->store.wait_sync = sync;
-
         break; }
     case LOAD_DATA: {
-        pd_spec_t val;
-        check(pd_parse_bytes(&val, arg), "Wrong load data size specification");
+        pd_spec_t val = pd_build_none();
+        pd_spec_t off = load_offset_pd;
+        do {
+            if (strncmp(arg, "size=[", 6) == 0) {
+                arg += 6;
+                char *tok = strsep(&arg, "]");
+                check(arg != NULL, "Missing closing ] bracket in %s", arg);
+                check(pd_parse_bytes(&val, tok), "Wrong load size specification");
+            } else if (strncmp(arg, "offset=[", 8) == 0) {
+                arg += 8;
+                char *tok = strsep(&arg, "]");
+                check(arg != NULL, "Missing closing ] bracket in %s", arg);
+                check(pd_parse_bytes(&off, tok), "Wrong load offset specification");
+            } else {
+                dw_log("ARG: %s\n", arg);
+                check(pd_parse_bytes(&val, arg), "Wrong load size specification");
+                break;
+            }
+            if (arg != NULL && *arg == ',')
+                arg++;
+        } while (arg != NULL && *arg != '\0');
+        check(!pd_is_none(&val), "Wrong load data size specification");
         ccmd_add(ccmd, LOAD, &val);
-        ccmd_last(ccmd)->pd_val2 = load_offset_pd;
+        ccmd_last(ccmd)->pd_val2 = off;
         break; }
     case SKIP_CMD: {
         pd_spec_t val = pd_build_fixed(1.0);
