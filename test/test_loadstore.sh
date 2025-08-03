@@ -9,7 +9,12 @@ node_bg -s $TMP
 client -S 32000000
 [ $(du -b $TMP | cut -f1) -eq 32000000 ]
 
-kill_all SIGINT
+client -L 1024
+client -L unif:min=1024,max=2048
+client --load-offset 0 -L 1024
+client --load-offset unif:min=0,max=3072 -L 1024
+
+kill_all SIGKILL
 
 strace_node_bg -s $TMP &> $trace_log
 client --store-offset 17 -S 65536
