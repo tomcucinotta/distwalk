@@ -38,4 +38,6 @@ int main(int argc, char **argv) {
     //printf("distrib=%s\n", pd_str(&val));
     for (int i = 0; i < num_samples; i++)
         printf("%g\n", pd_sample(&val));
+
+    return EXIT_SUCCESS;
 }
