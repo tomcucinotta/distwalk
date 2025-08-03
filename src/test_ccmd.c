@@ -43,6 +43,7 @@ bool test_ccmd_add_2() {
     
     val = pd_build_fixed(200);
     ccmd_add(ccmd, STORE, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
     bool res = false;
     if (queue_size(ccmd) == 2                
@@ -111,9 +112,11 @@ bool test_ccmd_last() {
 
     val = pd_build_fixed(300);
     ccmd_add(ccmd, STORE, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
     val = pd_build_fixed(400);
     ccmd_add(ccmd, LOAD, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
     if (ccmd_last(ccmd)->cmd == LOAD && ccmd_last(ccmd)->pd_val.val == 400) {
         res = true;
     }
@@ -142,6 +145,7 @@ bool test_ccmd_last_reply() {
 
     val = pd_build_fixed(400);
     ccmd_add(ccmd, STORE, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
     val = pd_build_fixed(500);
     ccmd_add(ccmd, REPLY, &val);
@@ -256,12 +260,14 @@ bool test_ccmd_skip_3() {
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, STORE, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
     val = pd_build_fixed(200);
     ccmd_add(ccmd, FORWARD_BEGIN, &val);
     
     val = pd_build_fixed(300);
     ccmd_add(ccmd, STORE, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
     val = pd_build_fixed(400);
     ccmd_add(ccmd, REPLY, &val);
@@ -290,9 +296,11 @@ bool test_ccmd_skip_4() {
     
     val = pd_build_fixed(200);
     ccmd_add(ccmd, STORE, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
     val = pd_build_fixed(300);
     ccmd_add(ccmd, LOAD, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
     val = pd_build_fixed(400);
     ccmd_add(ccmd, REPLY, &val);
@@ -319,7 +327,8 @@ bool test_ccmd_dump_1() {
 
     pd_spec_t val = pd_build_fixed(100);
     ccmd_add(ccmd, STORE, &val);
-    
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
+
     val = pd_build_fixed(200);
     ccmd_add(ccmd, COMPUTE, &val);
 
@@ -330,20 +339,21 @@ bool test_ccmd_dump_1() {
 
     val = pd_build_fixed(400);
     ccmd_add(ccmd, LOAD, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
-    
     val = pd_build_fixed(500);
     ccmd_add(ccmd, FORWARD_BEGIN, &val);
-    
+
     val = pd_build_fixed(600);
     ccmd_add(ccmd, STORE, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
     val = pd_build_fixed(700);
     ccmd_add(ccmd, LOAD, &val);
+    ccmd_last(ccmd)->pd_val2 = pd_build_fixed(-1);
 
     val = pd_build_fixed(800);
     ccmd_add(ccmd, REPLY, &val);
-
 
     val = pd_build_fixed(900);
     ccmd_add(ccmd, REPLY, &val);
