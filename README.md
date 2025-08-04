@@ -284,7 +284,7 @@ Set the number of sessions each client thread establishes with the (initial) dis
 
 Let the client output the response times obtained for each session, at the end of the session, rather than at the end of the program. this implies some extra delay between sessions, but it requires the client to save on the needed memory.
 
-```  --ps=nbytes|prob:field=val[,field=val]```
+```  --ps=nbytes_spec```
 
 Set the payload size of the sent requests, or their probability distribution (see below for details on how to specify distributions).
 
@@ -292,7 +292,7 @@ Set the payload size of the sent requests, or their probability distribution (se
 
 Set the number of client threads, corresponding to parallel sessions that are opened with the (initial) distwalk node, each submitting the overall number of requests as specified with `-n`. If this option is not used, only one thread will be submitting requests.
 
-```  -p, --period=usec|prob:field=val[,field=val]``
+```  -p, --period=usec_spec```
 
 Set the inter-spacing period to be used by each sender thread, between submitting two consecutive requests.
 
@@ -325,7 +325,7 @@ This id one by setting the socket in SOCK_NONBLOCK mode.
 
 Tell each client thread to perform a busy-wait loop instead of blocking, while waiting till the point in time in which the next request is to be sent.
 
-```  -C, --comp-time=usec|prob:field=val[,field=val]```
+```  -C, --comp-time=usec_spec```
 
 Add to the sequence of operations submitted per-request to the server,
 a COMPUTE operation, with the specified processing time, or processing
@@ -334,22 +334,30 @@ is implemented on the node side may or may not be affected by CPU
 frequency switches, see the --loops-per-usec option of the dw_node for
 details.
 
-```  -L, --load-data=nbytes|prob:field=val[,field=val]```
+```  -L, --load-data=[nbytes_spec]```
+```  -L, --load-data=[offset='['nbytes_spec']'][size='['nbytes_spec']']```
 
 Add a LOAD operation to the submitted per-request operations list,
-with the specified data payload size, in bytes (see below for details
-on how to specify distributions).
+with the given data payload size specification, in bytes, and
+optionally the given offset specification (see below for details
+on how to specify distributions). If the offset is not given, then
+the latest default set with the ```--load-offset``` option is applied.
 
-```  --load-offset=nbytes|prob:field=val[,field=val]```
+```  --load-offset=nbytes_spec```
 
 Set the offset to be used, or the distribution it has to be drawn from,
 for the subsequent LOAD operations.
 
-```  -S, --store-data=nbytes|prob:field=val[,field=val][,nosync]```
+```  -S, --store-data=nbytes_spec```
+```  -S, --store-data=[[no]sync][size='['nbytes_spec']']```
 
-Add to the per-request operations list to be submitted, a STORE operation, specifying its payload size in bytes, or its distribution (see below for details on how to specify distributions).
+Add to the per-request operations list to be submitted, a STORE operation,
+with the given payload size specification, in bytes, and optionally the
+given offset specification (see below for details on how to specify distributions).
+If the offset is not given, then the latest default set with the ```store-offset```
+options is applied.
 
-```  --store-offset=nbytes|prob:field=val[,field=val]```
+```  --store-offset=nbytes_spec```
 
 Set the offset value, or its distribution, for the subsequent STORE operations.
 
@@ -377,9 +385,11 @@ as a FORWARD operation matching its own REPLY. For example:
 
   ```-F ip1:p1,branch -C 10ms -R -F ip2:p2,branch -C 20ms -R```
 
-```  -R, --rs[=nbytes|prob:field=val[,field=val]]```
+```  -R, --rs[=nbytes_spec]```
 
-Add to the list of per-request operations to be submitted, a REPLY command. Optionally, specify the payload size, or the distribution its value has to be drawn from (see below for details on how to specify distributions).
+Add to the list of per-request operations to be submitted, a REPLY command,
+optionally, specifying the payload size, in bytes (see below for details on
+how to specify distributions).
 
 ```  --retry-num=n```
 
@@ -405,7 +415,7 @@ regular command-line options.
 
 Show a short help message.
 
-Many parameters in the `dw_client` command-line can be specified as samples to be drawn from a probability distribution. The tool has a versatile syntax allowing for a wide range of specifications:
+The parameters in the `dw_client` command-line syntax denoted with the `_spec` suffix can be specified as either constant values, or samples to be drawn from a probability distribution, to be generated from a deterministic sequence, or read from a CSV file. The tool has a versatile syntax allowing for a wide range of specifications:
 - constant values: just use a number, but consider using 'k' or 'm' suffixes, to shorten thousands and millions, respectively; for time quantities, the default time-unit is in microseconds, but the suffixes 'ns', 'us', 'ms' or 's' allow for a more friendly syntax;
   for example, 1500 requests can be specified as `-n 1500` or `-n 1.5k`; a COMPUTE operation with processing time of 10ms (= 10000us) can be specified as `-C 10000`, `-C 10000us`, `-C 10ms`, or even `-C 0.01s`;
 - probability distributions: the syntax is prob:value[,param=value[,...]]; different parameters are supported depending on the distribution:
@@ -415,8 +425,10 @@ Many parameters in the `dw_client` command-line can be specified as samples to b
   - `norm:avg-val,std=std-val`: samples are drawn from a Gaussian distribution with the specified average and standard deviation; if the optional min= and/or max= specifiers are used, then the distribution is truncated on the left and/or right, respectively;
   - `lognorm:avg-val,std=std-val[,xval=avg-xval][,xstd=avg-xstd]`: samples are drawn from a LogNormal distribution with the specified average and standard deviation; if preferred, parameters of the supporing Gaussian distribution can be specified with the xavg and xstd parameters; the distribution can also be truncated using the usual min= and max= specifiers;
   - `gamma:avg-val[,std=std-val][,k=k-val][,scale=s-val]`: samples are drawn from a Gamma distribution with the specified average and standard deviation, or, if preferred, with the specified k and scale values; the distribution can be truncated with the min= and max= specifiers;
+- arithmetic or geometric sequences:
   - `aseq:min=a,max=b[,step=s-val]`: samples picked from an arithmetic progression starting at a, and increasing by 1 each time, or by the specified step s-val each time, up to the maximum value b; in addition to ramp-up scenarios, also ramp-down ones can be specified, specifying a negative step;
     for example, a ramp-up workload starting at 100 reqs/s, and stepping up every second bu 10 reqs/s, up to 1000 reqs/s, is specified as: `-r seq:min=100,max=1000,step=10`;
   - `gseq:min=a,max=b[,step-s-val]`: samples picked from a geometric progression starting at a, and multiplying by the specified step s-val each time, up to the maximum value b; the multiplier can be greater or lower than one, resulting in either increasing or decreasing progressions;
+- CSV files:
   - `file:path/to/file[,sep=sep-char][,col=col-val][,unit=]`: samples are loaded from the specified column of the specified file (defaults to the first column), where columns on each line are assumed to be separated by the specified separator character (defaults to a comma); an optional unit specifier applies to all read values, causing their automatic rescaling;
     for example, to load inter-arrival times and execution times from the 2nd and 4th column of a data.csv file, expressed in ms, use: `-C file:data.csv,col=2,unit=ms -p file:data.csv,col=4,unit=ms`
