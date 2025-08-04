@@ -491,21 +491,21 @@ static struct argp_option argp_client_options[] = {
     { "bind-addr",          BIND_ADDR,              "host[:port]|:port",                          0, "Set client bindname and bindport"},
     { "to",                 TO_OPT_ARG,             "[tcp|udp|ssl:[//]][host][:port]",            0, "Set distwalk target node host, port and protocol"},
     { "num-pkts",           NUM_PKTS,               "n|auto",                                     0, "Number of packets sent by each thread (across all sessions"},
-    { "period",             PERIOD,                 "usec|prob:field=val[,field=val]",            0, "Inter-send period for each thread"},
+    { "period",             PERIOD,                 "usec_spec",            0, "Inter-send period for each thread"},
     { "rate",               RATE,                   "npkt",                                       0, "Packet sending rate (in pkts per sec)"},
-    { "wait-spin",          WAIT_SPIN,               0,                                           0, "Spin-wait instead of sleeping till next sending time"},
+    { "wait-spin",          WAIT_SPIN,               0,                                           0, "Spin-wait till next message send time"},
     { "ws",                 WAIT_SPIN,               0,  OPTION_ALIAS },
     { "rate-step-secs",     RATE_STEP_SECS,         "sec",                                        0, "Duration of each rate-step"},
     { "rss",                RATE_STEP_SECS,         "n", OPTION_ALIAS},
-    { "comp-time",          COMP_TIME,              "usec|prob:field=val[,field=val]",            0, "Per-request processing time"},
-    { "store-offset",       STORE_OFFSET,           "nbytes|prob:field=val[,field=val]",          0, "Per-store file offset"},
-    { "store-data",         STORE_DATA,             "nbytes|prob:field=val[,field=val][,nosync]", 0, "Per-store data payload size"},
-    { "load-offset",        LOAD_OFFSET,            "nbytes|prob:field=val[,field=val]",          0, "Per-load file offset"},
-    { "load-data",          LOAD_DATA,              "nbytes|prob:field=val[,field=val]",          0, "Per-load data payload size"},
+    { "comp-time",          COMP_TIME,              "usec_spec",                                  0, "Add a COMPUTE command with the given exec time"},
+    { "store-offset",       STORE_OFFSET,           "nbytes_spec",                                0, "Set default file offset for subseq. STOREs"},
+    { "store-data",         STORE_DATA,             "[offset='['nbytes_spec']',][nosync,]size='['nbytes_spec']'", 0, "Add a STORE command with the specified data payload size and optional offset and sync options"},
+    { "load-offset",        LOAD_OFFSET,            "nbytes_spec",                                0, "Set default file offset for subsequent LOADs"},
+    { "load-data",          LOAD_DATA,              "[offset='['nbytes_spec']',]size='['nbytes_spec']'", 0, "Add a LOAD command with the given data payload size and optional offset"},
     { "skip",               SKIP_CMD,               "n[,prob=val,every=m]",                       0, "Skip the next n commands with probability val in (0,1.0] (defaults to 1.0), every m requests (defaults to 1)"},
-    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,branch][,nack=n]", 0, "Send a number of FORWARD messages to the ip:port list"},
-    { "ps",                 SEND_REQUEST_SIZE,      "nbytes|prob:field=val[,field=val]",          0, "Set payload size of sent requests; Optionally specify timeout and connection retries, as well as specify if its a continued/branched multi-forward"},
-    { "rs",                 REPLY_CMD,              "nbytes|prob:field=val[,field=val]", OPTION_ARG_OPTIONAL, "Add a Reply command; Optionally specify payload size"},
+    { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,nack=n]\n      [,branch]", 0, "Add a FORWARD command to the given ip:port list, specifying optional connection timeout, retries and number of required acks, and whether its a continued/branched multi-forward"},
+    { "ps",                 SEND_REQUEST_SIZE,      "nbytes_spec",          0, "Set payload size of sent requests"},
+    { "rs",                 REPLY_CMD,              "nbytes_spec", OPTION_ARG_OPTIONAL, "Add a REPLY command, optionally specifying the payload size"},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
     { "num-sessions",       NUM_SESSIONS,           "n",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
@@ -514,19 +514,19 @@ static struct argp_option argp_client_options[] = {
     { "retry-period",       CONN_RETRY_PERIOD,      "msec",                                       0, "Interval between subsequent connection retries to the (initial) distwalk node"},
     { "conn-times",         CONN_TIMES,              0,                                           0, "Output also connect() times"},
     { "non-block",          CONN_NONBLOCK,           0,                                           0, "Set SOCK_NONBLOCK on connect()"},
-    { "no-delay",           NO_DELAY,             "0|1",                                          0, "Set value of TCP_NODELAY socket option"},
-    { "nd",                 NO_DELAY,             "0|1", OPTION_ALIAS },
-    { "stag-send",          STAG_SEND,                0,                                          0, "Enable staggered send among sender threads"},
-    { "per-session-output", PER_SESSION_OUTPUT,       0,                                          0, "Output response times at end of each session (implies some delay between sessions but saves memory)" },
-    { "pso",                PER_SESSION_OUTPUT,       0, OPTION_ALIAS },
-    { "script-filename",    SCRIPT_FILENAME,        "path/to/file",                               0, "Continue reading commands from script file (can be intermixed with regular options)"},
+    { "no-delay",           NO_DELAY,                "0|1",                                       0, "Set value of TCP_NODELAY socket option"},
+    { "nd",                 NO_DELAY,                "0|1", OPTION_ALIAS },
+    { "stag-send",          STAG_SEND,               0,                                           0, "Enable staggered send among sender threads"},
+    { "per-session-output", PER_SESSION_OUTPUT,      0,                                           0, "Output response times at end of each session" },
+    { "pso",                PER_SESSION_OUTPUT,      0, OPTION_ALIAS },
+    { "script-filename",    SCRIPT_FILENAME,         "file",                                      0, "Continue reading options from script file"},
     { "help",               HELP,                    0,                                           0, "Show this help message", 1 },
     { "usage",              USAGE,                   0,                                           0, "Show a short usage message", 1 },
-    { "ssl-cert",           SSL_CERT_FILE,           "FILE",                                      0, "Client SSL certificate file" },
-    { "ssl-key",            SSL_KEY_FILE,            "FILE",                                      0, "Client SSL key file" },
-    { "ssl-ca",             SSL_CA_FILE,             "FILE",                                      0, "Client SSL CA file" },
-    { "ssl-ciphers",        SSL_CIPHERS,             "CIPHERS",                                   0, "Allowed SSL ciphers" },
-    { "ssl-ca-path",        SSL_CA_PATH,             "DIR",                                       0, "Client SSL CA path" },
+    { "ssl-cert",           SSL_CERT_FILE,           "file",                                      0, "Client SSL certificate file" },
+    { "ssl-key",            SSL_KEY_FILE,            "file",                                      0, "Client SSL key file" },
+    { "ssl-ca",             SSL_CA_FILE,             "file",                                      0, "Client SSL CA file" },
+    { "ssl-ciphers",        SSL_CIPHERS,             "ciphers",                                   0, "Allowed SSL ciphers" },
+    { "ssl-ca-path",        SSL_CA_PATH,             "dir",                                       0, "Client SSL CA path" },
     { "ssl-verify",         SSL_VERIFY,              0,                                           0, "Require server certificate verification" },
     { 0 }
 };
@@ -986,8 +986,10 @@ int script_parse(char *fname, struct argp_state *state) {
 }
 
 int main(int argc, char *argv[]) {
-    static struct argp argp = { argp_client_options, argp_client_parse_opt, 0, "Distwalk Client -- the client program \
-                                                                                \v NOTES: Packet sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)" };
+    static struct argp argp = { argp_client_options, argp_client_parse_opt, 0, "Distwalk Client -- the client program"
+        "\vThe *_spec syntax denotes values that can be specified as constant (value[k|m|M|G][s|b]), drawn from a probabilistic distribution with optional truncation (unif|exp|norm|lognorm|gamma:avg-val[,min=a][,max=b]), generated from a sequence (aseq|gseq:min=a,max=b[,step=s-val]) or read from a CSV file (file:file-name[,sep=sep-char][,col=col-val][,unit=]).\n"
+        "\vPacket sizes are in bytes and do not consider headers added on lower network levels (TCP+IP+Ethernet = 66 bytes)\n\n"
+    };
     check(signal(SIGTERM, SIG_IGN) != SIG_ERR);
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
 
