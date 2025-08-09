@@ -1,0 +1,350 @@
+.TH DW_CLIENT 1 "August 2025" "dw_client manual" "User Manuals"
+
+.SH NAME
+dw_client \- distributed benchmarking client for distwalk node communication
+
+.SH SYNOPSIS
+.B dw_client
+[\fIOPTIONS\fR]...
+
+.SH DESCRIPTION
+.B dw_client
+is a flexible and extensible benchmarking client for testing and measuring performance against a
+.B dw_node
+server. It supports multiple connection modes, protocol types, request compositions, rate shaping, and fault-tolerant behaviors.
+
+.SH OPTIONS
+
+.TP
+.BR --to " = [ tcp | udp | ssl:[//] ] [ host ] [ :port ]"
+Set the target node host, port and protocol. All elements can be specified or not, see the description of the
+.B -F
+command-line option above for details.  
+Note: if the specified protocol is
+.B ssl,
+then the
+.B --non-block
+option is forced.
+
+.TP
+.BR -b,\ \--bind-addr " = [ host[:port] | :port ]"
+Set explicitly the bind address or name, and the bind port, for the client.
+
+.TP
+.BR -n,\ \--num-pkts "= \fIn\fR|\fIauto\fR"
+Set the number of requests sent by each thread (across all sessions).
+
+.TP
+.BR --num-sessions = \fIn\fR,\ \--ns = \fIn\fR
+Set the number of sessions each client thread establishes with the (initial) distwalk node. The overall number of requests to be submitted, specified with
+.B -n,
+is evenly split across the various sessions. If this option is not used, each thread submits its overall number of requests within a single session.
+
+.TP
+.BR --per-session-output,\ \--pso
+Let the client output the response times obtained for each session, at the end of the session, rather than at the end of the program. This implies some extra delay between sessions, but it requires the client to save on the needed memory.
+
+.TP
+.BR --ps = \fInbytes_spec\fR
+Set the payload size of the sent requests, or their probability distribution (see below for details on how to specify distributions).
+
+.TP
+.BR --num-threads = \fIn\fR,\ \--nt = \fIn\fR
+Set the number of client threads, corresponding to parallel sessions that are opened with the (initial) distwalk node, each submitting the overall number of requests as specified with
+.B -n.
+If this option is not used, only one thread will be submitting requests.
+
+.TP
+.BR -p,\ \--period = \fIusec_spec\fR
+Set the inter-spacing period to be used by each sender thread, between submitting two consecutive requests.
+
+.TP
+.BR --rate-step-secs = \fIsec\fR,\ \--rss = \fIsec\fR
+Set the duration of each rate-step.
+
+.TP
+.BR -r,\ \--rate = \fInpkt\fR
+Set the packet sending rate (in pkts per sec).
+
+.TP
+.BR --stag-send
+Enable staggered send among sender threads. This allows to avoid stressing the server with all requests hitting it at the same time.
+
+.TP
+.BR --conn-times
+Add also the
+.B connect()
+times to the final report output by the client.
+
+.TP
+.BR --no-delay "= \fI0|1\fR, " --nd "=\fI0|1\fR"
+Enable or disable the
+.B TCP_NODELAY
+socket option (default is enabled).
+
+.TP
+.BR --non-block
+Tell each client thread to perform a busy-wait loop instead of blocking, while waiting for a connection to be established.  
+This is done by setting the socket in
+.B SOCK_NONBLOCK
+mode.
+
+.TP
+.BR --wait-spin,\ \--ws
+Tell each client thread to perform a busy-wait loop instead of blocking, while waiting till the point in time in which the next request is to be sent.
+
+.TP
+.BR -C,\ \--comp-time = \fIusec_spec\fR
+Add to the sequence of operations submitted per-request to the server a
+.B COMPUTE
+operation, with the specified processing time or processing time distribution (see specifying distributions below). The way this is implemented on the node side may or may not be affected by CPU frequency switches; see the
+.B --loops-per-usec
+option of
+.B dw_node
+for details.
+
+.TP
+.BR -L,\ \--load-data "=\fInbytes_spec\fR"
+.TP
+.BR -L,\ \--load-data "=[ offset=[ nbytes_spec ], size=[ nbytes_spec ] ]"
+Add a
+.B LOAD
+operation to the submitted per-request operations list, with the given data payload size specification, in bytes, and optionally the given offset specification (see below for details on how to specify distributions). If the offset is not given, then the latest default set with the
+.B --load-offset
+option is applied.
+
+.TP
+.BR --load-offset = \fInbytes_spec\fR
+Set the offset to be used, or the distribution it has to be drawn from, for the subsequent
+.B LOAD
+operations.
+
+.TP
+.BR -S,\ \--store-data = \fInbytes_spec\fR
+.TP
+.BR -S,\ \--store-data "= [[no]sync, size=[nbytes_spec]]
+Add to the per-request operations list to be submitted a
+.B STORE
+operation, with the given payload size specification, in bytes, and optionally the given offset specification (see below for details on how to specify distributions). If the offset is not given, then the latest default set with the
+.B --store-offset
+option is applied.
+
+.TP
+.BR --store-offset = \fInbytes_spec\fR
+Set the offset value, or its distribution, for the subsequent
+.B STORE
+operations.
+
+.TP
+.BR -F,\ \--forward "= [ip:port[,ip:port,...][,timeout=usec][,retry=n][,branch][,nack=n]]"
+Add a
+.B FORWARD
+operation to the submitted per-request operations list, specifying the ip:port to forward to, the timeout to wait for, and the number of retries in case of failure to receive the
+.B REPLY
+to the
+.B FORWARD.
+This option allows also to specify multiple ip:port receivers. In this case, the
+.B FORWARD
+is performed in parallel to all the specified receivers, and by default all of their
+.B REPLY
+responses are needed before moving on with processing the rest of the operations list.
+
+However, the
+.B nack=n
+option allows for customizing the number of acknowledgements to wait for before moving on. For example, it is possible to FORWARD to 3 different nodes, and wait for just 1 or 2 of their
+.B REPLY
+responses, to move on. This is useful to emulate the typical behavior of distributed quorum-based protocols.
+
+Normally, when multiple ip:port are specified, the FORWARD messages are sent identical to all the peers, and are extracted starting from the operation following the FORWARD, to the matching
+.B REPLY.
+However, if the
+.B branch
+option is used, then different messages can be forwarded to the different peers, and they have to be specified each as a FORWARD operation matching its own REPLY. For example:
+
+.B dw_client -F ip1:p1,branch -C 10ms -R -F ip2:p2,branch -C 20ms -R
+
+.TP
+.BR -R,\ \--rs [ = \fInbytes_spec\fR ]
+Add to the list of per-request operations to be submitted a
+.B REPLY
+command, optionally specifying the payload size, in bytes (see below for details on how to specify distributions).
+
+.TP
+.BR --retry-num = \fIn\fR
+Set the number of connection retries by the client to the (initial) node in case of failure. If unused, defaults to 0. When the maximum number of retries is reached with still
+.B connect()
+failure, the whole session is considered aborted, but the next session will start to connect() if there is more than 1 session configured (see
+.B --ns).
+
+.TP
+.BR --retry-period = \fImsec\fR
+Set the interval between subsequent connection retries.
+
+.TP
+.BR -s,\ \--skip = \fIn\fR [,prob=val][,every=m]
+Skip the next
+.I n
+commands with probability val (defaults to 1.0 if unspecified), every m requests (defaults to 1 if unspecified).
+
+.TP
+.BR -f,\ \--script-filename = \fIpath/to/file\fR
+Read the sequence of commands to be submitted per-request operations list, as well as other
+.B dw_client
+options, from the specified script file, as though its contents were added to the command-line in the point where this option is used. This can be intermixed with other regular command-line options.
+
+
+.SS Parameter Specification
+.PP
+The parameters in the
+.B dw_client
+command-line syntax denoted with the
+.I _spec
+suffix can be specified as either constant values, samples to be drawn from a probability distribution, values generated from a deterministic sequence, or values read from a CSV file. The tool has a versatile syntax allowing for a wide range of specifications:
+.PP
+.SS Constant Values
+.PP
+Just use a number, optionally with
+.B k
+or
+.B m
+suffixes to shorten thousands and millions, respectively. For time quantities, the default unit is microseconds. Suffixes
+.B ns,
+.B us,
+.B ms
+or
+.B s
+allow for more readable time formats.
+.PP
+For example, 1500 requests can be specified as:
+.nf
+  -n 1500
+  -n 1.5k
+.fi
+.PP
+A
+.B COMPUTE
+operation with processing time of 10ms (= 10000us) can be specified as:
+.nf
+  -C 10000
+  -C 10000us
+  -C 10ms
+  -C 0.01s
+.fi
+
+.SS Probability Distributions
+.PP
+The syntax is:
+.I prob=value[,param=value[,...]]
+.PP
+Supported formats include:
+.PP
+.BR exp ":avg-val[,min=a][,max=b]"
+.RS
+Samples are drawn from an exponential distribution with the specified average. Optional
+.B min=
+and
+.B max=
+truncate the distribution.
+.RE
+.PP
+.BR unif ":min=a, max=b"
+.RS
+Samples are drawn from a uniform distribution between
+.B a
+and
+.B b.
+.PP
+Example:
+.nf
+  -p unif:min=10ms,max=20ms
+.fi
+.RE
+.PP
+.BR norm ":avg-val,std=std-val"
+.RS
+Samples are drawn from a Gaussian distribution with the specified average and standard deviation. Optional
+.B min=
+and
+.B max=
+truncate the distribution.
+.RE
+.PP
+.BR lognorm ":avg-val,std=std-val[,xval=avg-xval][,xstd=avg-xstd]"
+.RS
+Samples are drawn from a LogNormal distribution. You may specify parameters of the supporting Gaussian distribution using
+.B xval
+and
+.B xstd.
+Truncation with
+.B min=
+and
+.B max=
+is also supported.
+.RE
+.PP
+.BR gamma ":avg-val,std=std-val][,k=k-val][,scale=s-val]"
+.RS
+Samples are drawn from a Gamma distribution using either average and standard deviation, or using
+.B k
+and
+.B scale
+parameters. Truncation via
+.B min=
+and
+.B max=
+is also supported.
+.RE
+
+.SS Arithmetic or Geometric Sequences
+.PP
+.BR aseq ":min=a,max=b[,step=s-val]"
+.RS
+Samples are picked from an arithmetic progression starting at
+.B a
+and increasing by 1 or the specified
+.B step
+until reaching
+.B b.
+Negative steps allow ramp-down patterns.
+.PP
+Example:
+.nf
+  -r seq:min=100,max=1000,step=10
+.fi
+.RE
+.PP
+.BR gseq ":min=a,max=b[,step=s-val]"
+.RS
+Samples are picked from a geometric progression starting at
+.B a
+and multiplying by
+.B step
+each time, up to
+.B b.
+The step may be less than 1 for decreasing sequences.
+.RE
+
+.SS CSV Files
+.PP
+.BR file ":path/to/file[,sep=sep-char][,col=col-val][,unit=unit]"
+.RS
+Samples are read from a specified column (default is the first) of a CSV file. The column separator defaults to a comma. The
+.B unit
+parameter can be used to scale values.
+.PP
+Example:
+.nf
+  -C file:data.csv,col=2,unit=ms
+  -p file:data.csv,col=4,unit=ms
+.fi
+.RE
+
+
+.SH SEE ALSO
+.BR dw_node (1)
+
+.SH AUTHOR
+Farhan Tariq
+
+.SH COPYRIGHT
+Copyright © 2025. All rights reserved.
