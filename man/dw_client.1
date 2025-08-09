@@ -16,10 +16,8 @@ server. It supports multiple connection modes, protocol types, request compositi
 .SH OPTIONS
 
 .TP
-.BR --to " = [ tcp | udp | ssl:[//] ] [ host ] [ :port ]"
-Set the target node host, port and protocol. All elements can be specified or not, see the description of the
-.B -F
-command-line option above for details.  
+.BR --to "=[" \fIproto\fR: "[" // "]][" \fIhost\fR "][" :\fIport\fR "]"
+Set the target node host (hostname or IP), port and protocol (one of \fBtcp\fR, \fBudp\fR or \fBssl\fR). All elements can be specified or not: \fIproto\fR defaults to \fBtcp\fR, \fIhost\fR defaults to \fBlocalhost\fR, and \fIport\fR defaults to \fB7891\fR.
 Note: if the specified protocol is
 .B ssl,
 then the
@@ -27,21 +25,23 @@ then the
 option is forced.
 
 .TP
-.BR -b,\ \--bind-addr " = [ host[:port] | :port ]"
+.BR -b,\ --bind-addr "=" \fIhost\fR "[" :\fIport\fR "]"
+.TQ
+.BR -b,\ --bind-addr "=" :\fIport\fR
 Set explicitly the bind address or name, and the bind port, for the client.
 
 .TP
-.BR -n,\ \--num-pkts "= \fIn\fR|\fIauto\fR"
-Set the number of requests sent by each thread (across all sessions).
+.BR -n,\ \--num-pkts = \fIn\fR|\fIauto\fR
+Set the number of requests sent by each thread (across all sessions). The special string \fBauto\fR can be used when the number of packets are implicitly defined, i.e., when generating inter-arrival times from a sequence, or reading them from a file.
 
 .TP
-.BR --num-sessions = \fIn\fR,\ \--ns = \fIn\fR
+.BR --ns,\ \--num-sessions = \fIn\fR
 Set the number of sessions each client thread establishes with the (initial) distwalk node. The overall number of requests to be submitted, specified with
 .B -n,
 is evenly split across the various sessions. If this option is not used, each thread submits its overall number of requests within a single session.
 
 .TP
-.BR --per-session-output,\ \--pso
+.BR --pso,\ \--per-session-output
 Let the client output the response times obtained for each session, at the end of the session, rather than at the end of the program. This implies some extra delay between sessions, but it requires the client to save on the needed memory.
 
 .TP
@@ -49,7 +49,7 @@ Let the client output the response times obtained for each session, at the end o
 Set the payload size of the sent requests, or their probability distribution (see below for details on how to specify distributions).
 
 .TP
-.BR --num-threads = \fIn\fR,\ \--nt = \fIn\fR
+.BR --nt,\ \--num-threads = \fIn\fR
 Set the number of client threads, corresponding to parallel sessions that are opened with the (initial) distwalk node, each submitting the overall number of requests as specified with
 .B -n.
 If this option is not used, only one thread will be submitting requests.
@@ -59,8 +59,8 @@ If this option is not used, only one thread will be submitting requests.
 Set the inter-spacing period to be used by each sender thread, between submitting two consecutive requests.
 
 .TP
-.BR --rate-step-secs = \fIsec\fR,\ \--rss = \fIsec\fR
-Set the duration of each rate-step.
+.BR --rss,\ \--rate-step-secs = \fIsec\fR
+Set the duration of each rate-step, in seconds.
 
 .TP
 .BR -r,\ \--rate = \fInpkt\fR
@@ -77,7 +77,7 @@ Add also the
 times to the final report output by the client.
 
 .TP
-.BR --no-delay "= \fI0|1\fR, " --nd "=\fI0|1\fR"
+.BR --nd\ \--no-delay = 0 | 1
 Enable or disable the
 .B TCP_NODELAY
 socket option (default is enabled).
@@ -90,7 +90,7 @@ This is done by setting the socket in
 mode.
 
 .TP
-.BR --wait-spin,\ \--ws
+.BR --ws,\ \--wait-spin
 Tell each client thread to perform a busy-wait loop instead of blocking, while waiting till the point in time in which the next request is to be sent.
 
 .TP
@@ -105,8 +105,8 @@ for details.
 
 .TP
 .BR -L,\ \--load-data "=\fInbytes_spec\fR"
-.TP
-.BR -L,\ \--load-data "=[ offset=[ nbytes_spec ], size=[ nbytes_spec ] ]"
+.TQ
+.BR -L,\ \--load-data "=[\fBoffset=[\fR\fInbytes_spec\fR\fB]\fR,]\fBsize=[\fR\fInbytes_spec\fR\fB]\fR"
 Add a
 .B LOAD
 operation to the submitted per-request operations list, with the given data payload size specification, in bytes, and optionally the given offset specification (see below for details on how to specify distributions). If the offset is not given, then the latest default set with the
@@ -121,8 +121,8 @@ operations.
 
 .TP
 .BR -S,\ \--store-data = \fInbytes_spec\fR
-.TP
-.BR -S,\ \--store-data "= [[no]sync, size=[nbytes_spec]]
+.TQ
+.BR -S,\ \--store-data "=[[no]sync,]\fBsize=[\fR\fInbytes_spec\fR\fB]\fR"
 Add to the per-request operations list to be submitted a
 .B STORE
 operation, with the given payload size specification, in bytes, and optionally the given offset specification (see below for details on how to specify distributions). If the offset is not given, then the latest default set with the
@@ -136,13 +136,14 @@ Set the offset value, or its distribution, for the subsequent
 operations.
 
 .TP
-.BR -F,\ \--forward "= [ip:port[,ip:port,...][,timeout=usec][,retry=n][,branch][,nack=n]]"
+.BR -F,\ \--forward "=\fIip\fR:\fIport\fR[,\fIip2\fR:\fIport2\fR,...][,timeout=\fIusec\fR][,retry=\fIn\fR][,branch][,nack=\fIn\fR]"
 Add a
 .B FORWARD
 operation to the submitted per-request operations list, specifying the ip:port to forward to, the timeout to wait for, and the number of retries in case of failure to receive the
 .B REPLY
 to the
 .B FORWARD.
+The host and port specification have defaults similarly to the \fB--to\fR option.
 This option allows also to specify multiple ip:port receivers. In this case, the
 .B FORWARD
 is performed in parallel to all the specified receivers, and by default all of their
@@ -151,7 +152,7 @@ responses are needed before moving on with processing the rest of the operations
 
 However, the
 .B nack=n
-option allows for customizing the number of acknowledgements to wait for before moving on. For example, it is possible to FORWARD to 3 different nodes, and wait for just 1 or 2 of their
+option allows for customizing the number of acknowledgements to wait for, before moving on. For example, it is possible to FORWARD to 3 different nodes, and wait for just 1 or 2 of their
 .B REPLY
 responses, to move on. This is useful to emulate the typical behavior of distributed quorum-based protocols.
 
@@ -178,16 +179,16 @@ failure, the whole session is considered aborted, but the next session will star
 
 .TP
 .BR --retry-period = \fImsec\fR
-Set the interval between subsequent connection retries.
+Set the interval between subsequent connection retries, in milliseconds.
 
 .TP
-.BR -s,\ \--skip = \fIn\fR [,prob=val][,every=m]
+.BR -s,\ \--skip = \fIn\fR [,prob=\fIval\fR][,every=\fIm\fR]
 Skip the next
 .I n
 commands with probability val (defaults to 1.0 if unspecified), every m requests (defaults to 1 if unspecified).
 
 .TP
-.BR -f,\ \--script-filename = \fIpath/to/file\fR
+.BR -f,\ \--script-filename = \fIfile\fR
 Read the sequence of commands to be submitted per-request operations list, as well as other
 .B dw_client
 options, from the specified script file, as though its contents were added to the command-line in the point where this option is used. This can be intermixed with other regular command-line options.
@@ -201,7 +202,7 @@ command-line syntax denoted with the
 .I _spec
 suffix can be specified as either constant values, samples to be drawn from a probability distribution, values generated from a deterministic sequence, or values read from a CSV file. The tool has a versatile syntax allowing for a wide range of specifications:
 .PP
-.SS Constant Values
+.B Constant Values
 .PP
 Just use a number, optionally with
 .B k
@@ -231,23 +232,15 @@ operation with processing time of 10ms (= 10000us) can be specified as:
   -C 0.01s
 .fi
 
-.SS Probability Distributions
 .PP
-The syntax is:
-.I prob=value[,param=value[,...]]
+.B Probability Distributions
+.PP
+The generic syntax is:
+.B prob:\fIavg-val\fR[,param=\fIvalue\fR[,...]]
 .PP
 Supported formats include:
 .PP
-.BR exp ":avg-val[,min=a][,max=b]"
-.RS
-Samples are drawn from an exponential distribution with the specified average. Optional
-.B min=
-and
-.B max=
-truncate the distribution.
-.RE
-.PP
-.BR unif ":min=a, max=b"
+.BR unif ":min=\fIa\fR, max=\fIb\fR"
 .RS
 Samples are drawn from a uniform distribution between
 .B a
@@ -260,7 +253,16 @@ Example:
 .fi
 .RE
 .PP
-.BR norm ":avg-val,std=std-val"
+.BR exp ":\fIavg-val\fR[,min=\fIa\fR][,max=\fIb\fR]"
+.RS
+Samples are drawn from an exponential distribution with the specified average. Optional
+.B min=
+and
+.B max=
+truncate the distribution.
+.RE
+.PP
+.BR norm ":\fIavg-val\fR,std=\fIstd-val\fR[,min=\fIa\fR][,max=\fIb\fR]"
 .RS
 Samples are drawn from a Gaussian distribution with the specified average and standard deviation. Optional
 .B min=
@@ -269,7 +271,9 @@ and
 truncate the distribution.
 .RE
 .PP
-.BR lognorm ":avg-val,std=std-val[,xval=avg-xval][,xstd=avg-xstd]"
+.BR lognorm ":\fIavg-val\fR,std=\fIstd-val\fR[,min=\fIa\fR][,max=\fIb\fR]"
+.TQ
+.BR lognorm ":xval=\fIavg-xval\fR,xstd=\fIavg-xstd\fR[,min=\fIa\fR][,max=\fIb\fR]"
 .RS
 Samples are drawn from a LogNormal distribution. You may specify parameters of the supporting Gaussian distribution using
 .B xval
@@ -282,7 +286,9 @@ and
 is also supported.
 .RE
 .PP
-.BR gamma ":avg-val,std=std-val][,k=k-val][,scale=s-val]"
+.BR gamma ":\fIavg-val\fR,std=\fIstd-val\fR[,min=\fIa\fR][,max=\fIb\fR]"
+.TQ
+.BR gamma ":k=\fIk-val\fR,scale=\fIs-val\fR[,min=\fIa\fR][,max=\fIb\fR]"
 .RS
 Samples are drawn from a Gamma distribution using either average and standard deviation, or using
 .B k
@@ -295,14 +301,15 @@ and
 is also supported.
 .RE
 
-.SS Arithmetic or Geometric Sequences
 .PP
-.BR aseq ":min=a,max=b[,step=s-val]"
+.B Arithmetic or Geometric Sequences
+.PP
+.BR aseq ":min=\fIa\fR,max=\fIb\fR[,step=\fIs-val\fR]"
 .RS
 Samples are picked from an arithmetic progression starting at
 .B a
-and increasing by 1 or the specified
-.B step
+and increasing by 1 or the specified step
+.B s-val
 until reaching
 .B b.
 Negative steps allow ramp-down patterns.
@@ -313,20 +320,21 @@ Example:
 .fi
 .RE
 .PP
-.BR gseq ":min=a,max=b[,step=s-val]"
+.BR gseq ":min=\fIa\fR,max=\fIb\fR[,step=\fIs-val\fR]"
 .RS
 Samples are picked from a geometric progression starting at
 .B a
-and multiplying by
-.B step
-each time, up to
+and multiplying by the specified step
+.B s-val
+each time (defaults to 2), up to
 .B b.
 The step may be less than 1 for decreasing sequences.
 .RE
 
-.SS CSV Files
 .PP
-.BR file ":path/to/file[,sep=sep-char][,col=col-val][,unit=unit]"
+.B CSV Files
+.PP
+.BR file ":file[,sep=\fIsep-char\fR][,col=\fIcol-val\fR][,unit=\fIunit\fR]"
 .RS
 Samples are read from a specified column (default is the first) of a CSV file. The column separator defaults to a comma. The
 .B unit
@@ -345,7 +353,6 @@ Example:
 
 .SH BUGS
 For bug reports, use the issue tracker at https://github.com/tomcucinotta/distwalk/issues.
-
 
 .SH COPYRIGHT
 Copyright © 2025. All rights reserved.
