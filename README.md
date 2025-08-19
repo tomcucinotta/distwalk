@@ -60,14 +60,7 @@ two executables are created:
 - `src/dw_node_tsan`: the server program with logging and thread sanitizer activated
 
 
-To consult the complete documentation of `dw_client` and `dw_node`, 
-install their manpages with the following commands from within the root folder of this repository:
-```bash
-sudo mkdir -p /usr/local/share/man/man1;
-sudo cp man/dw_* /usr/local/share/man/man1/;
-sudo mandb;
-```
-Then run either `man dw_client` or `man dw_node` to read the documentation
+Read the complete documentation with `man dw_client` and `man dw_node`. 
 
 DOCKER BUILD
 ----------------------------------------------------------------------
