@@ -45,6 +45,10 @@ is evenly split across the various sessions. If this option is not used, each th
 Let the client output the response times obtained for each session, at the end of the session, rather than at the end of the program. This implies some extra delay between sessions, but it requires the client to save on the needed memory.
 
 .TP
+.BR -i,\ \--interactive-pso
+Flush client output to stdout at the end of each session for interactive monitoring; Available only with \fB--pso, --per-session-output\fR. This implies some extra delay between sessions, since it triggers a \fBwrite\fR syscall in-between.
+
+.TP
 .BR --ps = \fInbytes_spec\fR
 Set the payload size of the sent requests, or their probability distribution (see below for details on how to specify distributions).
 

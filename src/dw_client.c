@@ -47,6 +47,7 @@ unsigned long default_resp_size = 512;
 
 int no_delay = 1;
 int use_per_session_output = 0;
+int use_interactive_pso = 0;
 int conn_retry_num = 0;
 int conn_retry_period_ms = 200;
 int conn_nonblock = 0;
@@ -405,13 +406,15 @@ void *thread_receiver(void *data) {
                     int pkt_id = first_sess_pkt + j;
                     // if we abruptly terminated the session, the send timestamp
                     // of packets never sent will stay at 0
-                    if (usecs_send[thread_id][idx(pkt_id)] != 0)
+                    if (usecs_send[thread_id][idx(pkt_id)] != 0) {
                         printf(
                             "t: %ld us, elapsed: %ld us, req_id: %d, thr_id: "
                             "%d, sess_id: %d\n",
                             usecs_send[thread_id][idx(pkt_id)],
                             usecs_elapsed[thread_id][idx(pkt_id)], pkt_id,
                             thread_id, sess_id);
+                        if (use_interactive_pso) fflush(stdout);
+                    }
                 }
                 // make sure we reset the send timestamp and elapsed array to
                 // zeros for the next session
@@ -463,6 +466,7 @@ enum argp_client_option_keys {
     REPLY_CMD = 'R',
     SCRIPT_FILENAME = 'f',
     BIND_ADDR ='b',
+    INTERACTIVE_PSO = 'i',
 
     WAIT_SPIN = 0x200,
     RATE_STEP_SECS,
@@ -517,8 +521,10 @@ static struct argp_option argp_client_options[] = {
     { "no-delay",           NO_DELAY,                "0|1",                                       0, "Set value of TCP_NODELAY socket option"},
     { "nd",                 NO_DELAY,                "0|1", OPTION_ALIAS },
     { "stag-send",          STAG_SEND,               0,                                           0, "Enable staggered send among sender threads"},
-    { "per-session-output", PER_SESSION_OUTPUT,      0,                                           0, "Output response times at end of each session" },
-    { "pso",                PER_SESSION_OUTPUT,      0, OPTION_ALIAS },
+    { "pso",                PER_SESSION_OUTPUT,      0,                                           0, "Output response times at end of each session" },
+    { "per-session-output", PER_SESSION_OUTPUT,      0, OPTION_ALIAS },
+    { "i",                  INTERACTIVE_PSO,         0,                                           0, "Flush stdout at end of each session (only available with --per-session-output,--pso)" },
+    { "interactive-pso",    INTERACTIVE_PSO,         0, OPTION_ALIAS },
     { "script-filename",    SCRIPT_FILENAME,         "file",                                      0, "Continue reading options from script file"},
     { "help",               HELP,                    0,                                           0, "Show this help message", 1 },
     { "usage",              USAGE,                   0,                                           0, "Show a short usage message", 1 },
@@ -853,6 +859,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break;
     case PER_SESSION_OUTPUT:
         use_per_session_output = 1;
+        break;
+    case INTERACTIVE_PSO:
+        use_interactive_pso = 1;
         break;
     case SCRIPT_FILENAME:
         check(script_parse(arg, state) == 0, "Wrong syntax in script %s\n", arg);
