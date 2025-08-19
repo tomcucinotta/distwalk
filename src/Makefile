@@ -1,5 +1,8 @@
 SHELL=/bin/bash
 
+MAKEFILE_DIR := $(dir $(firstword $(MAKEFILE_LIST)))
+TOPDIR       := $(abspath $(MAKEFILE_DIR)/..)
+
 CFLAGS=-Wall -O3
 CFLAGS_DEBUG=-g -DDW_DEBUG -Wall -fprofile-arcs -ftest-coverage -fprofile-update=atomic
 CFLAGS_TSAN=-g -Wall -O2 -fsanitize=thread
@@ -24,9 +27,14 @@ BUILD_DIR=.
 .PRECIOUS: $(BUILD_DIR)
 
 all: main debug tests
-main: $(MAIN_PROGRAMS)
-debug: $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
-tests: $(TEST_PROGRAMS)
+main:  install-manpages  $(MAIN_PROGRAMS)
+debug: install-manpages  $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
+tests: install-manpages  $(TEST_PROGRAMS)
+
+install-manpages:
+	mkdir -p $(HOME)/.local/share/man/man1
+	cp $(TOPDIR)/man/* $(HOME)/.local/share/man/man1/
+	mandb
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
@@ -39,6 +47,8 @@ doc:
 	doxygen
 
 clean:
+	rm -rf $(HOME)/.local/share/man/man1/
+	mandb
 	rm -f *.o *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
 	rm -rf html latex gcov $(ifneq $(BUILD_DIR),.,$(BUILD_DIR))
 

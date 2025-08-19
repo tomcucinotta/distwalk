@@ -43,7 +43,9 @@ versions from 16.xx to 21.xx. Therefore, please, use Linux.
 In order to compile the client and the server, just type, from the
 root folder:
 
-  make
+```bash
+make
+```
 
 two executables are created:
 - `src/dw_client`: the client program, try typing ./dw_client -h
@@ -51,9 +53,11 @@ two executables are created:
 
 For debug/development purposes, compile the executables, from the root folder:
 
-  make debug
+```bash
+make debug
+```
 
-two executables are created:
+Two executables are created:
 - `src/dw_client_debug`: the client program with logging activated
 - `src/dw_node_debug`: the server program with logging activated
 - `src/dw_client_tsan`: the client program with logging and thread sanitizer activated
