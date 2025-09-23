@@ -53,6 +53,7 @@ int conn_retry_period_ms = 200;
 int conn_nonblock = 0;
 int conn_times = 0;
 int staggered_send = 0;
+int seed = -1;
 
 struct argp_client_arguments {
     int num_sessions;
@@ -155,8 +156,10 @@ void *thread_sender(void *data) {
     int num_send_pkts = p->num_send_pkts;
     struct timespec ts_now;
 
+    // Init random number generators (one per sender thread)
+    pd_init(seed + thread_id);
+
     clock_gettime(clk_id, &ts_now);
-    pd_init(time(NULL));
 
     message_t *m;
     conn_info_t *conn = conn_get_by_id(p->conn_id);
@@ -481,6 +484,7 @@ enum argp_client_option_keys {
     CONN_TIMES,
     CONN_NONBLOCK,
     STAG_SEND,
+    SEED,
 
     SSL_CERT_FILE,
     SSL_KEY_FILE,
@@ -528,6 +532,7 @@ static struct argp_option argp_client_options[] = {
     { "script-filename",    SCRIPT_FILENAME,         "file",                                      0, "Continue reading options from script file"},
     { "help",               HELP,                    0,                                           0, "Show this help message", 1 },
     { "usage",              USAGE,                   0,                                           0, "Show a short usage message", 1 },
+    { "seed",               SEED,                    "n",                                         0, "Set initial seed for random number generator (defaults to time(NULL))"},
     { "ssl-cert",           SSL_CERT_FILE,           "file",                                      0, "Client SSL certificate file" },
     { "ssl-key",            SSL_KEY_FILE,            "file",                                      0, "Client SSL key file" },
     { "ssl-ca",             SSL_CA_FILE,             "file",                                      0, "Client SSL CA file" },
@@ -836,6 +841,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->num_threads = atoi(arg);
         check(arguments->num_threads >= 1 && arguments->num_threads <= MAX_THREADS);
         break;
+    case SEED:
+        seed = atoi(arg);
+        break;
     case NUM_SESSIONS:
         arguments->num_sessions = atoi(arg);
         check(arguments->num_sessions >= 1);
@@ -1056,6 +1064,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    if (seed == -1)
+        seed = time(NULL);
+
     printf("Configuration:\n");
     printf("  clienthost=%s\n", input_args.clienthostport);
     printf("  serverhost=%s\n", input_args.nodehostport);
@@ -1076,6 +1087,7 @@ int main(int argc, char *argv[]) {
     printf("  num_sessions: %d\n", input_args.num_sessions);
     printf("  use_per_session_output: %d\n", use_per_session_output);
     printf("  num_conn_retries: %d (retry_period: %d ms)\n", conn_retry_num, conn_retry_period_ms);
+    printf("  seed: %d\n", seed);
 
     printf("  request template: ");  ccmd_log(ccmd);
 
@@ -1088,9 +1100,6 @@ int main(int argc, char *argv[]) {
         if (input_args.ssl_ca_path && input_args.ssl_ca_path[0])
             printf("  ssl_ca_path: %s\n", input_args.ssl_ca_path);
     }
-
-    // Init random number generator
-    srand(time(NULL));
 
     for (int i = 0; i < MAX_THREADS; i++) {
         clientSocket[i] = -1;
