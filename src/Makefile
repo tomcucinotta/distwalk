@@ -27,14 +27,9 @@ BUILD_DIR=.
 .PRECIOUS: $(BUILD_DIR)
 
 all: main debug tests
-main:  install-manpages  $(MAIN_PROGRAMS)
-debug: install-manpages  $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
-tests: install-manpages  $(TEST_PROGRAMS)
-
-install-manpages:
-	mkdir -p $(HOME)/.local/share/man/man1
-	cp $(TOPDIR)/man/* $(HOME)/.local/share/man/man1/
-	mandb
+main:  $(MAIN_PROGRAMS)
+debug: $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS)
+tests: $(TEST_PROGRAMS)
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
