@@ -1,3 +1,5 @@
+#!/usr/bin/gnuplot
+
 set terminal pdfcairo
 set output "cdf.pdf"
 
