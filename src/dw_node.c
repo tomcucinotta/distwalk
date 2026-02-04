@@ -116,6 +116,9 @@ typedef struct {
     int storefd; // write
     int store_replyfd; // read
 
+    int storage_fd; // shared storage file descriptor for sendfile
+    reply_mode_t reply_mode;
+
     int worker_id;
     int core_id; // core pinning
     struct sched_attr sched_attrs;
@@ -521,6 +524,7 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
     reply_opts_t *opts = cmd_get_opts(reply_opts_t, cmd);
     assert(m_dst->req_size >= opts->resp_size);
 
+
     m_dst->req_id = m->req_id;
     m_dst->req_size = opts->resp_size;
     m_dst->cmds[0].cmd = EOM;
@@ -537,7 +541,24 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
     struct sockaddr_in target = req->target;
     conn_req_remove(conn, req);
     infos->active_reqs--;
-    return conn_start_send(&conns[conn_id], target);
+
+    // added branching here for the two cases
+    conns[conn_id].reply_mode = opts->mode;
+
+    switch (opts->mode) {
+
+    case REPLY_MODE_SENDFILE:
+
+        req->sendfile_fd = storage_worker_info.storage_info.storage_fd;//conn_worker_infos[conn_id].storage_fd; // note! fd must be copied here since req will be freed after this function returns,but the sendfile operation may not be completed yet
+        req->sendfile_offset = 0;
+        req->sendfile_size = opts->resp_size;
+        printf("Reply using sendfile.\n");
+        return conn_start_sendfile(&conns[conn_id], target, req->sendfile_fd, req->sendfile_offset, req->sendfile_size);
+    
+    case REPLY_MODE_NORMAL:
+    default:
+        return conn_start_send(&conns[conn_id], target); // unchanged 
+    }
 }
 
 void compute_for_freqinv(unsigned long usecs) {
@@ -721,10 +742,23 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             }
             return 0;
         case REPLY:
-            dw_log("Handling REPLY: req_id=%d\n", m->req_id);
             if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd, infos)) {
-                fprintf(stderr, "reply() failed, conn_id: %d\n", conn_id);
-                return -1;
+                dw_log("reply() returned, conn_id: %d\n", conn_id);
+                
+                if (conn_get_status_by_id(req->conn_id) == SENDING) {
+                    dw_log("Message req_id=%d is still sending after REPLY, conn_id: %d\n", m->req_id, conn_id);
+                    sys_check(dw_poll_mod(p_poll, conns[req->conn_id].sock, DW_POLLOUT | DW_POLLONESHOT, i2l(SOCKET, conn_id)));
+                    return 1;
+                } else {
+                    dw_log("Closing connection conn_id: %d after failed REPLY\n", conn_id);
+                    close_and_forget(p_poll, conns[conn_id].sock);
+                    return -1;
+                }
+            }
+            if (conn_get_status_by_id(req->conn_id) == SENDING) {
+
+                dw_log("Message req_id=%d is still sending after REPLY, conn_id: %d\n", m->req_id, conn_id);
+                sys_check(dw_poll_mod(p_poll, conns[conn_id].sock, DW_POLLOUT | DW_POLLONESHOT, i2l(SOCKET, conn_id)));
             }
             // any further cmds[] for replied-to hop, not me
             return 1;
@@ -790,6 +824,8 @@ int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos) {
             req->curr_cmd = message_first_cmd(m);
             // process_single_message() may call reply() -> conn_req_remove() -> req_unlink() + defrag -> req and m invalid
             int req_size = m->req_size;
+            dw_log("Received message req_id=%d, size=%d, from %s:%d\n", m->req_id, req_size,
+                   inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), ntohs(conns[conn_id].target.sin_port));
             int executed = process_single_message(req, p_poll, infos);
 
             if (executed < 0)
@@ -883,6 +919,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     conn_info_t *conn = conn_get_by_id(conn_id);
     dw_log("event_type=%s, conn_id=%d\n", get_event_str(type), conn_id);
 
+
     if (conn->status == SSL_HANDSHAKE) {
         int hs = conn_do_ssl_handshake(conn_id);
         if (hs < 0)
@@ -919,11 +956,27 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
         infos->active_conns++;
         // we need the send_messages() below to still be tried afterwards
     }
-    if ((pflags & DW_POLLOUT) && conn->curr_send_size > 0 && conn_get_status(conn) != CONNECTING && conn_get_status(conn) != NOT_INIT) {
-        dw_log("calling send_mesg() to conn_id=%d\n", conn_id);
-        if (!conn_send(conn))
+    
+    if (pflags & DW_POLLOUT) {
+        int r = conn_flush(conn);
+
+        if (r < 0)
             goto err;
+
+        if (r == 0) {
+            // still pending
+            dw_log("conn_id=%d, still pending after flush, adding EPOLLOUT\n", conn_id);
+            sys_check(dw_poll_mod(p_poll, conn->sock, DW_POLLOUT | DW_POLLONESHOT, i2l(SOCKET, conn_id)));
+        } else {
+            // finished
+            dw_log("conn_id=%d, flush finished, adding EPOLLIN\n", conn_id);
+            sys_check(dw_poll_mod(p_poll, conn->sock, DW_POLLIN | DW_POLLONESHOT, i2l(SOCKET, conn_id)));
+            conn_set_status(conn, READY);
+            infos->active_conns++;
+        }
     }
+
+
     dw_log("conns[%d].status=%d (%s)\n", conn_id, conn_get_status(conn), conn_status_str(conn_get_status(conn)));
 
     // check whether we have new or leftover messages to process
@@ -931,20 +984,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     if (!obtain_messages(conn_id, p_poll, infos))
         goto err;
 
-    if (conn->curr_send_size > 0 && conn_get_status(conn) == READY) {
-        dw_log("adding EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
-               conns->sock, conn_id, conns->curr_send_size);
-        sys_check(dw_poll_mod(p_poll, conns->sock, DW_POLLIN | DW_POLLOUT, i2l(SOCKET, conn_id)));
-        conn_set_status(conn, SENDING);
-    }
-    if (conn->curr_send_size == 0 && conn_get_status(conn) == SENDING) {
-        dw_log("removing EPOLLOUT for sock=%d, conn_id=%d, curr_send_size=%lu\n",
-               conn->sock, conn_id, conn->curr_send_size);
-        sys_check(dw_poll_mod(p_poll, conns->sock, DW_POLLIN, i2l(SOCKET, conn_id)));
-        conn_set_status(conn, READY);
-        infos->active_conns++;
-    }
-
+    
     return;
 
  err:
@@ -1765,6 +1805,7 @@ int main(int argc, char *argv[]) {
 
             storage_worker_info.store_replyfd[i] = fds2[i][1]; // write 
             conn_worker_infos[i].store_replyfd = fds2[i][0]; // read
+            conn_worker_infos[i].storage_fd = storage_worker_info.storage_info.storage_fd;
         }
     } else {
         for (int i = 0; i < input_args.num_threads; i++) {

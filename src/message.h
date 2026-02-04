@@ -43,8 +43,15 @@ typedef struct {
     uint32_t comp_time_us;
 } comp_opts_t;
 
+// added reply mode options
+typedef enum {
+    REPLY_MODE_NORMAL = 0,
+    REPLY_MODE_SENDFILE = 1,
+} reply_mode_t;
+
 typedef struct {
     uint32_t resp_size;   // REPLY pkt size
+    reply_mode_t mode;   // NORMAL | SENDFILE
 } reply_opts_t;
 
 // TODO: Here we need all quantities to be network-ordered

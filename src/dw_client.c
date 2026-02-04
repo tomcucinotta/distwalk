@@ -270,6 +270,8 @@ void *thread_receiver(void *data) {
     int num_success = 0;
     int num_error = 0;
     int num_timedout = 0;
+    int message_completed = 0;
+
 
     int i_incr = 0;
     int pkt_i;
@@ -356,6 +358,7 @@ void *thread_receiver(void *data) {
                 conn_set_status_by_id(thr_data.conn_id, READY);
 
             thr_data.first_pkt_id = pkt_i;
+            printf("Spawning sender thread for sess_id=%d, first_pkt_id=%d\n", pkt_i / (int)pkts_per_session, pkt_i);
             sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
                                   (void *)&thr_data));
         }
@@ -364,6 +367,7 @@ void *thread_receiver(void *data) {
         // TODO: support receive of variable reply-size requests
         conn_info_t *conn = conn_get_by_id(thr_data.conn_id);
 
+        /*
         do {
             recv = conn_recv(conn);
             if (recv == 0) {
@@ -379,33 +383,52 @@ void *thread_receiver(void *data) {
 
         while ((m = conn_prepare_recv_message(conn))) {
             dw_log("thread_id: %d\n", thread_id);
+        */
 
-#ifdef DW_DEBUG
-            msg_log(m, "received message: ");
-#endif
+        while (!message_completed) {
 
-            unsigned pkt_id = m->req_id;
-            if (m->status != SUCCESS) {
-                dw_log("REPLY reported an error - %s\n", msg_status_str(m->status));
-
-                if (m->status == ERR)
-                    num_error++;
-                else
-                    num_timedout++;
-                i_incr = 1;
-            } else {
-                struct timespec ts_now;
-                clock_gettime(clk_id, &ts_now);
-                unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
-                    (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
-                usecs_elapsed[thread_id][idx(pkt_id)] =
-                    usecs - usecs_send[thread_id][idx(pkt_id)];
-                dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
-                       usecs_elapsed[thread_id][idx(pkt_id)]);
-
-                num_success++;
-                i_incr = 1;
+            recv = conn_recv(conn);
+            if (recv <= 0) {
+                printf("Error: cannot read received message\n");
+                unsigned long skip_pkts =
+                    pkts_per_session - (pkt_i % pkts_per_session);
+                printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
+                num_error += skip_pkts;
+                i_incr = skip_pkts;
+                goto skip;
             }
+
+            while ((m = conn_prepare_recv_message(conn))) {
+                
+                unsigned pkt_id = m->req_id;
+                if (m->status != SUCCESS) {
+                    dw_log("REPLY reported an error - %s\n", msg_status_str(m->status));
+
+                    if (m->status == ERR)
+                        num_error++;
+                    else
+                        num_timedout++;
+                    i_incr = 1;
+                } else {
+                    struct timespec ts_now;
+                    clock_gettime(clk_id, &ts_now);
+                    unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
+                        (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
+                    usecs_elapsed[thread_id][idx(pkt_id)] =
+                        usecs - usecs_send[thread_id][idx(pkt_id)];
+                    dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
+                        usecs_elapsed[thread_id][idx(pkt_id)]);
+
+                    num_success++;
+                    i_incr = 1;
+                    message_completed = 1;
+                }
+
+                #ifdef DW_DEBUG
+                    msg_log(m, "received message: ");
+                #endif
+            }
+            
         }
 
     skip:
@@ -442,6 +465,8 @@ void *thread_receiver(void *data) {
                 thr_data.conn_id = -1;
             }
         }
+        dw_log("end of while loop for Sent pkts - success: %d, error: %d, timeout: %d, thr_id: %d\n", num_success, num_error, num_timedout, thread_id);
+
     }
 
     if (!use_per_session_output) {
@@ -522,7 +547,7 @@ static struct argp_option argp_client_options[] = {
     { "skip",               SKIP_CMD,               "n[,prob=val,every=m]",                       0, "Skip the next n commands with probability val in (0,1.0] (defaults to 1.0), every m requests (defaults to 1)"},
     { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,nack=n]\n      [,branch]", 0, "Add a FORWARD command to the given ip:port list, specifying optional connection timeout, retries and number of required acks, and whether its a continued/branched multi-forward"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes_spec",          0, "Set payload size of sent requests"},
-    { "rs",                 REPLY_CMD,              "nbytes_spec", OPTION_ARG_OPTIONAL, "Add a REPLY command, optionally specifying the payload size"},
+    { "rs",                 REPLY_CMD,              "nbytes_spec", 0, "Add a REPLY command, optionally specifying the payload size"},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
     { "num-sessions",       NUM_SESSIONS,           "n",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
@@ -815,33 +840,54 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         check(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE, "Too big send request size, maximum is %d", BUF_SIZE);
         break;
     case REPLY_CMD: {
-        pd_spec_t val;
+        pd_spec_t val = pd_build_fixed(default_resp_size);
+        reply_mode_t reply_mode = REPLY_MODE_NORMAL;
 
         if (arg == NULL)
             val = pd_build_fixed(default_resp_size);
         else {
-            check(pd_parse_bytes(&val, arg), "Wrong response size specification");
-            val.min = MIN_REPLY_SIZE;
-            val.max = BUF_SIZE;
-            check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
-        }
+            do {
+                if (strncmp(arg, "sendfile", 8) == 0) {
+                    reply_mode = REPLY_MODE_SENDFILE;
+                    arg += 8;
+                } else {
+                    check(pd_parse_bytes(&val, arg),
+                            "Wrong response size specification");
+                    break;
+                }
 
+                if (arg != NULL && *arg == ',')
+                    arg++;
+            } while (arg != NULL && *arg != '\0');
+        }
+        if (pd_is_none(&val))
+            val = pd_build_fixed(default_resp_size);
+        
+        val.min = MIN_REPLY_SIZE;
+        val.max = BUF_SIZE;
+        
+        check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
+        
+        
         if (queue_size(ccmd) <= 0) { // edge-case
-            ccmd_add(ccmd, COMPUTE, &val);
+            ccmd_add_reply(ccmd, REPLY, &val, reply_mode);
+
             break;
         }
 
         if (arguments->fwd_scope <= 0) {
-            if (ccmd_last(ccmd)->cmd == REPLY && ccmd_last(ccmd) != arguments->last_reserved_used) // update last chained reply
+            if (ccmd_last(ccmd)->cmd == REPLY && ccmd_last(ccmd) != arguments->last_reserved_used)  {// update last chained reply
                 ccmd_last(ccmd)->pd_val = val;
-            else // intra-chain reply
-                ccmd_add(ccmd, REPLY, &val);
+            } else {// intra-chain reply
+                ccmd_add_reply(ccmd, REPLY, &val, reply_mode);
+            }
             break;
         }
 
         // Discard last reserved reply and use updated resp size
         queue_dequeue_tail(arguments->reserved_fwd_replies);
-        ccmd_add(ccmd, REPLY, &val);
+        ccmd_add_reply(ccmd, REPLY, &val, reply_mode);
+        ccmd_last(ccmd)->resp.mode = reply_mode; // added reply_mode
         
         arguments->last_reserved_used = ccmd_last(ccmd);
         arguments->fwd_scope--;
