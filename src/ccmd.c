@@ -9,7 +9,8 @@
 #include "message.h"
 #include "dw_debug.h"
 
-void ccmd_add(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
+
+void ccmd_add_reply(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec, reply_mode_t reply_mode) {
     if (!q) {
         printf("ccmd_add() error - Initialize queue first\n");
         exit(EXIT_FAILURE);
@@ -18,12 +19,19 @@ void ccmd_add(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     ccmd_node_t* new_node = calloc(1, sizeof(ccmd_node_t));
     new_node->cmd = cmd;
     new_node->pd_val = *p_pd_spec;
-
+    new_node->resp.mode = reply_mode; // reply mode used for sendfile
+    
     if (queue_size(q) >= 1)
         ccmd_last(q)->next = new_node;
 
     data_t data = { .ptr=new_node };
     queue_enqueue(q, cmd, data);
+}
+
+void ccmd_add(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
+    reply_mode_t mode = REPLY_MODE_NORMAL; // default reply mode
+    ccmd_add_reply(q, cmd, p_pd_spec, mode);
+
 }
 
 extern __thread struct drand48_data rnd_buf;
@@ -90,6 +98,7 @@ int ccmd_dump(queue_t* q, message_t* m) {
             case REPLY: 
                 *cmd_get_opts(reply_opts_t, m_cmd_itr) = ccmd_itr->resp;
                 cmd_get_opts(reply_opts_t, m_cmd_itr)->resp_size = pd_sample(&ccmd_itr->pd_val);
+                cmd_get_opts(reply_opts_t, m_cmd_itr)->mode = ccmd_itr->resp.mode;
                 break;
             case PSKIP:
                 drand48_r(&rnd_buf, &x);
@@ -109,7 +118,6 @@ int ccmd_dump(queue_t* q, message_t* m) {
                 exit(EXIT_FAILURE);
         }
         m_cmd_itr = cmd_next(m_cmd_itr);
-        //printf("%s\n", get_command_name(curr->cmd));
         ccmd_itr = ccmd_itr->next;
     }
     if (avail < cmd_type_size(EOM))

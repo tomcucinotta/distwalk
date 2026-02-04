@@ -24,6 +24,11 @@ struct req_info_t {
     command_t *curr_cmd;
     node_t *timeout_node;
     req_info_t *prev, *next;
+
+    // --- Added for sendfile() support ---
+    int     sendfile_fd;      // storage file fd
+    off_t sendfile_offset;    // starting offset for this specific request
+    size_t  sendfile_size;    // number of bytes to send
 };
 
 extern req_info_t reqs[MAX_REQS];

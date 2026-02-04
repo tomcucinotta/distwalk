@@ -19,3 +19,12 @@ test_struct_tsan
 *.gcno 
 *.gcda 
 *.gcov
+*.d
+*_debug*
+test*
+.idea/*
+umls_sendfile_flow*
+dw_store
+dw_proxy
+*.txt
+.github

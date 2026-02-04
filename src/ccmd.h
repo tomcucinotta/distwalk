@@ -23,6 +23,8 @@ typedef struct ccmd_node_t {
 } ccmd_node_t;
 
 void ccmd_add(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec);
+void ccmd_add_reply(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec, reply_mode_t reply_mode);
+
 ccmd_node_t *ccmd_skip(ccmd_node_t *curr, int n);
 int ccmd_dump(queue_t* q, message_t* m);
 void ccmd_destroy(queue_t** q);
