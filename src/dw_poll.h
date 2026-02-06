@@ -15,6 +15,7 @@ typedef enum { DW_POLLIN=0x001, DW_POLLOUT=0x004, DW_POLLONESHOT=1u << 30, DW_PO
 
 typedef struct {
     dw_poll_type_t poll_type;
+    int use_spinning;  // 1 = busy-poll, 0 blocking wait
     union {
         struct {
             int rd_fd[MAX_POLLFD];
