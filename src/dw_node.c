@@ -177,6 +177,7 @@ int conn_threads = 1;
 int no_delay = 1;
 atomic_int next_thread_cnt = 0;
 int use_wait_spinning = 0;
+int use_wait_spinning_storage = 0;
 int enable_defrag = 1;
 
 typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
@@ -1010,6 +1011,7 @@ void* storage_worker(void* args) {
     dw_poll_t poll, *p_poll = &poll;
 
     check(dw_poll_init(p_poll, poll_mode) == 0);
+    p_poll->use_spinning = use_wait_spinning_storage;  // Configurable via --wait-spin-storage
 
     // Add conn_worker(s) -> storage_worker communication pipe
     for (int i = 0; i < conn_threads; i++) {
@@ -1343,6 +1345,7 @@ enum argp_node_option_keys {
     NO_DEFRAG,
     NO_DELAY,
     WAIT_SPIN,
+    WAIT_SPIN_STORAGE,
     LOOPS_PER_USEC,
     BACKLOG_LENGTH,
     SSL_CERT_FILE,
@@ -1389,6 +1392,8 @@ static struct argp_option argp_node_options[] = {
     {"no-defrag",         NO_DEFRAG,         0,                               0,  "Disable defragmentation of connection buffers for incoming messages (defaults to defrag enabled)"},
     {"wait-spin",         WAIT_SPIN,         0,                               0,  "Spin-wait instead of sleeping till next received packet"},
     {"ws",                WAIT_SPIN,         0, OPTION_ALIAS },
+    {"wait-spin-storage", WAIT_SPIN_STORAGE, 0,                               0,  "Spin-wait for storage thread (default: storage thread blocks)"},
+    {"wss",               WAIT_SPIN_STORAGE, 0, OPTION_ALIAS },
     {"loops-per-usec",    LOOPS_PER_USEC,    "value",                         0,  "Set loops_per_usec calibration parameter (0: handle it automatically in ~/.dw_loops_per_usec; -1: use frequency-invariant mode)"},
     {"help",              HELP,              0,                               0,  "Show this help message", 1 },
     {"usage",             USAGE,             0,                               0,  "Show a short usage message", 1 },
@@ -1457,6 +1462,9 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case WAIT_SPIN:
         use_wait_spinning = 1;
+        break;
+    case WAIT_SPIN_STORAGE:
+        use_wait_spinning_storage = 1;
         break;
     case LOOPS_PER_USEC:
         loops_per_usec = atof(arg);
@@ -1803,6 +1811,7 @@ int main(int argc, char *argv[]) {
         conn_worker_infos[i].n_listen_socks = 0;
 
         check(dw_poll_init(&conn_worker_infos[i].dw_poll, poll_mode) == 0);
+        conn_worker_infos[i].dw_poll.use_spinning = use_wait_spinning;
         conn_worker_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
         conn_worker_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
         conn_worker_infos[i].sched_attrs = input_args.sched_attrs;
