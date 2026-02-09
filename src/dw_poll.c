@@ -4,8 +4,9 @@
 #include "dw_debug.h"
 
 // return value useful to return failure if we allocate memory here in the future
-int dw_poll_init(dw_poll_t *p_poll, dw_poll_type_t type) {
+int dw_poll_init(dw_poll_t *p_poll, dw_poll_type_t type, int use_spinning) {
     p_poll->poll_type = type;
+    p_poll->use_spinning = use_spinning;
     switch (p_poll->poll_type) {
     case DW_SELECT:
         p_poll->u.select_fds.n_rd_fd = 0;

@@ -46,7 +46,7 @@ typedef struct {
 } dw_poll_t;
 
 // initialize the list of monitored fds
-int dw_poll_init(dw_poll_t *p_poll, dw_poll_type_t type);
+int dw_poll_init(dw_poll_t *p_poll, dw_poll_type_t type, int use_spinning);
 
 // add fd to the list of monitored fds, with associated custom data aux
 int dw_poll_add(dw_poll_t *p_poll, int fd, dw_poll_flags flags, uint64_t aux);

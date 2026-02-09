@@ -1010,8 +1010,7 @@ void* storage_worker(void* args) {
 
     dw_poll_t poll, *p_poll = &poll;
 
-    check(dw_poll_init(p_poll, poll_mode) == 0);
-    p_poll->use_spinning = use_wait_spinning_storage;  // Configurable via --wait-spin-storage
+    check(dw_poll_init(p_poll, poll_mode, use_wait_spinning_storage) == 0);
 
     // Add conn_worker(s) -> storage_worker communication pipe
     for (int i = 0; i < conn_threads; i++) {
@@ -1810,8 +1809,7 @@ int main(int argc, char *argv[]) {
 
         conn_worker_infos[i].n_listen_socks = 0;
 
-        check(dw_poll_init(&conn_worker_infos[i].dw_poll, poll_mode) == 0);
-        conn_worker_infos[i].dw_poll.use_spinning = use_wait_spinning;
+        check(dw_poll_init(&conn_worker_infos[i].dw_poll, poll_mode, use_wait_spinning) == 0);
         conn_worker_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
         conn_worker_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
         conn_worker_infos[i].sched_attrs = input_args.sched_attrs;
