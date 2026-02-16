@@ -62,6 +62,10 @@ Run the node in privileged mode if you wish to use `rr`, `fifo`, `dl` or `other`
 Tell each worker thread to perform a busy-wait loop, till the next incoming request on any of the monitored sockets, instead of sleeping. This allows the worker threads to be always ready, so to save wake-up from idle, and context switch overheads, thus it is useful in scenarios seeking extremely low latency. However, it causes each worker thread to take 100% of a CPU, regardless on the amount of traffic hitting it.
 
 .TP
+.BR --wait-spin-storage,\ \--wss
+Tell the storage thread to perform a busy-wait loop instead of blocking while waiting for new LOAD/STORE requests. Similarly to --wait-spin, this will reduce latency but will cause the storage thread to take 100% of a CPU.
+
+.TP
 .BR --loops-per-usec = \fIvalue\fR
 Switch the implementation of COMPUTE commands from computing for exactly the amount of time the -C client option requires, regardless of the underlying CPU frequency, to the specified fixed number of repeatitions of a simple compute-intensive loop, which results in computations whose duration varies with the CPU frequency. Specifying the special value 0, lets the program benchmark itself for a fraction of a second when launched, causing the CPU to scale-up its frequency, then store number of performed loops per second in the $HOME/.dw_loops_per_usec file, then this value is reused for any successive invocation of dw_node with 0 as value.
 
