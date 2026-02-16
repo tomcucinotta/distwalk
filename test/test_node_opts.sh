@@ -50,4 +50,8 @@ node_bg --ws
 client
 kill_all SIGINT
 
+node_bg --wss
+client
+kill_all SIGINT
+
 rm $tmp
