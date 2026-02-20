@@ -175,16 +175,24 @@ void *thread_sender(void *data) {
         // remember time of send relative to ts_start
         struct timespec ts_send;
         clock_gettime(clk_id, &ts_send);
-        
+
         usecs_send[thread_id][idx(pkt_id)] = ts_sub_us(ts_send, ts_start);
         usecs_elapsed[thread_id][idx(pkt_id)] = 0; // mark corresponding elapsed value as 0, i.e., non-valid 
                                                    // (in case we don't receive all packets back)
 
         // Issue a request to the server
         m->req_id = pkt_id;
-        m->req_size = pd_sample(&send_pkt_size_pd);
-        ccmd_dump(ccmd, m);
-        
+        uint32_t pkt_size = pd_sample(&send_pkt_size_pd);
+        if (pkt_size > m->req_size) {
+            dw_log("unable to send pkt %d: pkt_size %u exceeds available space in send buffer %u", pkt_id, pkt_size, m->req_size);
+            goto next_pkt;
+        }
+        m->req_size = pkt_size;
+        if (!ccmd_dump(ccmd, m)) {
+            dw_log("unable to send pkt %d: ccmd_dump() failed", pkt_id);
+            goto next_pkt;
+        }
+
         dw_log("sending %u bytes...\n", m->req_size);
         assert(m->req_size <= BUF_SIZE);
         #ifdef DW_DEBUG
@@ -199,6 +207,7 @@ void *thread_sender(void *data) {
             break;
         }
 
+    next_pkt:
         // wait / spin-wait before sending next packet based on the specified rate / period
         if (ramp_step_secs != 0 && pkt_id > 0) {
             int step_prev =

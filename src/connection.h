@@ -76,6 +76,7 @@ req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req);
 
 unsigned char *get_send_buf(conn_info_t *pc, size_t size);
 
+// req_size field of returned message is initialized with the available space in send buffer
 message_t* conn_prepare_send_message(conn_info_t *conn);
 /* retrieve next received message in conn's recv buffer */
 message_t* conn_prepare_recv_message(conn_info_t *conn);
