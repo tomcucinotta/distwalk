@@ -27,6 +27,14 @@
 #include "address_utils.h"
 #include "queue.h"
 
+#ifdef DPDK_ENABLED
+#include "dw_dpdk.h"
+#include "thread_affinity.h"
+#include <rte_lcore.h>
+#include <rte_launch.h>
+static unsigned dpdk_tx_lcore = RTE_MAX_LCORE;
+#endif
+
 //__thread char thread_name[16];
 
 int use_wait_spinning = 0;
@@ -56,6 +64,11 @@ int conn_times = 0;
 int staggered_send = 0;
 int seed = -1;
 
+#ifdef DPDK_ENABLED
+static int use_dpdk = 0;
+static uint8_t dpdk_dest_mac[6];
+#endif
+
 struct argp_client_arguments {
     int num_sessions;
     int num_threads;
@@ -77,6 +90,8 @@ struct argp_client_arguments {
     char* ssl_ciphers; // --ssl-ciphers
     char* ssl_ca_path; // --ssl-ca-path
     int ssl_verify;    // --ssl-verify
+    int dpdk_tx_cpu;   // CPU for sender thread
+    int dpdk_rx_cpu;   // CPU for receiver thread
 } input_args;
 
 #define MAX_THREADS 256
@@ -528,13 +543,15 @@ enum argp_client_option_keys {
     SSL_CIPHERS,
     SSL_CA_PATH,
     SSL_VERIFY,
-    NANO_OUTPUT
+    NANO_OUTPUT,
+    DPDK_TX_CPU,
+    DPDK_RX_CPU
 };
 
 static struct argp_option argp_client_options[] = {
     // long name, short name, value name, flag, description
-    { "bind-addr",          BIND_ADDR,              "host[:port]|:port",                          0, "Set client bindname and bindport"},
-    { "to",                 TO_OPT_ARG,             "[tcp|udp|ssl:[//]][host][:port]",            0, "Set distwalk target node host, port and protocol"},
+    { "bind-addr",          BIND_ADDR,              "host[:port]|:port | dpdk://[iface|pci]",     0, "Set client bindname, bindport or a DPDK bind interface"},
+    { "to",                 TO_OPT_ARG,             "[tcp|udp|ssl:[//]][host][:port] | dpdk://mac",        0, "Set distwalk target node address and protocol"},
     { "num-pkts",           NUM_PKTS,               "n|auto",                                     0, "Number of packets sent by each thread (across all sessions"},
     { "period",             PERIOD,                 "usec_spec",            0, "Inter-send period for each thread"},
     { "rate",               RATE,                   "npkt",                                       0, "Packet sending rate (in pkts per sec)"},
@@ -577,6 +594,8 @@ static struct argp_option argp_client_options[] = {
     { "ssl-ca-path",        SSL_CA_PATH,             "dir",                                       0, "Client SSL CA path" },
     { "ssl-verify",         SSL_VERIFY,              0,                                           0, "Require server certificate verification" },
     { "nano",               NANO_OUTPUT,             0,                                           0, "Output response times in nanoseconds (default: microseconds)" },
+    { "dpdk-tx-cpu",        DPDK_TX_CPU,             "N",                                         0, "CPU core for DPDK sender thread" },
+    { "dpdk-rx-cpu",        DPDK_RX_CPU,             "N",                                         0, "CPU core for DPDK receiver thread" },
     { 0 }
 };
 
@@ -623,7 +642,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break;
     case BIND_ADDR:
         check(strlen(arg) < MAX_HOSTPORT_STRLEN, "Too long host:port argument to %c option", BIND_ADDR);
-        strcpy(arguments->clienthostport, arg);
+        addr_proto_parse(arg, arguments->clienthostport, &(proto_t){TCP}); // strip protocol prefix for DPDK
         break;
     case TO_OPT_ARG:
         check(strlen(arg) < MAX_HOSTPORT_STRLEN, "Too long host:port argument to --to option");
@@ -801,7 +820,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             proto_t fwd_proto = TCP;
 
             addr_proto_parse(tok, fwdhostport, &fwd_proto);
-            addr_parse(fwdhostport, &fwd_addr);
 
             ccmd_add(ccmd, FORWARD_BEGIN, &fwd_val); // may need to be changed to FORWARD_CONTINUE later
 
@@ -810,11 +828,21 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             if (multi_fwds == 0) // keep track of the first forward operation in this subcontext
                 fwd_itr_start = ccmd_last(ccmd);
 
-            // Static params
-            ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
-            ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
             ccmd_last(ccmd)->fwd.on_fail_skip = 1;
             ccmd_last(ccmd)->fwd.proto = fwd_proto;
+
+            if (fwd_proto == DPDK) {
+                unsigned int mac[6];
+                int n = sscanf(fwdhostport, "%x:%x:%x:%x:%x:%x",
+                               &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+                check(n == 6, "Invalid MAC address for DPDK forward: %s", fwdhostport);
+                for (int j = 0; j < 6; j++)
+                    ccmd_last(ccmd)->fwd.fwd_addr[j] = (uint8_t)mac[j];
+            } else {
+                addr_parse(fwdhostport, &fwd_addr);
+                ccmd_last(ccmd)->fwd.fwd_port = fwd_addr.sin_port;
+                ccmd_last(ccmd)->fwd.fwd_host = fwd_addr.sin_addr.s_addr;
+            }
             // TODO: customize forward pkt size
 
             multi_fwds++;
@@ -874,6 +902,12 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                     check((dev_id >= 0), "Device id in dev= needs to be a positive integer");
 
                 } else if (strncmp(tok, "sendfile", 8) == 0) {
+#ifdef DPDK_ENABLED
+                    if (proto == DPDK) {
+                        fprintf(stderr, "Error: sendfile is not supported with DPDK\n");
+                        exit(1);
+                    }
+#endif
                     reply_mode = REPLY_MODE_SENDFILE;
 
                 } else {
@@ -979,9 +1013,17 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case SSL_VERIFY:
         arguments->ssl_verify = 1;
         break;
+    case DPDK_TX_CPU:
+        arguments->dpdk_tx_cpu = atoi(arg);
+        break;
+    case DPDK_RX_CPU:
+        arguments->dpdk_rx_cpu = atoi(arg);
+        break;
     case ARGP_KEY_END: // post-parsing validity checks
-        addr_parse(arguments->clienthostport, &myaddr);
-        addr_parse(arguments->nodehostport, &serveraddr);
+        if (proto != DPDK) { // skip host and port parsing for DPDK
+            addr_parse(arguments->clienthostport, &myaddr);
+            addr_parse(arguments->nodehostport, &serveraddr);
+        }
 
         if (send_rate_pd.prob != FIXED && ramp_step_secs == 0) {
             ccmd_destroy(&ccmd);
@@ -1090,7 +1132,62 @@ int main(int argc, char *argv[]) {
     conn_init();
     req_init();
 
+    input_args.dpdk_tx_cpu = -1;
+    input_args.dpdk_rx_cpu = -1;
+
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
+
+#ifdef DPDK_ENABLED
+    if (proto == DPDK) {
+        const char *spec = input_args.clienthostport;
+        int is_pci = (strlen(spec) >= 10 && spec[4] == ':' && spec[7] == ':');
+
+        // build core list
+        int dpdk_core_list[2];
+        int dpdk_num_cores = 0;
+        dpdk_core_list[dpdk_num_cores++] = input_args.dpdk_rx_cpu >= 0
+            ? input_args.dpdk_rx_cpu : 0;
+        if (input_args.dpdk_tx_cpu >= 0 &&
+            input_args.dpdk_tx_cpu != dpdk_core_list[0])
+            dpdk_core_list[dpdk_num_cores++] = input_args.dpdk_tx_cpu;
+
+        dpdk_config_t config = {
+            .iface = is_pci ? NULL : spec,
+            .pci = is_pci ? spec : NULL,
+            .core_list = dpdk_core_list,
+            .num_cores = dpdk_num_cores,
+            .num_queues = 1,
+        };
+        check(dpdk_init(&config) >= 0, "dpdk_init() failed");
+
+        // we store the lcore_id to launch the sender thread on it
+        if (dpdk_num_cores > 1) {
+            unsigned lcore_id;
+            RTE_LCORE_FOREACH_WORKER(lcore_id) {
+                dpdk_tx_lcore = lcore_id;
+                break;
+            }
+        }
+
+        use_dpdk = 1;
+        use_wait_spinning = 1;
+        input_args.num_sessions = 1;
+        pkts_per_session = num_pkts;
+
+        // Destination MAC address parsing
+        unsigned int mac[6];
+        int n = sscanf(input_args.nodehostport, "%x:%x:%x:%x:%x:%x",
+                       &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+        check(n == 6, "Invalid MAC address: %s", input_args.nodehostport);
+        for (int i = 0; i < 6; i++)
+            dpdk_dest_mac[i] = (uint8_t)mac[i];
+    }
+#else
+    if (proto == DPDK) {
+        fprintf(stderr, "Error: DPDK requested but binary compiled without USE_DPDK=1\n");
+        exit(EXIT_FAILURE);
+    }
+#endif
 
     // If --to ssl://..., then proto == TLS. Setup the SSL context accordingly:
     if (proto == TLS) {
@@ -1219,6 +1316,12 @@ int main(int argc, char *argv[]) {
         SSL_CTX_free(client_ssl_ctx);
         client_ssl_ctx = NULL;
     }
+
+#ifdef DPDK_ENABLED
+    if (use_dpdk) {
+        dpdk_cleanup();
+    }
+#endif
 
     return 0;
 }
