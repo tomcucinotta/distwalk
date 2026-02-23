@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <rte_mbuf.h>
 
 typedef struct {
     const char *iface;         // af_packet interface (e.g., "veth0")
@@ -17,5 +18,16 @@ typedef struct {
 
 int dpdk_init(const dpdk_config_t *config);
 void dpdk_cleanup(void);
+uint16_t dpdk_get_port(void);
+
+void *dpdk_get_payload_ptr(struct rte_mbuf *mbuf);
+void dpdk_set_payload_len(struct rte_mbuf *mbuf, size_t len);
+void dpdk_extract_src_mac(struct rte_mbuf *mbuf, uint8_t *mac);
+
+struct rte_mbuf *dpdk_alloc_tx_mbuf(const uint8_t *dest_mac);
+
+int dpdk_is_dw_packet(struct rte_mbuf *mbuf);
+
+void dpdk_flush_tx(struct rte_mbuf **mbufs, uint16_t *count, uint16_t queue_id);
 
 #endif

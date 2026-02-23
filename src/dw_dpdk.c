@@ -189,3 +189,51 @@ void dpdk_cleanup(void) {
     rte_eal_cleanup();
     mbuf_pool = NULL;
 }
+
+uint16_t dpdk_get_port(void) {
+    return dpdk_port;
+}
+
+void *dpdk_get_payload_ptr(struct rte_mbuf *m) {
+    return rte_pktmbuf_mtod_offset(m, void *, sizeof(struct rte_ether_hdr));
+}
+
+void dpdk_set_payload_len(struct rte_mbuf *m, size_t len) {
+    m->data_len = sizeof(struct rte_ether_hdr) + len;
+    m->pkt_len = sizeof(struct rte_ether_hdr) + len;
+}
+
+void dpdk_extract_src_mac(struct rte_mbuf *m, uint8_t *mac) {
+    struct rte_ether_hdr *eth = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+    memcpy(mac, eth->src_addr.addr_bytes, 6);
+}
+
+struct rte_mbuf *dpdk_alloc_tx_mbuf(const uint8_t *dest_mac) {
+    struct rte_mbuf *m = rte_pktmbuf_alloc(mbuf_pool);
+    if (m == NULL)
+        return NULL;
+
+    struct rte_ether_hdr *eth = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+    memcpy(eth->dst_addr.addr_bytes, dest_mac, 6);
+    rte_ether_addr_copy(&port_local_mac, &eth->src_addr);
+    eth->ether_type = rte_cpu_to_be_16(DW_ETHERTYPE);
+
+    m->data_len = sizeof(struct rte_ether_hdr);
+    m->pkt_len = sizeof(struct rte_ether_hdr);
+
+    return m;
+}
+
+int dpdk_is_dw_packet(struct rte_mbuf *m) {
+    struct rte_ether_hdr *eth = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+    return rte_be_to_cpu_16(eth->ether_type) == DW_ETHERTYPE;
+}
+
+void dpdk_flush_tx(struct rte_mbuf **mbufs, uint16_t *count, uint16_t queue_id) {
+    if (*count > 0) {
+        uint16_t nb_tx = rte_eth_tx_burst(dpdk_port, queue_id, mbufs, *count);
+        for (uint16_t j = nb_tx; j < *count; j++)
+            rte_pktmbuf_free(mbufs[j]);
+        *count = 0;
+    }
+}

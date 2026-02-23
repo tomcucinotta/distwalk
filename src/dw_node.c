@@ -39,6 +39,7 @@
 
 #ifdef DPDK_ENABLED
 #include "dw_dpdk.h"
+#include <rte_ethdev.h>
 static int use_dpdk = 0;
 #endif
 
@@ -132,6 +133,10 @@ typedef struct {
     // load-balancing stats
     atomic_int active_conns;
     atomic_int active_reqs;
+
+#ifdef DPDK_ENABLED
+    uint16_t queue_id;
+#endif
 } conn_worker_info_t;
 
 typedef struct {
@@ -347,6 +352,47 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
             cmd_log(cmd);
         return cmd == NULL ? cmd_skip(req->curr_cmd, 1) : cmd;
     }
+#ifdef DPDK_ENABLED
+    if (fwd.proto == DPDK) {
+        conn_info_t *my_conn = conn_get_by_id(req->conn_id);
+        if (my_conn->tx_count >= TX_BURST_SIZE)
+            dpdk_flush_tx(my_conn->tx_mbufs, &my_conn->tx_count, infos->queue_id);
+
+        struct rte_mbuf *tx_mbuf = dpdk_alloc_tx_mbuf(fwd.fwd_addr);
+        if (tx_mbuf == NULL) {
+            fprintf(stderr, "dpdk_alloc_tx_mbuf() failed for forward\n");
+            return NULL;
+        }
+
+        message_t *m_dst = dpdk_get_payload_ptr(tx_mbuf);
+        m_dst->req_size = fwd.pkt_size;
+
+        // skip possible FORWARD_CONTINUE cmds in non-branched multi-fwd
+        command_t *c = cmd_next(cmd);
+        while (c->cmd == FORWARD_CONTINUE)
+            c = cmd_next(c);
+
+        command_t *reply_cmd = message_copy_tail(m, m_dst, c);
+        if (!reply_cmd) {
+            dw_log("message_copy_tail(): destination message out-of-space\n");
+            rte_pktmbuf_free(tx_mbuf);
+            return NULL;
+        }
+
+        m_dst->req_id = req->req_id;
+        m_dst->req_size = fwd.pkt_size;
+        m_dst->status = SUCCESS;
+
+        dpdk_set_payload_len(tx_mbuf, fwd.pkt_size);
+        my_conn->tx_mbufs[my_conn->tx_count++] = tx_mbuf;
+
+        dw_log("Forwarding req %u via DPDK\n", m_dst->req_id);
+
+        if (req->fwd_timeout)
+            insert_timeout(infos, req->req_id, p_poll, req->fwd_timeout);
+        return cmd;
+    }
+#endif
     int fwd_conn_id = conn_find_existing(addr, fwd.proto);
     conn_info_t *fwd_conn;
     if (fwd_conn_id == -1) {
@@ -542,8 +588,36 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
 
 // returns 1 if reply sent correctly, 0 otherwise
 int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* infos) {
-    message_t *m_dst = conn_prepare_send_message(&conns[req->conn_id]);
+    conn_info_t *conn = conn_get_by_id(req->conn_id);
     reply_opts_t *opts = cmd_get_opts(reply_opts_t, cmd);
+
+#ifdef DPDK_ENABLED
+    if (conn->proto == DPDK) {
+        if (conn->tx_count >= TX_BURST_SIZE)
+            dpdk_flush_tx(conn->tx_mbufs, &conn->tx_count, infos->queue_id);
+
+        struct rte_mbuf *tx_mbuf = dpdk_alloc_tx_mbuf(req->reply_mac);
+        if (tx_mbuf == NULL) {
+            fprintf(stderr, "dpdk_alloc_tx_mbuf() failed\n");
+            return 0;
+        }
+
+        message_t *m_dst = dpdk_get_payload_ptr(tx_mbuf);
+        m_dst->req_id = m->req_id;
+        m_dst->req_size = opts->resp_size;
+        m_dst->cmds[0].cmd = EOM;
+        m_dst->status = m->status;
+        dpdk_set_payload_len(tx_mbuf, opts->resp_size);
+
+        conn->tx_mbufs[conn->tx_count++] = tx_mbuf;
+
+        conn_req_remove(conn, req);
+        infos->active_reqs--;
+        return 1;
+    }
+#endif
+
+    message_t *m_dst = conn_prepare_send_message(conn);
     assert(m_dst->req_size >= opts->resp_size);
 
 
@@ -556,8 +630,6 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
 #ifdef DW_DEBUG
     msg_log(m_dst, "REPLY ");
 #endif
-
-    conn_info_t *conn = conn_get_by_id(req->conn_id);
     // cannot access req after conn_req_remove()
     int conn_id = req->conn_id;
     struct sockaddr_in target = req->target;
@@ -1210,6 +1282,16 @@ void* conn_worker(void* args) {
 
     sys_check(sched_setattr(0, &infos->sched_attrs, 0));
 
+#ifdef DPDK_ENABLED
+    if (use_dpdk) {
+        struct sockaddr_in dummy = {0};
+        int dpdk_conn_id = conn_alloc(-1, dummy, DPDK);
+        check(dpdk_conn_id != -1, "conn_alloc() failed for DPDK worker %d", infos->worker_id);
+        conn_set_status_by_id(dpdk_conn_id, READY);
+        conn_get_by_id(dpdk_conn_id)->enable_defrag = enable_defrag;
+    }
+#endif
+
     if (accept_mode != AM_PARENT || infos == &conn_worker_infos[0]) {
         for (int i = 0; i < infos->n_listen_socks; i++) {
             int s = infos->listen_socks[i];
@@ -1256,6 +1338,63 @@ void* conn_worker(void* args) {
                 exit(EXIT_FAILURE);
             }
         }
+
+#ifdef DPDK_ENABLED
+        if (use_dpdk) {
+            struct sockaddr_in dummy = {0};
+            int my_dpdk_conn_id = conn_find_existing(dummy, DPDK);
+            conn_info_t *conn = conn_get_by_id(my_dpdk_conn_id);
+
+            uint16_t nb_rx = rte_eth_rx_burst(dpdk_get_port(), infos->queue_id, conn->rx_mbufs, RX_BURST_SIZE);
+
+
+            for (uint16_t i = 0; i < nb_rx; i++) {
+                struct rte_mbuf *m = conn->rx_mbufs[i];
+
+                if (!dpdk_is_dw_packet(m)) {
+                    rte_pktmbuf_free(m);
+                    continue;
+                }
+
+                uint8_t src_mac[6];
+                dpdk_extract_src_mac(m, src_mac);
+
+                message_t *msg = dpdk_get_payload_ptr(m);
+
+                if (message_first_cmd(msg)->cmd == EOM) {
+                    if (!handle_forward_reply(msg->req_id, &infos->dw_poll, infos, msg->status, src_mac, DPDK))
+                        dw_log("handle_forward_reply() failed for DPDK\n");
+                } else {
+                    req_info_t *req = conn_req_add(conn);
+                    if (req == NULL) {
+                        fprintf(stderr, "conn_req_add() failed for DPDK\n");
+                        rte_pktmbuf_free(m);
+                        continue;
+                    }
+                    memcpy(req->reply_mac, src_mac, 6);
+                    infos->active_reqs++;
+
+                    req->message_ptr = (unsigned char *)msg;
+                    req->curr_cmd = message_first_cmd(msg);
+
+                    int executed = process_single_message(req, &infos->dw_poll, infos);
+
+                    if (executed == 0) {
+                        int cmd_offset = (unsigned char *)req->curr_cmd - (unsigned char *)msg;
+                        memcpy(conn->curr_recv_buf, msg, msg->req_size);
+                        req->message_ptr = conn->curr_recv_buf;
+                        req->curr_cmd = (command_t *)(conn->curr_recv_buf + cmd_offset);
+                        conn->curr_recv_buf += msg->req_size;
+                        conn->curr_recv_size -= msg->req_size;
+                    }
+                }
+
+                rte_pktmbuf_free(m);
+            }
+
+            dpdk_flush_tx(conn->tx_mbufs, &conn->tx_count, infos->queue_id);
+        }
+#endif
 
         uint64_t aux;
         dw_poll_flags pflags;
@@ -2040,6 +2179,12 @@ int main(int argc, char *argv[]) {
 
         conn_worker_infos[i].active_conns = 0;
         conn_worker_infos[i].active_reqs = 0;
+
+#ifdef DPDK_ENABLED
+        if (use_dpdk) {
+            conn_worker_infos[i].queue_id = i;
+        }
+#endif
 
         // Auxiliary communication medium
         if (accept_mode == AM_PARENT) {
