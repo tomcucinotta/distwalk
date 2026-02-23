@@ -166,13 +166,26 @@ void ccmd_log(queue_t* q) {
                     sprintf(opts, "%d", curr->n_skip);
                 break;
             case FORWARD_BEGIN:
-                sprintf(opts, "%s://%s:%d,%sb,retries=%d,timeout=%d,branched=%d,nack=%d", curr->fwd.proto == TCP ? "tcp" : "udp", 
+                if (curr->fwd.proto == DPDK)
+                    sprintf(opts, "dpdk://%02x:%02x:%02x:%02x:%02x:%02x,%sb,retries=%d,timeout=%d,branched=%d,nack=%d",
+                            curr->fwd.fwd_addr[0], curr->fwd.fwd_addr[1], curr->fwd.fwd_addr[2],
+                            curr->fwd.fwd_addr[3], curr->fwd.fwd_addr[4], curr->fwd.fwd_addr[5],
+                            pd_str(&curr->pd_val), curr->fwd.retries, curr->fwd.timeout, curr->fwd.branched,
+                            curr->fwd.n_ack);
+                else
+                    sprintf(opts, "%s://%s:%d,%sb,retries=%d,timeout=%d,branched=%d,nack=%d", curr->fwd.proto == TCP ? "tcp" : "udp", 
                                                                     inet_ntoa((struct in_addr) {curr->fwd.fwd_host}), ntohs(curr->fwd.fwd_port), 
                                                                     pd_str(&curr->pd_val), curr->fwd.retries, curr->fwd.timeout, curr->fwd.branched,
                                                                     curr->fwd.n_ack);
                 break;
             case FORWARD_CONTINUE:
-                sprintf(opts, "%s://%s:%d,%sb", curr->fwd.proto == TCP ? "tcp" : "udp", 
+                if (curr->fwd.proto == DPDK)
+                    sprintf(opts, "dpdk://%02x:%02x:%02x:%02x:%02x:%02x,%sb",
+                            curr->fwd.fwd_addr[0], curr->fwd.fwd_addr[1], curr->fwd.fwd_addr[2],
+                            curr->fwd.fwd_addr[3], curr->fwd.fwd_addr[4], curr->fwd.fwd_addr[5],
+                            pd_str(&curr->pd_val));
+                else
+                    sprintf(opts, "%s://%s:%d,%sb", curr->fwd.proto == TCP ? "tcp" : "udp", 
                                                                                   inet_ntoa((struct in_addr) {curr->fwd.fwd_host}), ntohs(curr->fwd.fwd_port), 
                                                                                   pd_str(&curr->pd_val));
                 break;

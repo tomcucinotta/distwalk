@@ -12,14 +12,19 @@
 
 typedef enum { COMPUTE, STORE, LOAD, PSKIP, FORWARD_BEGIN, FORWARD_CONTINUE, REPLY, EOM } command_type_t;
 
-typedef enum { UDP, TCP, TLS, PROTO_NUMBER } proto_t;
+typedef enum { UDP, TCP, TLS, DPDK, PROTO_NUMBER } proto_t;
 
 typedef enum { SUCCESS, TIMEOUT, ERR, MSG_STATUS_NUMBER } msg_status_t;
 
 typedef struct {
     uint32_t pkt_size;    // size of forwarded packet
-    in_addr_t fwd_host;   // target IP of host to forward to (network encoding)
-    uint16_t fwd_port;    // target port (network encoding, for multiple nodes on same host)
+    union {
+        struct {
+            in_addr_t fwd_host;   // target IP of host to forward to (network encoding)
+            uint16_t fwd_port;    // target port (network encoding, for multiple nodes on same host)
+        };
+        uint8_t fwd_addr[6];       // target MAC address (for DPDK)
+    };
     uint32_t timeout;     // timeout in microsecond (0 means no timeout)
     uint8_t retries;      // how many times to reply before failing
     uint8_t n_ack;        // forward-reply concern (number of acknowledgments)

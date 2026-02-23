@@ -15,6 +15,7 @@ inline const char *proto_str(proto_t proto) {
         "UDP",
         "TCP",
         "SSL",
+        "DPDK",
     };
     return proto_str[proto];
 }
