@@ -40,6 +40,8 @@
 #ifdef DPDK_ENABLED
 #include "dw_dpdk.h"
 #include <rte_ethdev.h>
+#include <rte_lcore.h>
+#include <rte_launch.h>
 static int use_dpdk = 0;
 #endif
 
@@ -1269,15 +1271,29 @@ void* storage_worker(void* args) {
     return (void*)1;
 }
 
+void* conn_worker(void* args);
+
+#ifdef DPDK_ENABLED
+static int conn_worker_lcore(void *arg) {
+    conn_worker(arg);
+    return 0;
+}
+#endif
+
 void* conn_worker(void* args) {
     conn_worker_info_t *infos = (conn_worker_info_t *)args;
 
     sprintf(thread_name, "connw-%d", infos->worker_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
-    if (infos->core_id >= 0) {
-        sys_check(aff_pin_to(infos->core_id));
-        dw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
+#ifdef DPDK_ENABLED
+    if (!use_dpdk)
+#endif
+    {
+        if (infos->core_id >= 0) {
+            sys_check(aff_pin_to(infos->core_id));
+            dw_log("thread %ld pinned to core %i\n", pthread_self(), infos->core_id);
+        }
     }
 
     sys_check(sched_setattr(0, &infos->sched_attrs, 0));
@@ -2242,6 +2258,22 @@ int main(int argc, char *argv[]) {
     }
 
     // Run
+#ifdef DPDK_ENABLED
+    if (use_dpdk) {
+        // launch workers 1..N-1 on remote lcores
+        unsigned lcore_id;
+        int w = 1;
+        RTE_LCORE_FOREACH_WORKER(lcore_id) {
+            if (w >= input_args.num_threads)
+                break;
+            rte_eal_remote_launch(conn_worker_lcore, &conn_worker_infos[w], lcore_id);
+            w++;
+        }
+        // worker 0 runs on the main lcore (the current one)
+        conn_worker((void *)&conn_worker_infos[0]);
+        rte_eal_mp_wait_lcore(); // wait until all lcores terminate
+    } else
+#endif
     if (input_args.num_threads == 1) {
         conn_worker((void*) &conn_worker_infos[0]);
     } else {
