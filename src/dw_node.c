@@ -37,6 +37,11 @@
 #include "address_utils.h"
 #include "dw_poll.h"
 
+#ifdef DPDK_ENABLED
+#include "dw_dpdk.h"
+static int use_dpdk = 0;
+#endif
+
 #define MAX_EVENTS 10
 
 volatile uint8_t running = 1;
@@ -1419,7 +1424,7 @@ struct argp_node_arguments {
 
 static struct argp_option argp_node_options[] = {
     // long name, short name, value name, flag, description
-    {"bind-addr",         BIND_ADDR,        "[tcp|udp|ssl:[//]][host][:port]",0,  "DistWalk node bindname, bindport, and communication protocol (can be specified multiple times)"},
+    {"bind-addr",         BIND_ADDR,        "[tcp|udp|ssl:[//]][host][:port] | dpdk://[iface|pci]",0,  "DistWalk node bind address, and communication protocol (can be specified multiple times)"},
     {"accept-mode",       ACCEPT_MODE,      "child|shared|parent",            0,  "Accept mode (per-worker thread, shared or parent-only listening queue)"},
     {"poll-mode",         POLL_MODE,        "epoll|poll|select",              0,  "Poll mode (defaults to epoll)"},
     {"backlog-length",    BACKLOG_LENGTH,   "n",                              0,  "Maximum pending connections queue length"},
@@ -1803,6 +1808,44 @@ int main(int argc, char *argv[]) {
         core_it = aff_it_init(&mask, nproc);
     }
 
+#ifdef DPDK_ENABLED
+    for (int i = 0; i < n_bind_addrs; i++) {
+        if (bind_addrs[i].protocol == DPDK) {
+            const char *spec = bind_addrs[i].nodehostport;
+            int is_pci = (strlen(spec) >= 10 && spec[4] == ':' && spec[7] == ':');
+
+            // build the core list
+            int dpdk_core_list[MAX_THREADS];
+            if (input_args.use_thread_affinity) {
+                int it = aff_it_init(&mask, nproc);
+                for (int c = 0; c < input_args.num_threads; c++) {
+                    dpdk_core_list[c] = it;
+                    aff_it_next(&it, &mask, nproc);
+                }
+            } else {
+                // no affinity mask, use cores 0..num_threads-1
+                for (int c = 0; c < input_args.num_threads; c++)
+                    dpdk_core_list[c] = c;
+            }
+
+            dpdk_config_t config = {
+                .iface = is_pci ? NULL : spec,
+                .pci = is_pci ? spec : NULL,
+                .core_list = dpdk_core_list,
+                .num_cores = input_args.num_threads,
+                .num_queues = input_args.num_threads,
+            };
+            if (dpdk_init(&config) < 0) {
+                fprintf(stderr, "dpdk_init() failed\n");
+                exit(EXIT_FAILURE);
+            }
+            use_dpdk = 1;
+            use_wait_spinning = 1;
+            break;
+        }
+    }
+#endif
+
     conn_init();
     req_init();
 
@@ -2005,6 +2048,15 @@ int main(int argc, char *argv[]) {
 
     // For each requested bind-addr, init the listen socket(s)
     for (int l = 0; l < n_bind_addrs; l++) {
+#ifdef DPDK_ENABLED
+        if (bind_addrs[l].protocol == DPDK)
+            continue;
+#else
+        if (bind_addrs[l].protocol == DPDK) {
+            fprintf(stderr, "Error: DPDK requested but binary compiled without USE_DPDK=1\n");
+            exit(EXIT_FAILURE);
+        }
+#endif
         addr_parse(bind_addrs[l].nodehostport, &serverAddr);
         for (int i = 0; i < conn_threads; i++) {
             init_listen_sock(i, accept_mode, bind_addrs[l].protocol, serverAddr);
@@ -2087,6 +2139,12 @@ int main(int argc, char *argv[]) {
         SSL_CTX_free(server_ssl_ctx);
         server_ssl_ctx = NULL;
     }
+
+#ifdef DPDK_ENABLED
+    if (use_dpdk) {
+        dpdk_cleanup();
+    }
+#endif
 
     return 0;
 }
