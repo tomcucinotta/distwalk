@@ -9,6 +9,18 @@ CFLAGS_TSAN=-g -Wall -O2 -fsanitize=thread
 LDLIBS=-pthread -lm -lssl -lcrypto
 LDLIBS_DEBUG=-pthread -lm -lssl -lcrypto -lgcov
 
+# Optional DPDK support, adding DPDK flags when enabled as per documentation
+USE_DPDK ?= 0
+ifeq ($(USE_DPDK),1)
+    DPDK_CFLAGS := $(shell pkg-config --cflags libdpdk)
+    DPDK_LDFLAGS := $(shell pkg-config --libs libdpdk)
+    CFLAGS += $(DPDK_CFLAGS) -DDPDK_ENABLED
+    CFLAGS_DEBUG += $(DPDK_CFLAGS) -DDPDK_ENABLED
+    CFLAGS_TSAN += $(DPDK_CFLAGS) -DDPDK_ENABLED
+    LDLIBS += $(DPDK_LDFLAGS)
+    LDLIBS_DEBUG += $(DPDK_LDFLAGS)
+endif
+
 TEST_PROGRAMS=test_distrib test_distrib_debug test_ccmd test_ccmd_debug test_message test_message_debug test_pqueue test_pqueue_debug
 TEST_PROGRAMS+=test_queue test_queue_debug test_timespec test_timespec_debug dw_proxy dw_proxy_debug
 TSAN_PROGRAMS=dw_client_tsan dw_node_tsan
@@ -18,6 +30,12 @@ MAIN_PROGRAMS=dw_client dw_node
 DW_CLIENT_SOURCES=dw_client.c ccmd.c distrib.c thread_affinity.c connection.c request.c message.c queue.c address_utils.c
 DW_NODE_SOURCES=dw_node.c thread_affinity.c priority_queue.c request.c connection.c message.c address_utils.c dw_poll.c
 DW_PROXY_SOURCES=dw_proxy.c address_utils.c
+
+# Add DPDK source file when enabled
+ifeq ($(USE_DPDK),1)
+    DW_CLIENT_SOURCES += dw_dpdk.c
+    DW_NODE_SOURCES += dw_dpdk.c
+endif
 
 TEST_SCRIPTS=$(wildcard test_*.sh)
 TOOLS=bash gcovr
