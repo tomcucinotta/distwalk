@@ -30,6 +30,7 @@
 #ifdef DPDK_ENABLED
 #include "dw_dpdk.h"
 #include "thread_affinity.h"
+#include <rte_ethdev.h>
 #include <rte_lcore.h>
 #include <rte_launch.h>
 static unsigned dpdk_tx_lcore = RTE_MAX_LCORE;
@@ -161,6 +162,34 @@ int try_connect(int* conn_sock, struct sockaddr_in target) {
     return connect(*conn_sock, (struct sockaddr *)&target, sizeof(target));
 }
 
+// Process a received reply message. Returns: 1 = success, -1 = error, -2 = timeout
+int process_reply(message_t *m, int thread_id) {
+    unsigned pkt_id = m->req_id;
+    if (m->status != SUCCESS) {
+        dw_log("REPLY reported an error - %s\n", msg_status_str(m->status));
+        return m->status == ERR ? -1 : -2;
+    }
+    struct timespec ts_now;
+    clock_gettime(clk_id, &ts_now);
+    unsigned long usecs = use_nano
+        ? (ts_now.tv_sec - ts_start.tv_sec) * 1000000000L + (ts_now.tv_nsec - ts_start.tv_nsec)
+        : (ts_now.tv_sec - ts_start.tv_sec) * 1000000 + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
+    usecs_elapsed[thread_id][idx(pkt_id)] =
+        usecs - usecs_send[thread_id][idx(pkt_id)];
+    dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
+           usecs_elapsed[thread_id][idx(pkt_id)]);
+    return 1;
+}
+
+void *thread_sender(void *data);
+
+#ifdef DPDK_ENABLED
+static int thread_sender_lcore(void *arg) {
+    thread_sender(arg);
+    return 0;
+}
+#endif
+
 void *thread_sender(void *data) {
     thread_data_t *p = (thread_data_t *)data;
 
@@ -186,7 +215,6 @@ void *thread_sender(void *data) {
 
     for (int i = 0; i < num_send_pkts; i++) {
         int pkt_id = first_pkt_id + i;
-        m = conn_prepare_send_message(conn);
 
         // remember time of send relative to ts_start
         struct timespec ts_send;
@@ -195,6 +223,26 @@ void *thread_sender(void *data) {
         usecs_send[thread_id][idx(pkt_id)] = use_nano ? ts_sub_ns(ts_send, ts_start) : ts_sub_us(ts_send, ts_start);
         usecs_elapsed[thread_id][idx(pkt_id)] = 0; // mark corresponding elapsed value as 0, i.e., non-valid 
                                                    // (in case we don't receive all packets back)
+
+#ifdef DPDK_ENABLED
+        if (use_dpdk) {
+            struct rte_mbuf *tx = dpdk_alloc_tx_mbuf(dpdk_dest_mac);
+            if (tx == NULL) {
+                fprintf(stderr, "dpdk_alloc_tx_mbuf() failed at pkt %d\n", pkt_id);
+                break;
+            }
+            m = dpdk_get_payload_ptr(tx);
+            m->req_id = pkt_id;
+            m->req_size = pd_sample(&send_pkt_size_pd);
+            m->status = SUCCESS;
+            ccmd_dump(ccmd, m);
+            dpdk_set_payload_len(tx, m->req_size);
+            if (rte_eth_tx_burst(dpdk_get_port(), 0, &tx, 1) == 0)
+                rte_pktmbuf_free(tx);
+            goto next_pkt;
+        }
+#endif
+        m = conn_prepare_send_message(conn);
 
         // Issue a request to the server
         m->req_id = pkt_id;
@@ -214,7 +262,7 @@ void *thread_sender(void *data) {
         #ifdef DW_DEBUG
             msg_log(m, "Sending msg: ");
         #endif
-        
+
         if (!conn_start_send(conn, conn->target)) {
             fprintf(stderr,
                     "Forcing premature termination of sender thread while "
@@ -295,7 +343,16 @@ void *thread_receiver(void *data) {
             struct timespec ts1, ts2;
             if (conn_times)
                 clock_gettime(CLOCK_MONOTONIC, &ts1);
-            
+
+#ifdef DPDK_ENABLED
+            if (use_dpdk) {
+                struct sockaddr_in dummy = {0};
+                thr_data.conn_id = conn_alloc(-1, dummy, DPDK);
+                check(thr_data.conn_id != -1, "conn_alloc() failed for DPDK");
+                conn_set_status_by_id(thr_data.conn_id, READY);
+                goto spawn_sender;
+            }
+#endif
             // Try to connect client socket to the server
             dw_log("Connecting to %s:%d (sess_id=%d) ...\n", inet_ntoa((struct in_addr) {serveraddr.sin_addr.s_addr}), ntohs(serveraddr.sin_port), (int) (pkt_i / pkts_per_session));
             int rv = 0;
@@ -372,13 +429,47 @@ void *thread_receiver(void *data) {
             } else
                 conn_set_status_by_id(thr_data.conn_id, READY);
 
+#ifdef DPDK_ENABLED
+        spawn_sender:
+#endif
             thr_data.first_pkt_id = pkt_i;
             dw_log("Spawning sender thread for sess_id=%d, first_pkt_id=%d\n", pkt_i / (int)pkts_per_session, pkt_i);
-            sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
-                                  (void *)&thr_data));
+#ifdef DPDK_ENABLED
+            if (use_dpdk && dpdk_tx_lcore != RTE_MAX_LCORE) {
+                rte_eal_remote_launch(thread_sender_lcore, (void *)&thr_data, dpdk_tx_lcore);
+            } else
+#endif
+            {
+                sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
+                                      (void *)&thr_data));
+            }
         }
 
         /*---- Read the message from the server into the buffer ----*/
+#ifdef DPDK_ENABLED
+        if (use_dpdk) {
+            conn_info_t *dpdk_conn = conn_get_by_id(thr_data.conn_id);
+            uint16_t nb_rx;
+            int got_dw = 0;
+            while (!got_dw) {
+                while ((nb_rx = rte_eth_rx_burst(dpdk_get_port(), 0, dpdk_conn->rx_mbufs, RX_BURST_SIZE)) == 0);
+                for (uint16_t i = 0; i < nb_rx; i++) {
+                    if (!dpdk_is_dw_packet(dpdk_conn->rx_mbufs[i])) {
+                        rte_pktmbuf_free(dpdk_conn->rx_mbufs[i]);
+                        continue;
+                    }
+                    got_dw = 1;
+                    m = dpdk_get_payload_ptr(dpdk_conn->rx_mbufs[i]);
+                    int rv = process_reply(m, thread_id);
+                    if (rv == 1) { num_success++; i_incr = 1; }
+                    else if (rv == -1) { num_error++; i_incr = 1; }
+                    else { num_timedout++; i_incr = 1; }
+                    rte_pktmbuf_free(dpdk_conn->rx_mbufs[i]);
+                }
+            }
+            goto skip;
+        }
+#endif
         // TODO: support receive of variable reply-size requests
         conn_info_t *conn = conn_get_by_id(thr_data.conn_id);
 
@@ -417,33 +508,10 @@ void *thread_receiver(void *data) {
             msg_log(m, "received message: ");
 #endif
 
-            unsigned pkt_id = m->req_id;
-            if (m->status != SUCCESS) {
-                dw_log("REPLY reported an error - %s\n", msg_status_str(m->status));
-
-                if (m->status == ERR)
-                    num_error++;
-                else
-                    num_timedout++;
-                i_incr = 1;
-            } else {
-                struct timespec ts_now;
-                clock_gettime(clk_id, &ts_now);
-                unsigned long usecs = use_nano
-                    ? (ts_now.tv_sec - ts_start.tv_sec) * 1000000000L + (ts_now.tv_nsec - ts_start.tv_nsec)
-                    : (ts_now.tv_sec - ts_start.tv_sec) * 1000000 + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
-                usecs_elapsed[thread_id][idx(pkt_id)] =
-                    usecs - usecs_send[thread_id][idx(pkt_id)];
-                dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
-                       usecs_elapsed[thread_id][idx(pkt_id)]);
-
-                num_success++;
-                i_incr = 1;
-
-                #ifdef DW_DEBUG
-                    msg_log(m, "received message: ");
-                #endif
-            }
+            int rv = process_reply(m, thread_id);
+            if (rv == 1) { num_success++; i_incr = 1; }
+            else if (rv == -1) { num_error++; i_incr = 1; }
+            else { num_timedout++; i_incr = 1; }
         }
 
     skip:
@@ -474,9 +542,17 @@ void *thread_receiver(void *data) {
             }
             if (thr_data.conn_id != -1) {
                 dw_log("Joining sender thread\n");
-                pthread_join(sender[thread_id], NULL);
+#ifdef DPDK_ENABLED
+                if (use_dpdk && dpdk_tx_lcore != RTE_MAX_LCORE)
+                    rte_eal_wait_lcore(dpdk_tx_lcore);
+                else
+#endif
+                    pthread_join(sender[thread_id], NULL);
 
-                close(clientSocket[thread_id]);
+#ifdef DPDK_ENABLED
+                if (!use_dpdk)
+#endif
+                    close(clientSocket[thread_id]);
                 conn_free(thr_data.conn_id);
                 thr_data.conn_id = -1;
             }
