@@ -75,18 +75,22 @@ void addr_proto_parse(char* arg, char *nodehostport, proto_t *proto) {
         if (strncmp(arg, "udp", 3) == 0) {
             *proto = UDP;
             parse_proto_check = 1;
-        }
-        if (strncmp(arg, "tcp", 3) == 0) {
+            arg += 3;
+        } else if (strncmp(arg, "tcp", 3) == 0) {
             *proto = TCP;
             parse_proto_check = 1;
-        }
-        if (strncmp(arg, "ssl", 3) == 0) {
+            arg += 3;
+        } else if (strncmp(arg, "ssl", 3) == 0) {
             *proto = TLS;
             parse_proto_check = 1;
+            arg += 3;
+        } else if (strncmp(arg, "dpdk", 4) == 0) {
+            *proto = DPDK;
+            parse_proto_check = 1;
+            arg += 4;
         }
 
         if (parse_proto_check) {
-            arg += 3;
             if (arg[0] == ':') {
                 arg++;
             }
@@ -102,21 +106,27 @@ void addr_proto_parse(char* arg, char *nodehostport, proto_t *proto) {
         check(tok != NULL);
 
         int parse_protocol_check = 0;
+        int proto_len = 0;
         if (strncmp(tok, "udp:", 4) == 0) {
             *proto = UDP;
             parse_protocol_check = 1;
-        }
-        if (strncmp(tok, "tcp:", 4) == 0) {
+            proto_len = 4;
+        } else if (strncmp(tok, "tcp:", 4) == 0) {
             *proto = TCP;
             parse_protocol_check = 1;
-        }
-        if (strncmp(tok, "ssl:", 4) == 0) {
+            proto_len = 4;
+        } else if (strncmp(tok, "ssl:", 4) == 0) {
             *proto = TLS;
             parse_protocol_check = 1;
+            proto_len = 4;
+        } else if (strncmp(tok, "dpdk:", 5) == 0) {
+            *proto = DPDK;
+            parse_protocol_check = 1;
+            proto_len = 5;
         }
 
         if (parse_protocol_check) {
-            tok += 4;
+            tok += proto_len;
             check(tok[0] == '\0');
 
             tok = strtok_r(NULL, "//", &reserve);
