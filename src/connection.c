@@ -136,7 +136,8 @@ static void conn_reset(conn_info_t *conn) {
 }
 
 req_info_t* conn_req_remove(conn_info_t *conn, req_info_t *req) {
-    if (conn->enable_defrag) {
+    // skip defrag if message_ptr is outside recv_buf (DPDK zero-copy from mbuf)
+    if (conn->enable_defrag && req->message_ptr >= conn->recv_buf && req->message_ptr < conn->recv_buf + BUF_SIZE) {
         unsigned long req_size = req_get_message(req)->req_size;
         unsigned long leftover = conn->curr_recv_buf - (req->message_ptr + req_size);
     
@@ -171,6 +172,10 @@ int conn_find_existing(struct sockaddr_in target, proto_t proto) {
 
     pthread_t curr_thread = pthread_self();
     for (int i = 0; i < MAX_CONNS; i++) {
+        if (proto == DPDK && conns[i].proto == DPDK && conns[i].parent_thread == curr_thread) {
+            rv = i;
+            break;
+        }
         if (conns[i].sock == -1)
             continue;
         if (proto == UDP && conns[i].parent_thread == curr_thread) {

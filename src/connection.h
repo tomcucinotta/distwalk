@@ -9,6 +9,10 @@
 #include "message.h"
 #include "request.h"
 
+#ifdef DPDK_ENABLED
+#include "dw_dpdk.h"
+#endif
+
 #define MAX_CONNS 8192
 
 typedef enum {
@@ -51,6 +55,12 @@ typedef struct {
     atomic_int busy;             // 1 if conn is allocated, 0 otherwise
     
     int enable_defrag;            // Defragment receive buffer to reduce memory usage
+
+#ifdef DPDK_ENABLED
+    struct rte_mbuf *rx_mbufs[RX_BURST_SIZE];
+    struct rte_mbuf *tx_mbufs[TX_BURST_SIZE];
+    uint16_t tx_count;
+#endif
 
     // SSL/TLS support
     int use_ssl;                  // 1 if SSL is enabled for this connection

@@ -23,6 +23,7 @@ struct req_info_t {
     unsigned char *message_ptr;
     command_t *curr_cmd;
     node_t *timeout_node;
+    uint8_t reply_mac[6];
     req_info_t *prev, *next;
 
     // --- Added for sendfile() support ---
