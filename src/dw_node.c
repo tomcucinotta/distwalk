@@ -315,7 +315,9 @@ int remove_timeout(conn_worker_info_t* infos, int req_id, dw_poll_t *p_poll) {
 
 void setnonblocking(int fd);
 
-int find_forward_reply_id(command_t *cmd, struct sockaddr_in from_addr);
+// match_addr is 6 bytes: either fwd_host(4)+fwd_port(2) or fwd_addr[6],
+// same union in fwd_opts_t, so memcmp on fwd_addr covers both cases
+int find_forward_reply_id(command_t *cmd, const uint8_t match_addr[6]);
 
 // cmd_id is the index of the FORWARD item within m->cmds[] here, we
 // remove the first (cmd_id+1) commands from cmds[], and forward the
@@ -331,7 +333,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     addr.sin_addr.s_addr = fwd.fwd_host;
     addr.sin_port = fwd.fwd_port;
 
-    int fwd_reply_id = find_forward_reply_id(req->curr_cmd, addr);
+    int fwd_reply_id = find_forward_reply_id(req->curr_cmd, fwd.fwd_addr);
     if (fwd_reply_id == -1)
         return NULL;
 
@@ -473,18 +475,19 @@ int process_messages(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t* inf
 int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos);
 
 // return 0-based id if found, or -1 if not found
-int find_forward_reply_id(command_t *cmd, struct sockaddr_in from_addr) {
+// match_addr is 6 bytes: either fwd_host(4)+fwd_port(2) or fwd_addr[6],
+// same union in fwd_opts_t, so memcmp on fwd_addr covers both cases
+int find_forward_reply_id(command_t *cmd, const uint8_t match_addr[6]) {
     int id = 0;
     for (; cmd != NULL; cmd = cmd_next_forward(cmd), id++) {
-        if (cmd_get_opts(fwd_opts_t, cmd)->fwd_host == from_addr.sin_addr.s_addr
-            && cmd_get_opts(fwd_opts_t, cmd)->fwd_port == from_addr.sin_port)
+        if (memcmp(cmd_get_opts(fwd_opts_t, cmd)->fwd_addr, match_addr, 6) == 0)
             return id;
     }
     return -1;
 }
 
-// Call this once we received a REPLY from a socket matching a req_id we forwarded
-int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* infos, msg_status_t fwd_m_status, struct sockaddr_in from_addr) {
+// Call this once we received a REPLY from a connection matching a req_id we forwarded
+int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* infos, msg_status_t fwd_m_status, const uint8_t match_addr[6], proto_t proto) {
     req_info_t *req = req_get_by_id(req_id);
 
     if (!req) {
@@ -492,12 +495,24 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         return -1;
     }
 
-    int reply_id = find_forward_reply_id(req->curr_cmd, from_addr);
-    dw_log("Found reply_id %d from: %s:%d (conn_id: %d)\n", reply_id,
-           inet_ntoa((struct in_addr) {from_addr.sin_addr.s_addr}), ntohs(from_addr.sin_port), req->conn_id);
+    // human readable string that supports both cases
+    char addr_str[64];
+    if (proto == DPDK) {
+        snprintf(addr_str, sizeof(addr_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                 match_addr[0], match_addr[1], match_addr[2],
+                 match_addr[3], match_addr[4], match_addr[5]);
+    } else {
+        struct in_addr addr;
+        uint16_t port;
+        memcpy(&addr, match_addr, 4);
+        memcpy(&port, match_addr + 4, 2);
+        snprintf(addr_str, sizeof(addr_str), "%s:%d", inet_ntoa(addr), ntohs(port));
+    }
+
+    int reply_id = find_forward_reply_id(req->curr_cmd, match_addr);
+    dw_log("Found reply_id %d from: %s (conn_id: %d)\n", reply_id, addr_str, req->conn_id);
     if (reply_id == -1) {
-        dw_log("Got a REPLY to FORWARD from an unexpected endpoint: %s:%d - Dropped",
-               inet_ntoa((struct in_addr) {from_addr.sin_addr.s_addr}), ntohs(from_addr.sin_port));
+        dw_log("Got a REPLY to FORWARD from an unexpected endpoint: %s - Dropped\n", addr_str);
         return -1;
     }
     
@@ -814,7 +829,10 @@ int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos) {
         if (message_first_cmd(m)->cmd == EOM) {
             dw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), 
                                                                            ntohs(conns[conn_id].target.sin_port), m->req_id);
-            if (!handle_forward_reply(m->req_id, p_poll, infos, m->status, conns[conn_id].target)) {
+            uint8_t fwd_match[6];
+            memcpy(fwd_match, &conn->target.sin_addr.s_addr, 4);
+            memcpy(fwd_match + 4, &conn->target.sin_port, 2);
+            if (!handle_forward_reply(m->req_id, p_poll, infos, m->status, fwd_match, conn->proto)) {
                     dw_log("handle_forward_reply() failed\n");
                     return 0;
             }
