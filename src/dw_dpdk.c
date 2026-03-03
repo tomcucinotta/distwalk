@@ -9,6 +9,7 @@
 #include <rte_ethdev.h>
 #include <rte_mbuf.h>
 #include <rte_ether.h>
+#include <rte_pmd_i40e.h>
 
 #define MBUF_POOL_NAME      "MBUF_POOL"
 #define NUM_MBUFS           8191        // 2^n - 1 (per queue)
@@ -31,6 +32,16 @@ static int port_init(uint16_t port_id, struct rte_ether_addr *out_mac) {
 
     if (!rte_eth_dev_is_valid_port(port_id))
         return -1;
+
+    if (num_queues > 1) {
+        struct rte_eth_dev_info dev_info;
+        ret = rte_eth_dev_info_get(port_id, &dev_info);
+        if (ret != 0)
+            return ret;
+        port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
+        port_conf.rx_adv_conf.rss_conf.rss_hf =
+            RTE_ETH_RSS_L2_PAYLOAD & dev_info.flow_type_rss_offloads;
+    }
 
     ret = rte_eth_dev_configure(port_id, num_queues, num_queues, &port_conf);
     if (ret != 0) {
@@ -66,6 +77,21 @@ static int port_init(uint16_t port_id, struct rte_ether_addr *out_mac) {
     if (ret < 0) {
         fprintf(stderr, "[DPDK] Cannot start port %u: %s\n", port_id, rte_strerror(-ret));
         return -1;
+    }
+
+    // RSS configuration to hash on source MAC for L2 payload (i40e PF only)
+    if (num_queues > 1) {
+        struct rte_pmd_i40e_inset inset = { .inset = 0 };
+        rte_pmd_i40e_inset_field_set(&inset.inset, 3); // SMAC bytes 0-1
+        rte_pmd_i40e_inset_field_set(&inset.inset, 4); // SMAC bytes 2-3
+        rte_pmd_i40e_inset_field_set(&inset.inset, 5); // SMAC bytes 4-5
+        ret = rte_pmd_i40e_inset_set(port_id, 63, &inset, INSET_HASH);
+        if (ret == 0) {
+            printf("[DPDK] RSS input set: source MAC on L2_PAYLOAD (i40e)\n");
+        } else {
+            fprintf(stderr, "[DPDK] WARNING: RSS on source MAC not available, "
+                    "all packets will go to a single queue\n");
+        }
     }
 
     ret = rte_eth_macaddr_get(port_id, out_mac);

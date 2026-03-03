@@ -17,8 +17,8 @@ ifeq ($(USE_DPDK),1)
     CFLAGS += $(DPDK_CFLAGS) -DDPDK_ENABLED
     CFLAGS_DEBUG += $(DPDK_CFLAGS) -DDPDK_ENABLED
     CFLAGS_TSAN += $(DPDK_CFLAGS) -DDPDK_ENABLED
-    LDLIBS += $(DPDK_LDFLAGS)
-    LDLIBS_DEBUG += $(DPDK_LDFLAGS)
+    LDLIBS += $(DPDK_LDFLAGS) -lrte_net_i40e
+    LDLIBS_DEBUG += $(DPDK_LDFLAGS) -lrte_net_i40e
 endif
 
 TEST_PROGRAMS=test_distrib test_distrib_debug test_ccmd test_ccmd_debug test_message test_message_debug test_pqueue test_pqueue_debug
