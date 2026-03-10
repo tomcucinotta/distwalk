@@ -30,6 +30,7 @@
 //__thread char thread_name[16];
 
 int use_wait_spinning = 0;
+int use_nano = 0;
 
 queue_t* ccmd = NULL; // chain of commands
 
@@ -145,6 +146,25 @@ int try_connect(int* conn_sock, struct sockaddr_in target) {
     return connect(*conn_sock, (struct sockaddr *)&target, sizeof(target));
 }
 
+// Process a received reply message. Returns: 1 = success, -1 = error, -2 = timeout
+int process_reply(message_t *m, int thread_id) {
+    unsigned pkt_id = m->req_id;
+    if (m->status != SUCCESS) {
+        dw_log("REPLY reported an error - %s\n", msg_status_str(m->status));
+        return m->status == ERR ? -1 : -2;
+    }
+    struct timespec ts_now;
+    clock_gettime(clk_id, &ts_now);
+    unsigned long usecs = use_nano
+        ? (ts_now.tv_sec - ts_start.tv_sec) * 1000000000L + (ts_now.tv_nsec - ts_start.tv_nsec)
+        : (ts_now.tv_sec - ts_start.tv_sec) * 1000000 + (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
+    usecs_elapsed[thread_id][idx(pkt_id)] =
+        usecs - usecs_send[thread_id][idx(pkt_id)];
+    dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
+           usecs_elapsed[thread_id][idx(pkt_id)]);
+    return 1;
+}
+
 void *thread_sender(void *data) {
     thread_data_t *p = (thread_data_t *)data;
 
@@ -176,7 +196,7 @@ void *thread_sender(void *data) {
         struct timespec ts_send;
         clock_gettime(clk_id, &ts_send);
 
-        usecs_send[thread_id][idx(pkt_id)] = ts_sub_us(ts_send, ts_start);
+        usecs_send[thread_id][idx(pkt_id)] = use_nano ? ts_sub_ns(ts_send, ts_start) : ts_sub_us(ts_send, ts_start);
         usecs_elapsed[thread_id][idx(pkt_id)] = 0; // mark corresponding elapsed value as 0, i.e., non-valid 
                                                    // (in case we don't receive all packets back)
 
@@ -210,10 +230,11 @@ void *thread_sender(void *data) {
     next_pkt:
         // wait / spin-wait before sending next packet based on the specified rate / period
         if (ramp_step_secs != 0 && pkt_id > 0) {
+            long time_div = use_nano ? 1000000000L : 1000000L;
             int step_prev =
-                usecs_send[thread_id][idx(pkt_id - 1)] / 1000000 / ramp_step_secs;
+                usecs_send[thread_id][idx(pkt_id - 1)] / time_div / ramp_step_secs;
             int step =
-                usecs_send[thread_id][idx(pkt_id)] / 1000000 / ramp_step_secs;
+                usecs_send[thread_id][idx(pkt_id)] / time_div / ramp_step_secs;
             int rate;
             while (step_prev++ < step) {
                 int old_rate = 1000000.0 / send_period_us_pd.val;
@@ -440,8 +461,9 @@ void *thread_receiver(void *data) {
                     // of packets never sent will stay at 0
                     if (usecs_send[thread_id][idx(pkt_id)] != 0) {
                         printf(
-                            "t: %ld us, elapsed: %ld us, req_id: %d, thr_id: "
-                            "%d, sess_id: %d\n",
+                            use_nano
+                            ? "t: %ld ns, elapsed: %ld ns, req_id: %d, thr_id: %d, sess_id: %d\n"
+                            : "t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n",
                             usecs_send[thread_id][idx(pkt_id)],
                             usecs_elapsed[thread_id][idx(pkt_id)], pkt_id,
                             thread_id, sess_id);
@@ -470,8 +492,9 @@ void *thread_receiver(void *data) {
         for (int i = 0; i < num_pkts; i++) {
             int sess_id = i / pkts_per_session;
             printf(
-                "t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: "
-                "%d\n",
+                use_nano
+                ? "t: %ld ns, elapsed: %ld ns, req_id: %d, thr_id: %d, sess_id: %d\n"
+                : "t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n",
                 usecs_send[thread_id][i], usecs_elapsed[thread_id][idx(i)], i,
                 thread_id, sess_id);
         }
@@ -522,7 +545,8 @@ enum argp_client_option_keys {
     SSL_CA_FILE,
     SSL_CIPHERS,
     SSL_CA_PATH,
-    SSL_VERIFY
+    SSL_VERIFY,
+    NANO_OUTPUT
 };
 
 static struct argp_option argp_client_options[] = {
@@ -570,6 +594,7 @@ static struct argp_option argp_client_options[] = {
     { "ssl-ciphers",        SSL_CIPHERS,             "ciphers",                                   0, "Allowed SSL ciphers" },
     { "ssl-ca-path",        SSL_CA_PATH,             "dir",                                       0, "Client SSL CA path" },
     { "ssl-verify",         SSL_VERIFY,              0,                                           0, "Require server certificate verification" },
+    { "nano",               NANO_OUTPUT,             0,                                           0, "Output response times in nanoseconds" },
     { 0 }
 };
 
@@ -645,6 +670,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         break;
     case WAIT_SPIN:
         use_wait_spinning = 1;
+        break;
+    case NANO_OUTPUT:
+        use_nano = 1;
         break;
     case RATE_STEP_SECS:
         ramp_step_secs = atoi(arg);
