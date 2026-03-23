@@ -341,9 +341,9 @@ message_t* conn_prepare_recv_message(conn_info_t *conn) {
     }
     assert(m->req_size >= sizeof(message_t) && m->req_size <= BUF_SIZE);
 
-    dw_log("Got complete message of [recv size:%lu (expected %d), ready to process\n", msg_size, m->req_size);
+    dw_log("Got complete message of recv size:%lu (expected %d), ready to process\n", msg_size, m->req_size);
 #ifdef DW_DEBUG
-    //msg_log(m, "");
+    msg_log(m, "");
 #endif
 
     conn->curr_proc_buf += m->req_size;
