@@ -524,7 +524,6 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
     reply_opts_t *opts = cmd_get_opts(reply_opts_t, cmd);
     assert(m_dst->req_size >= opts->resp_size);
 
-    //printf("Reply opts: %i\n", sizeof(opts));
 
     m_dst->req_id = m->req_id;
     m_dst->req_size = opts->resp_size;
@@ -544,20 +543,16 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
     infos->active_reqs--;
 
     // added branching here for the two cases
-    //printf("Reply opts: resp_size=%u, mode=%d\n", opts->resp_size, opts->mode);
     conns[conn_id].reply_mode = opts->mode;
 
     switch (opts->mode) {
 
     case REPLY_MODE_SENDFILE:
 
-        //printf("storage_fd=%d, conn_worker_infos[conn_id=%d].storage_fd=%d\n", storage_worker_info.storage_info.storage_fd, conn_id, conn_worker_infos[conn_id].storage_fd);
-
-
         req->sendfile_fd = storage_worker_info.storage_info.storage_fd;//conn_worker_infos[conn_id].storage_fd; // note! fd must be copied here since req will be freed after this function returns,but the sendfile operation may not be completed yet
         req->sendfile_offset = 0;
         req->sendfile_size = opts->resp_size;
-        //printf("dw node REPLY using SENDFILE  (req_id=%d, fd=%d)\n", req->req_id, req->sendfile_fd);
+        printf("Reply using sendfile.\n");
         return conn_start_sendfile(&conns[conn_id], target, req->sendfile_fd, req->sendfile_offset, req->sendfile_size);
     
     case REPLY_MODE_NORMAL:
@@ -923,7 +918,6 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
 void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t type, conn_worker_info_t* infos) {
     conn_info_t *conn = conn_get_by_id(conn_id);
     dw_log("event_type=%s, conn_id=%d\n", get_event_str(type), conn_id);
-    //printf("event_type=%s, conn_id=%d\n", get_event_str(type), conn_id);
 
 
     if (conn->status == SSL_HANDSHAKE) {
@@ -987,7 +981,6 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
 
     // check whether we have new or leftover messages to process
     dw_log("calling obtain_messages() from conn_id=%d's recv buffer\n", conn_id)
-    //printf("conn_id=%d, curr_send_size=%lu, status=%s\n", conn_id, conn->curr_send_size, conn_status_str(conn_get_status(conn)));
     if (!obtain_messages(conn_id, p_poll, infos))
         goto err;
 
@@ -1367,7 +1360,6 @@ void* conn_worker(void* args) {
 
                 break;
             } else {
-                //printf("event_type=%s, event_data=%d (conn_id if event_type==SOCKET, polled fd otherwise)\n", get_event_str(event_type), event_data);
                 exec_request(&infos->dw_poll, pflags, event_data, event_type, infos);
             }
         }
