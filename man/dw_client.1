@@ -169,10 +169,10 @@ option is used, then different messages can be forwarded to the different peers,
 .B dw_client -F ip1:p1,branch -C 10ms -R -F ip2:p2,branch -C 20ms -R
 
 .TP
-.BR -R,\ \--rs [ = \fInbytes_spec\fR ]
+.BR -R,\ \--rs [ = \fI[sendfile,]nbytes_spec]\fR
 Add to the list of per-request operations to be submitted a
 .B REPLY
-command, optionally specifying the payload size, in bytes (see below for details on how to specify distributions).
+command, optionally specifying the payload size, in bytes (see below for details on how to specify distributions), or enabling the use of sendfile to perform a joined LOAD+REPLY operation.
 
 .TP
 .BR --retry-num = \fIn\fR
