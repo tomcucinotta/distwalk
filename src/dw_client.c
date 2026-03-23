@@ -425,7 +425,7 @@ void *thread_receiver(void *data) {
                 }
 
                 #ifdef DW_DEBUG
-                    //msg_log(m, "received message: ");
+                    msg_log(m, "received message: ");
                 #endif
             }
             
@@ -465,7 +465,7 @@ void *thread_receiver(void *data) {
                 thr_data.conn_id = -1;
             }
         }
-        printf("end of while loop for Sent pkts - success: %d, error: %d, timeout: %d, thr_id: %d\n", num_success, num_error, num_timedout, thread_id);
+        dw_log("end of while loop for Sent pkts - success: %d, error: %d, timeout: %d, thr_id: %d\n", num_success, num_error, num_timedout, thread_id);
 
     }
 
@@ -872,7 +872,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         if (queue_size(ccmd) <= 0) { // edge-case
             ccmd_add_reply(ccmd, REPLY, &val, reply_mode);
 
-            printf("edge case\n");
             break;
         }
 
