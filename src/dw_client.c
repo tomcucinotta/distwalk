@@ -270,8 +270,6 @@ void *thread_receiver(void *data) {
     int num_success = 0;
     int num_error = 0;
     int num_timedout = 0;
-    int message_completed = 0;
-
 
     int i_incr = 0;
     int pkt_i;
@@ -358,7 +356,7 @@ void *thread_receiver(void *data) {
                 conn_set_status_by_id(thr_data.conn_id, READY);
 
             thr_data.first_pkt_id = pkt_i;
-            printf("Spawning sender thread for sess_id=%d, first_pkt_id=%d\n", pkt_i / (int)pkts_per_session, pkt_i);
+            dw_log("Spawning sender thread for sess_id=%d, first_pkt_id=%d\n", pkt_i / (int)pkts_per_session, pkt_i);
             sys_check(pthread_create(&sender[thread_id], NULL, thread_sender,
                                   (void *)&thr_data));
         }
@@ -367,7 +365,6 @@ void *thread_receiver(void *data) {
         // TODO: support receive of variable reply-size requests
         conn_info_t *conn = conn_get_by_id(thr_data.conn_id);
 
-        /*
         do {
             recv = conn_recv(conn);
             if (recv == 0) {
@@ -379,56 +376,56 @@ void *thread_receiver(void *data) {
                 i_incr = skip_pkts;
                 goto skip;
             }
+            /* check if we're receiving a long REPLY */
+            unsigned long msg_size = conn->curr_recv_buf - conn->curr_proc_buf;
+            if (msg_size > sizeof(message_t)) {
+                message_t *m = (message_t *)conn->curr_proc_buf;
+                command_t *p_cmd = message_first_cmd(m);
+                if (p_cmd->cmd == EOM && m->req_size > msg_size) {
+                    /* long REPLY case */
+                    command_t *p_next = cmd_next(p_cmd);
+                    size_t diff = conn->curr_recv_buf - (unsigned char*)p_next;
+                    m->req_size -= diff;
+                    conn->curr_recv_buf -= diff;
+                    conn->curr_recv_size += diff;
+                    recv = -1; /* force repeatition since conn_recv() */
+                }
+            }
         } while (recv == -1);
 
         while ((m = conn_prepare_recv_message(conn))) {
             dw_log("thread_id: %d\n", thread_id);
-        */
 
-        while (!message_completed) {
+#ifdef DW_DEBUG
+            msg_log(m, "received message: ");
+#endif
 
-            recv = conn_recv(conn);
-            if (recv <= 0) {
-                printf("Error: cannot read received message\n");
-                unsigned long skip_pkts =
-                    pkts_per_session - (pkt_i % pkts_per_session);
-                printf("Fast-forwarding i by %lu pkts\n", skip_pkts);
-                num_error += skip_pkts;
-                i_incr = skip_pkts;
-                goto skip;
-            }
+            unsigned pkt_id = m->req_id;
+            if (m->status != SUCCESS) {
+                dw_log("REPLY reported an error - %s\n", msg_status_str(m->status));
 
-            while ((m = conn_prepare_recv_message(conn))) {
-                
-                unsigned pkt_id = m->req_id;
-                if (m->status != SUCCESS) {
-                    dw_log("REPLY reported an error - %s\n", msg_status_str(m->status));
+                if (m->status == ERR)
+                    num_error++;
+                else
+                    num_timedout++;
+                i_incr = 1;
+            } else {
+                struct timespec ts_now;
+                clock_gettime(clk_id, &ts_now);
+                unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
+                    (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
+                usecs_elapsed[thread_id][idx(pkt_id)] =
+                    usecs - usecs_send[thread_id][idx(pkt_id)];
+                dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
+                       usecs_elapsed[thread_id][idx(pkt_id)]);
 
-                    if (m->status == ERR)
-                        num_error++;
-                    else
-                        num_timedout++;
-                    i_incr = 1;
-                } else {
-                    struct timespec ts_now;
-                    clock_gettime(clk_id, &ts_now);
-                    unsigned long usecs = (ts_now.tv_sec - ts_start.tv_sec) * 1000000 +
-                        (ts_now.tv_nsec - ts_start.tv_nsec) / 1000;
-                    usecs_elapsed[thread_id][idx(pkt_id)] =
-                        usecs - usecs_send[thread_id][idx(pkt_id)];
-                    dw_log("thread_id: %d sess_id: %ld req_id %u elapsed %ld us\n", thread_id, pkt_id / pkts_per_session, pkt_id,
-                        usecs_elapsed[thread_id][idx(pkt_id)]);
-
-                    num_success++;
-                    i_incr = 1;
-                    message_completed = 1;
-                }
+                num_success++;
+                i_incr = 1;
 
                 #ifdef DW_DEBUG
                     msg_log(m, "received message: ");
                 #endif
             }
-            
         }
 
     skip:
