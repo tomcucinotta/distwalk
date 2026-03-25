@@ -544,7 +544,7 @@ static struct argp_option argp_client_options[] = {
     { "skip",               SKIP_CMD,               "n[,prob=val,every=m]",                       0, "Skip the next n commands with probability val in (0,1.0] (defaults to 1.0), every m requests (defaults to 1)"},
     { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,nack=n]\n      [,branch]", 0, "Add a FORWARD command to the given ip:port list, specifying optional connection timeout, retries and number of required acks, and whether its a continued/branched multi-forward"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes_spec",          0, "Set payload size of sent requests"},
-    { "rs",                 REPLY_CMD,              "[sendfile,]nbytes_spec", 0, "Add a REPLY command, optionally specifying the payload size or other options"},
+    { "rs",                 REPLY_CMD,              "[sendfile,]nbytes_spec", OPTION_ARG_OPTIONAL, "Add a REPLY command, optionally specifying the payload size or other options"},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
     { "num-sessions",       NUM_SESSIONS,           "n",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
