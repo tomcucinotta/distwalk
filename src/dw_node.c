@@ -742,6 +742,7 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             }
             return 0;
         case REPLY:
+            dw_log("Handling REPLY: req_id=%d\n", m->req_id);
             if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd, infos)) {
                 dw_log("reply() returned, conn_id: %d\n", conn_id);
                 
