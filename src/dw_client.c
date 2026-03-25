@@ -974,12 +974,6 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             argp_failure(state, 1, 0, "num_pkts: %ld > MAX_PKTS: %d, Overflow!", num_pkts, MAX_PKTS);
         }
 
-        // default ccmd
-        if (queue_size(ccmd) <= 0) {
-            pd_spec_t val = pd_build_fixed(default_compute_us);
-            ccmd_add(ccmd, COMPUTE, &val);
-        }
-
         // Exhaust remaining deferred replies
         while(queue_size(arguments->reserved_fwd_replies) > 0 && arguments->fwd_scope > 0) {
             pd_spec_t val = pd_build_fixed(queue_node_key(queue_tail(arguments->reserved_fwd_replies)));
