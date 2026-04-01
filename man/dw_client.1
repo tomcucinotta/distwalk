@@ -98,6 +98,10 @@ mode.
 Tell each client thread to perform a busy-wait loop instead of blocking, while waiting till the point in time in which the next request is to be sent.
 
 .TP
+.BR --nano
+Output response times in nanoseconds instead of the default microseconds.
+
+.TP
 .BR -C,\ \--comp-time = \fIusec_spec\fR
 Add to the sequence of operations submitted per-request to the server a
 .B COMPUTE
