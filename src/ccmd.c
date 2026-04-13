@@ -9,8 +9,7 @@
 #include "message.h"
 #include "dw_debug.h"
 
-
-void ccmd_add_reply(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec, reply_mode_t reply_mode) {
+void ccmd_add(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
     if (!q) {
         printf("ccmd_add() error - Initialize queue first\n");
         exit(EXIT_FAILURE);
@@ -19,19 +18,14 @@ void ccmd_add_reply(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec, reply_
     ccmd_node_t* new_node = calloc(1, sizeof(ccmd_node_t));
     new_node->cmd = cmd;
     new_node->pd_val = *p_pd_spec;
-    new_node->resp.mode = reply_mode; // reply mode used for sendfile
-    
+    new_node->resp.mode = REPLY_MODE_NORMAL; // default reply mode
+    new_node->resp.dev_id = 0; // default device id
+
     if (queue_size(q) >= 1)
         ccmd_last(q)->next = new_node;
 
     data_t data = { .ptr=new_node };
     queue_enqueue(q, cmd, data);
-}
-
-void ccmd_add(queue_t* q, command_type_t cmd, pd_spec_t *p_pd_spec) {
-    reply_mode_t mode = REPLY_MODE_NORMAL; // default reply mode
-    ccmd_add_reply(q, cmd, p_pd_spec, mode);
-
 }
 
 extern __thread struct drand48_data rnd_buf;
@@ -155,14 +149,14 @@ void ccmd_log(queue_t* q) {
 
         switch (curr->cmd) {
             case STORE:
-                sprintf(opts, "%sb,%s,offset=%s", pd_str(&curr->pd_val),
+                sprintf(opts, "dev=%d,%sb,%s,offset=%s", curr->store.dev_id, pd_str(&curr->pd_val),
                         curr->store.wait_sync ? "sync" : "nosync", pd_str(&curr->pd_val2));
                 break;
             case COMPUTE:
                 sprintf(opts, "%sus", pd_str(&curr->pd_val));
                 break;
             case LOAD:
-                sprintf(opts, "%sb,offset=%s", pd_str(&curr->pd_val),
+                sprintf(opts, "dev=%d,%sb,offset=%s", curr->load.dev_id, pd_str(&curr->pd_val),
                         pd_str(&curr->pd_val2));
                 break;
             case PSKIP:
@@ -183,7 +177,7 @@ void ccmd_log(queue_t* q) {
                                                                                   pd_str(&curr->pd_val));
                 break;
             case REPLY:
-                sprintf(opts, "%sb", pd_str(&curr->pd_val));
+                sprintf(opts, "%sb, mode=%s, dev=%d", pd_str(&curr->pd_val), curr->resp.mode ? "sendfile" : "normal", curr->resp.dev_id);
                 break;
             default: 
                 fprintf(stderr, "ccmd_log() - Unknown command type\n");
