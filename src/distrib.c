@@ -179,7 +179,7 @@ int pd_parse_internal(pd_spec_t *p, char *s, int is_time) {
     }
     double k = NAN, scale = NAN; // for gamma:
     double file_unit_us = 1.0;      // for file:
-    while ((tok = strsep(&s, ",")) != NULL) {
+    while ((tok = strsep(&s, ":")) != NULL) {
         dw_log("Processing tok: %s\n", tok);
         if (sscanf_unit(tok, "min=%lf", &p->min, is_time) == 1
             || sscanf_unit(tok, "max=%lf", &p->max, is_time) == 1
@@ -272,7 +272,7 @@ int pd_parse_bytes(pd_spec_t *p, char *s) {
     int l = strlen(s);
     if (l > 0 && (s[l-1] == 'b' || s[l-1] == 'B'))
         s[l-1] = 0;
-    return pd_parse(p, s);
+    return pd_parse_internal(p, s, 0);
 }
 
 double pd_sample(pd_spec_t *p) {
