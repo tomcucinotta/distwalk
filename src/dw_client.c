@@ -544,13 +544,13 @@ static struct argp_option argp_client_options[] = {
     { "rss",                RATE_STEP_SECS,         "n", OPTION_ALIAS},
     { "comp-time",          COMP_TIME,              "usec_spec",                                  0, "Add a COMPUTE command with the given exec time"},
     { "store-offset",       STORE_OFFSET,           "nbytes_spec",                                0, "Set default file offset for subseq. STOREs"},
-    { "store-data",         STORE_DATA,             "[offset='['nbytes_spec']',][nosync,]size='['nbytes_spec']'", 0, "Add a STORE command with the specified data payload size and optional offset and sync options"},
+    { "store-data",         STORE_DATA,             "[offset='['nbytes_spec']',][nosync,]size='['nbytes_spec']'[,dev=id]", 0, "Add a STORE command with the specified data payload size and optional device, offset and sync options"},
     { "load-offset",        LOAD_OFFSET,            "nbytes_spec",                                0, "Set default file offset for subsequent LOADs"},
-    { "load-data",          LOAD_DATA,              "[offset='['nbytes_spec']',]size='['nbytes_spec']'", 0, "Add a LOAD command with the given data payload size and optional offset"},
+    { "load-data",          LOAD_DATA,              "[offset='['nbytes_spec']',]size='['nbytes_spec']'[,dev=id]", 0, "Add a LOAD command with the given data payload size and optional device and offset options"},
     { "skip",               SKIP_CMD,               "n[,prob=val,every=m]",                       0, "Skip the next n commands with probability val in (0,1.0] (defaults to 1.0), every m requests (defaults to 1)"},
     { "forward",            FORWARD_CMD,            "ip:port[,ip:port,...][,timeout=usec][,retry=n][,nack=n]\n      [,branch]", 0, "Add a FORWARD command to the given ip:port list, specifying optional connection timeout, retries and number of required acks, and whether its a continued/branched multi-forward"},
     { "ps",                 SEND_REQUEST_SIZE,      "nbytes_spec",          0, "Set payload size of sent requests"},
-    { "rs",                 REPLY_CMD,              "[sendfile,]nbytes_spec", OPTION_ARG_OPTIONAL, "Add a REPLY command, optionally specifying the payload size or other options"},
+    { "rs",                 REPLY_CMD,              "[dev=id,][sendfile,]nbytes_spec", OPTION_ARG_OPTIONAL, "Add a REPLY command, optionally specifying the payload size or other options"},
     { "num-threads",        NUM_THREADS,            "n",                                          0, "Number of threads dedicated to communication" },
     { "nt",                 NUM_THREADS,            "n", OPTION_ALIAS },
     { "num-sessions",       NUM_SESSIONS,           "n",                                          0, "Number of sessions each thread establishes with the (initial) distwalk node"},
@@ -670,10 +670,11 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case STORE_OFFSET: {
         check(pd_parse_bytes(&store_offset_pd, arg), "Wrong store-offset specification");
         break; }
-    case STORE_DATA: {        
+    case STORE_DATA: {
         pd_spec_t val = pd_build_none();
         pd_spec_t off = store_offset_pd;
         uint8_t sync = 1;
+        uint8_t dev_id = 0; // default device id is 0
         do {
             if (strncmp(arg, "nosync", 6) == 0) {
                 arg += 6;
@@ -691,9 +692,14 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 char *tok = strsep(&arg, "]");
                 check(arg != NULL, "Missing closing ] bracket in %s", arg);
                 check(pd_parse_bytes(&val, tok), "Wrong store size specification");
+            } else if (strncmp(arg, "dev=", 4) == 0) {
+                arg += 4;
+                char *tok = strsep(&arg, ",");
+                dev_id = atoi(tok);
+                check((dev_id >= 0), "Device id in dev= needs to be a positive integer");
             } else {
-                check(pd_parse_bytes(&val, arg), "Wrong store data size specification");
-                break;
+                char *tok = strsep(&arg, ",");
+                check(pd_parse_bytes(&val, tok), "Wrong store data size specification");
             }
             if (arg != NULL && *arg == ',')
                 arg++;
@@ -702,10 +708,12 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         ccmd_add(ccmd, STORE, &val);
         ccmd_last(ccmd)->pd_val2 = off;
         ccmd_last(ccmd)->store.wait_sync = sync;
+        ccmd_last(ccmd)->store.dev_id = dev_id;
         break; }
     case LOAD_DATA: {
         pd_spec_t val = pd_build_none();
         pd_spec_t off = load_offset_pd;
+        uint8_t dev_id = 0; // default device id is 0
         do {
             if (strncmp(arg, "size=[", 6) == 0) {
                 arg += 6;
@@ -717,10 +725,15 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
                 char *tok = strsep(&arg, "]");
                 check(arg != NULL, "Missing closing ] bracket in %s", arg);
                 check(pd_parse_bytes(&off, tok), "Wrong load offset specification");
+            } else if (strncmp(arg, "dev=", 4) == 0) {
+                arg += 4;
+                char *tok = strsep(&arg, ",");
+                dev_id = atoi(tok);
+                check((dev_id > 0), "Device id in dev= needs to be a positive integer");
             } else {
                 dw_log("ARG: %s\n", arg);
-                check(pd_parse_bytes(&val, arg), "Wrong load size specification");
-                break;
+                char *tok = strsep(&arg, ",");
+                check(pd_parse_bytes(&val, tok), "Wrong load size specification");
             }
             if (arg != NULL && *arg == ',')
                 arg++;
@@ -728,6 +741,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         check(!pd_is_none(&val), "Wrong load data size specification");
         ccmd_add(ccmd, LOAD, &val);
         ccmd_last(ccmd)->pd_val2 = off;
+        ccmd_last(ccmd)->load.dev_id = dev_id;
         break; }
     case SKIP_CMD: {
         pd_spec_t val = pd_build_fixed(1.0);
@@ -847,38 +861,43 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         check(send_pkt_size_pd.val + TCPIP_HEADERS_SIZE <= BUF_SIZE, "Too big send request size, maximum is %d", BUF_SIZE);
         break;
     case REPLY_CMD: {
-        pd_spec_t val = pd_build_fixed(default_resp_size);
+        pd_spec_t val;
         reply_mode_t reply_mode = REPLY_MODE_NORMAL;
+        int dev_id = 0; // default device id is 0
 
-        if (arg == NULL)
-            val = pd_build_fixed(default_resp_size);
-        else {
+        if (arg != NULL) {
             do {
-                if (strncmp(arg, "sendfile", 8) == 0) {
+                char *tok = strsep(&arg, ",");
+
+                if (strncmp(tok, "dev=", 4) == 0) {
+                    dev_id = atoi(tok+4);
+                    check((dev_id >= 0), "Device id in dev= needs to be a positive integer");
+
+                } else if (strncmp(tok, "sendfile", 8) == 0) {
                     reply_mode = REPLY_MODE_SENDFILE;
-                    arg += 8;
+
                 } else {
-                    check(pd_parse_bytes(&val, arg),
+                    check(pd_parse_bytes(&val, tok),
                             "Wrong response size specification");
-                    break;
                 }
 
-                if (arg != NULL && *arg == ',')
-                    arg++;
             } while (arg != NULL && *arg != '\0');
+        } else {
+            val = pd_build_none(default_resp_size);
         }
-        if (pd_is_none(&val))
-            val = pd_build_fixed(default_resp_size);
-        
-        val.min = MIN_REPLY_SIZE;
-        val.max = BUF_SIZE;
-        
-        check(val.prob != FIXED || (val.val >= val.min && val.val <= val.max), "Wrong min-max range for response size");
-        
-        
-        if (queue_size(ccmd) <= 0) { // edge-case
-            ccmd_add_reply(ccmd, REPLY, &val, reply_mode);
 
+        if (pd_is_none(&val)) {
+            val = pd_build_fixed(default_resp_size);
+        }
+
+        // Clamp limits on response size
+        val.min = (val.min < MIN_REPLY_SIZE)? MIN_REPLY_SIZE : val.min;
+        val.max = (val.max > BUF_SIZE)? BUF_SIZE : val.max;
+
+        if (queue_size(ccmd) <= 0) { // edge-case
+            ccmd_add(ccmd, REPLY, &val);
+            ccmd_last(ccmd)->resp.mode = reply_mode;
+            ccmd_last(ccmd)->resp.dev_id = dev_id;
             break;
         }
 
@@ -886,16 +905,18 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
             if (ccmd_last(ccmd)->cmd == REPLY && ccmd_last(ccmd) != arguments->last_reserved_used)  {// update last chained reply
                 ccmd_last(ccmd)->pd_val = val;
             } else {// intra-chain reply
-                ccmd_add_reply(ccmd, REPLY, &val, reply_mode);
+                ccmd_add(ccmd, REPLY, &val);
+                ccmd_last(ccmd)->resp.mode = reply_mode;
+                ccmd_last(ccmd)->resp.dev_id = dev_id;
             }
             break;
         }
 
         // Discard last reserved reply and use updated resp size
         queue_dequeue_tail(arguments->reserved_fwd_replies);
-        ccmd_add_reply(ccmd, REPLY, &val, reply_mode);
-        ccmd_last(ccmd)->resp.mode = reply_mode; // added reply_mode
-        
+        ccmd_add(ccmd, REPLY, &val);
+        ccmd_last(ccmd)->resp.mode = reply_mode;
+        ccmd_last(ccmd)->resp.dev_id = dev_id;
         arguments->last_reserved_used = ccmd_last(ccmd);
         arguments->fwd_scope--;
         break; }
