@@ -85,6 +85,7 @@ const char* get_event_str(event_t event) {
 
 // used with --per-client-thread
 #define MAX_THREADS 256
+#define MAX_STORAGE_DEVICES 16
 #define MAX_STORAGE_PATH_STR 100
 
 #define MAX_LISTEN_SOCKETS 16
@@ -112,9 +113,9 @@ typedef struct {
     // 0 is used for writing (parent), 1 for reading (child)
     int dispatchfd[2];
 
-    // communication with storage
-    int storefd; // write
-    int store_replyfd; // read
+    // communication with storage workers
+    int storefd[MAX_STORAGE_DEVICES]; // write
+    int store_replyfd[MAX_STORAGE_DEVICES]; // read
 
     int storage_fd; // shared storage file descriptor for sendfile
     reply_mode_t reply_mode;
@@ -142,13 +143,16 @@ typedef struct {
 typedef struct {
     int timerfd; // special timerfd to handle periodic storage sync
     int periodic_sync_msec;
+    int use_wait_spin;
 
-    // communication with conn worker
+    // communication with conn workers
     int storefd[MAX_THREADS]; // read
     int store_replyfd[MAX_THREADS]; //write
 
     pqueue_t* sync_waiting_queue; // worker threads waiting for periodic timer to be triggered
+    int worker_id;
     int core_id; // core pinning
+    int count;
 
     storage_info_t storage_info;
     unsigned char *store_buf;
@@ -164,23 +168,21 @@ typedef struct {
     };
 } storage_req_t;
 
+// connection workers
+int conn_threads = 1;
 pthread_t workers[MAX_THREADS];
 conn_worker_info_t conn_worker_infos[MAX_THREADS];
 
-// Pipe comm
-int fds[MAX_THREADS][2];
-int fds2[MAX_THREADS][2];
-
-pthread_t storer;
-storage_worker_info_t storage_worker_info;
+// storage workers
+int storage_devices = 0;
+pthread_t storers[MAX_STORAGE_DEVICES];
+storage_worker_info_t storage_worker_infos[MAX_STORAGE_DEVICES];
 
 //pthread_mutex_t socks_mtx;
 
-int conn_threads = 1;
 int no_delay = 1;
 atomic_int next_thread_cnt = 0;
 int use_wait_spinning = 0;
-int use_wait_spinning_storage = 0;
 int enable_defrag = 1;
 
 typedef enum { AM_CHILD, AM_SHARED, AM_PARENT } accept_mode_t;
@@ -548,8 +550,8 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
     switch (opts->mode) {
 
     case REPLY_MODE_SENDFILE:
-
-        req->sendfile_fd = storage_worker_info.storage_info.storage_fd;//conn_worker_infos[conn_id].storage_fd; // note! fd must be copied here since req will be freed after this function returns,but the sendfile operation may not be completed yet
+        int dev_id = opts->dev_id; // retrieve device id from reply options
+        req->sendfile_fd = storage_worker_infos[dev_id].storage_info.storage_fd; // note! fd must be copied here since req will be freed after this function returns,but the sendfile operation may not be completed yet
         req->sendfile_offset = 0;
         req->sendfile_size = opts->resp_size;
         printf("Reply using sendfile.\n");
@@ -667,14 +669,6 @@ void store(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store
     if (wait_sync && infos->periodic_sync_msec <= 0) { 
         fsync(storage_info->storage_fd);
     }
-
-    if (storage_info->storage_offset > storage_info->storage_eof) {
-        storage_info->storage_eof = storage_info->storage_offset;
-
-        if (storage_info->storage_eof > storage_info->max_storage_size) {
-            storage_info->storage_eof = storage_info->max_storage_size;
-        }
-    }
 }
 
 void load(storage_worker_info_t *infos, unsigned char* buf, load_opts_t *load_opts) {
@@ -690,11 +684,6 @@ void load(storage_worker_info_t *infos, unsigned char* buf, load_opts_t *load_op
             return; // @todo propagate error
         }
         storage_info->storage_offset = offset;
-    } else {
-        if (storage_info->storage_offset + total_bytes > storage_info->storage_eof) {
-            lseek(storage_info->storage_fd, 0, SEEK_SET);
-            storage_info->storage_offset = 0;
-        }
     }
 
     size_t read_bytes = 0;
@@ -769,7 +758,17 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             int cmds_len = ((unsigned char*)cmd_next(cmd) - (unsigned char*)cmd);
             memcpy(&w.cmd, cmd, cmds_len);
 
-            if (safe_write(infos->storefd, (unsigned char*) &w, sizeof(w)) < 0) {
+            // determine which storage worker to use based on store/load option device id, and send the request to it
+            int storage_device_id = (cmd->cmd == STORE)
+                                    ? cmd_get_opts(store_opts_t, cmd)->dev_id
+                                    : cmd_get_opts(load_opts_t, cmd)->dev_id;
+
+            if (storage_device_id < 0 || storage_device_id >= storage_devices) {
+                fprintf(stderr, "Invalid storage device id: %d\n", storage_device_id);
+                return -1;
+            }
+
+            if (safe_write(infos->storefd[storage_device_id], (unsigned char*) &w, sizeof(w)) < 0) {
                 perror("storage worker write() failed");
                 return -1;
             }
@@ -778,7 +777,8 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
                 break;
 
             req->curr_cmd = cmd_next(cmd);
-            return 0; }
+            return 0;
+        }
         default:
             fprintf(stderr, "Error: Unknown cmd: %d\n", m->cmds[0].cmd);
             return 0;
@@ -1041,7 +1041,7 @@ void* storage_worker(void* args) {
     storage_worker_info_t *infos = (storage_worker_info_t *)args;
     infos->sync_waiting_queue = pqueue_alloc(MAX_REQS);
 
-    sprintf(thread_name, "storagew");
+    sprintf(thread_name, "storagew-%d", infos->worker_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
     if (infos->core_id >= 0) {
@@ -1051,7 +1051,7 @@ void* storage_worker(void* args) {
 
     dw_poll_t poll, *p_poll = &poll;
 
-    check(dw_poll_init(p_poll, poll_mode, use_wait_spinning_storage) == 0);
+    check(dw_poll_init(p_poll, poll_mode, infos->use_wait_spin) == 0);
 
     // Add conn_worker(s) -> storage_worker communication pipe
     for (int i = 0; i < conn_threads; i++) {
@@ -1213,8 +1213,10 @@ void* conn_worker(void* args) {
         check(dw_poll_add(&infos->dw_poll, infos->statfd, DW_POLLIN, i2l(STATS, infos->statfd)) == 0);
 
     // Add storage reply fd
-    if (infos->storefd != -1)
-        check(dw_poll_add(&infos->dw_poll, infos->store_replyfd, DW_POLLIN, i2l(STORAGE, infos->store_replyfd)) == 0);
+    for (int i = 0; i < storage_devices; i++) {
+         if (infos->storefd[i] != -1)
+            check(dw_poll_add(&infos->dw_poll, infos->store_replyfd[i], DW_POLLIN, i2l(STORAGE, infos->store_replyfd[i])) == 0);
+    }
 
     // Add parent communication fd
     if (accept_mode == AM_PARENT) {
@@ -1300,10 +1302,10 @@ void* conn_worker(void* args) {
                 }
                 dw_log("conn_id: %d assigned to connw-%d\n", conn_id, next_thread_id);
             } else if (event_type == STORAGE) {
-                check(event_data == infos->store_replyfd);
+                int store_replyfd = event_data;
 
                 int req_id_ACK;
-                if (safe_read(infos->store_replyfd, (unsigned char*) &req_id_ACK, sizeof(req_id_ACK)) < 0) {
+                if (safe_read(store_replyfd, (unsigned char*) &req_id_ACK, sizeof(req_id_ACK)) < 0) {
                     perror("storage worker read() failed");
                     continue;
                 }
@@ -1375,6 +1377,7 @@ enum argp_node_option_keys {
     BIND_ADDR = 'b',
     ACCEPT_MODE = 'a',
     POLL_MODE = 'p',
+    STORAGE_MODE = 0x103,
     STORAGE_OPT_ARG = 's',
     MAX_STORAGE_SIZE = 'm',
     THREAD_AFFINITY = 'c',
@@ -1400,6 +1403,8 @@ struct argp_node_arguments {
     int periodic_sync_msec;
     size_t max_storage_size;
     int use_odirect;
+    int use_wait_spin_storage;
+
     int use_thread_affinity;
     char* thread_affinity_list;
     int num_threads;
@@ -1419,7 +1424,7 @@ static struct argp_option argp_node_options[] = {
     {"poll-mode",         POLL_MODE,        "epoll|poll|select",              0,  "Poll mode (defaults to epoll)"},
     {"backlog-length",    BACKLOG_LENGTH,   "n",                              0,  "Maximum pending connections queue length"},
     {"bl",                BACKLOG_LENGTH,   "n", OPTION_ALIAS},
-    {"storage",           STORAGE_OPT_ARG,  "path/to/storage/file",           0,  "Path to the file used for storage"},
+    {"storage",           STORAGE_OPT_ARG,  "[file=path/to/file][,size=nbytes][,sync=msecs][,odirect][,wait-spin][,count=n]",           0,  "Path to the file used for storage"},
     {"max-storage-size",  MAX_STORAGE_SIZE, "nbytes",                         0,  "Max size for the storage size"},
     {"nt",                NUM_THREADS,      "n",                              0,  "Number of threads dedicated to communication" },
     {"num-threads",       NUM_THREADS,      "n", OPTION_ALIAS },
@@ -1503,31 +1508,65 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
     case WAIT_SPIN:
         use_wait_spinning = 1;
         break;
-    case WAIT_SPIN_STORAGE:
-        use_wait_spinning_storage = 1;
-        break;
     case LOOPS_PER_USEC:
         loops_per_usec = atof(arg);
         check(loops_per_usec == -1 || loops_per_usec >= 0);
         break;
-    case STORAGE_OPT_ARG:
-        if (strlen(arg) >= MAX_STORAGE_PATH_STR) {
-            printf("storage_path too long: %s\n", arg);
-            exit(EXIT_FAILURE);
-        }
-        strcpy(storage_worker_info.storage_info.storage_path, arg);
+    case MAX_STORAGE_SIZE:
+        arguments->max_storage_size = atol(arg);
         break;
     case SYNC:
         arguments->periodic_sync_msec = atoi(arg);
         break;
-    case MAX_STORAGE_SIZE:
-        arguments->max_storage_size = atol(arg);
-        break;
-    case NUM_THREADS:
-        arguments->num_threads = atoi(arg);
-        break;
     case ODIRECT:
         arguments->use_odirect = 1;
+        break;
+    case WAIT_SPIN_STORAGE:
+        arguments->use_wait_spin_storage = 1;
+        break;
+    case STORAGE_OPT_ARG:
+        if (storage_devices >= MAX_STORAGE_DEVICES) {
+            printf("Too many --storage options\n");
+            exit(EXIT_FAILURE);
+        }
+
+        storage_worker_info_t *sw_info = &storage_worker_infos[storage_devices];
+
+        do { // iterate through comma-separated fields of --storage argument
+            char *tok = strsep(&arg, ",");
+
+            if (strncmp(tok, "file=", 5) == 0) {
+                strncpy(sw_info->storage_info.storage_path, tok + 5, MAX_STORAGE_PATH_STR);
+            }
+            else if (strncmp(tok, "size=", 5) == 0) {
+                sw_info->storage_info.max_storage_size = atol(tok + 5);
+            }
+            else if (strncmp(tok, "count=", 6) == 0) {
+                sw_info->count = atoi(tok + 6);
+                if (storage_devices + sw_info->count > MAX_STORAGE_DEVICES) {
+                    printf("Total count across --storage options exceeds maximum number of storage devices (%d)\n", MAX_STORAGE_DEVICES);
+                    exit(EXIT_FAILURE);
+                }
+            }
+            else if (strncmp(tok, "sync=", 5) == 0) {
+                sw_info->periodic_sync_msec = atoi(tok + 5);
+            }
+            else if (strncmp(tok, "odirect", 7) == 0) {
+                sw_info->storage_info.use_odirect = 1;
+            }
+            else if (strncmp(tok, "wait-spin", 9) == 0) {
+                sw_info->use_wait_spin = 1;
+            }
+            else {
+                strncpy(sw_info->storage_info.storage_path, tok, MAX_STORAGE_PATH_STR);
+            }
+        } while (arg != NULL && *arg != '\0');
+
+        storage_devices += sw_info->count;
+        break;
+
+    case NUM_THREADS:
+        arguments->num_threads = atoi(arg);
         break;
     case THREAD_AFFINITY:
         arguments->use_thread_affinity = 1;
@@ -1639,6 +1678,7 @@ int main(int argc, char *argv[]) {
     
     // Default argp values
     input_args.periodic_sync_msec = -1;
+    input_args.use_wait_spin_storage = 0;
     input_args.max_storage_size = 1024 * 1024 * 1024;
     input_args.use_odirect = 0;
     input_args.use_thread_affinity = 0;
@@ -1652,14 +1692,74 @@ int main(int argc, char *argv[]) {
     input_args.ssl_ca_path = NULL;
     input_args.ssl_verify = 0;
 
-    char *home_path = getenv("HOME");
-    check(home_path != NULL && strlen(home_path) + 10 < sizeof(storage_worker_info.storage_info));
-    strcpy(storage_worker_info.storage_info.storage_path, home_path);
-    strcat(storage_worker_info.storage_info.storage_path, "/.dw_store");
-    storage_worker_info.storage_info.storage_fd = -1;
+    for (int i = 0; i < MAX_STORAGE_DEVICES; i++) {
+        storage_worker_infos[i].timerfd = -1;
+        storage_worker_infos[i].periodic_sync_msec = -1;
+        storage_worker_infos[i].use_wait_spin = -1;
+        storage_worker_infos[i].core_id = -1;
+        storage_worker_infos[i].count = 1;
+        storage_worker_infos[i].storage_info.storage_fd = -1;
+        storage_worker_infos[i].storage_info.storage_path[0] = '\0';
+        storage_worker_infos[i].storage_info.use_odirect = -1;
+        storage_worker_infos[i].storage_info.max_storage_size = -1;
+    }
 
     argp_parse(&argp, argc, argv, ARGP_NO_HELP, 0, &input_args);
-    
+
+    if (storage_devices == 0) { storage_devices = 1; } // default to 1 storage device if no --storage option is provided
+
+    // Set defaults for storage
+    // storage_devices has already been set while parsing --storage options, no need to update it
+    for (int i = 0; i < storage_devices; i++) {
+
+        storage_worker_info_t *sw_info = &storage_worker_infos[i];
+        if (sw_info->periodic_sync_msec == -1) {sw_info->periodic_sync_msec = input_args.periodic_sync_msec;}
+        if (sw_info->use_wait_spin == -1) {sw_info->use_wait_spin = input_args.use_wait_spin_storage;}
+
+        storage_info_t *s_info = &sw_info->storage_info;
+        if (s_info->use_odirect == -1) {s_info->use_odirect = input_args.use_odirect;}
+        if (s_info->max_storage_size == -1) {s_info->max_storage_size = input_args.max_storage_size;}
+        s_info->storage_offset = 0;
+        s_info->storage_eof = 0;
+
+        char path_template[1024];
+
+        if (s_info->storage_path[0] == '\0') {
+            char *home_path = getenv("HOME");
+            snprintf(path_template, sizeof(path_template), "%s/.dw_store_%%d", home_path);
+            snprintf(s_info->storage_path, sizeof(s_info->storage_path), path_template, i);
+        } else {
+            if (sw_info->count > 1) {
+                // look for %d in the path to replace with storage index, otherwise append it
+                if (strstr(s_info->storage_path, "%d") == NULL) {
+                    snprintf(path_template, sizeof(path_template), "%s_%%d", s_info->storage_path);
+                } else {
+                    strncpy(path_template, s_info->storage_path, sizeof(path_template)-1);
+                }
+                snprintf(s_info->storage_path, sizeof(s_info->storage_path), path_template, i);
+            }
+        }
+
+        // Replicate the same storage info to the next [count-1] storage_worker_info entries
+        for (int j = 1; j < sw_info->count; j++) {
+
+            storage_worker_info_t *sw_info2 = &storage_worker_infos[i+j];
+            sw_info2->periodic_sync_msec = sw_info->periodic_sync_msec;
+            sw_info2->use_wait_spin = sw_info->use_wait_spin;
+
+            storage_info_t *s_info2 = &sw_info2->storage_info;
+            s_info2->use_odirect = s_info->use_odirect;
+            s_info2->max_storage_size = s_info->max_storage_size;
+            s_info2->storage_offset = 0;
+            s_info2->storage_eof = 0;
+
+            snprintf(s_info2->storage_path, sizeof(s_info2->storage_path), path_template, i+j);
+        }
+
+        // Populate path of first thread in group
+        i = i + sw_info->count - 1; // skip to the next storage device (if count > 1)
+    }
+
     // Handle SIGINT and SIGTERM via epoll
     sigset_t term_sigmask;
     sigemptyset(&term_sigmask);
@@ -1676,18 +1776,9 @@ int main(int argc, char *argv[]) {
 
     // Setup thread name
     sys_check(prctl(PR_GET_NAME, thread_name, NULL, NULL, NULL));
-    
+
     cpu_set_t mask;
     struct sockaddr_in serverAddr;
-
-    // Storage worker info defaults
-    storage_worker_info.timerfd = -1;
-    storage_worker_info.periodic_sync_msec = input_args.periodic_sync_msec;
-
-    storage_worker_info.storage_info.max_storage_size = input_args.max_storage_size;
-    storage_worker_info.storage_info.use_odirect = input_args.use_odirect;
-    storage_worker_info.storage_info.storage_offset = 0; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
-    storage_worker_info.storage_info.storage_eof = 0; //TODO: same here
 
     // Configure global variables
     conn_threads = input_args.num_threads;
@@ -1770,48 +1861,58 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Open storage file, if any
-    if (storage_worker_info.storage_info.storage_path[0] != '\0') {
-        int flags = O_RDWR | O_CREAT | O_TRUNC;
-        if (storage_worker_info.storage_info.use_odirect)
-            flags |= O_DIRECT;
-        sys_check(storage_worker_info.storage_info.storage_fd = open(storage_worker_info.storage_info.storage_path, flags, S_IRUSR | S_IWUSR));
-        sys_check(fallocate(storage_worker_info.storage_info.storage_fd, 0, 0, BUF_SIZE));
+    // Initialize storage_worker_infos and pipes between connection and storage workers
+    for (int i = 0; i < storage_devices; i++) {
 
-        struct stat s;
-        sys_check(fstat(storage_worker_info.storage_info.storage_fd, &s));
-        blk_size = s.st_blksize;
-        dw_log("blk_size = %lu\n", blk_size);
+        storage_worker_info_t *sw_info = &storage_worker_infos[i];
+        sw_info->worker_id = i;
 
-        if (storage_worker_info.storage_info.use_odirect) { // block-aligned buffer
-            sys_check(posix_memalign((void**) &storage_worker_info.store_buf, blk_size, BUF_SIZE));
+        if (sw_info->storage_info.storage_path[0] != '\0') {
+            int flags = O_RDWR | O_CREAT | O_TRUNC;
+            if (sw_info->storage_info.use_odirect)
+                flags |= O_DIRECT;
+            sys_check(sw_info->storage_info.storage_fd = open(sw_info->storage_info.storage_path, flags, S_IRUSR | S_IWUSR));
+            sys_check(fallocate(sw_info->storage_info.storage_fd, 0, 0, BUF_SIZE));
+
+            struct stat s;
+            sys_check(fstat(sw_info->storage_info.storage_fd, &s));
+            blk_size = s.st_blksize;
+            dw_log("blk_size = %lu\n", blk_size);
+
+            if (sw_info->storage_info.use_odirect) { // block-aligned buffer
+                sys_check(posix_memalign((void**) &sw_info->store_buf, blk_size, BUF_SIZE));
+            } else {
+                sw_info->store_buf = calloc(1, BUF_SIZE);
+            }
+
+            for (int j = 0; j < conn_threads; j++) {
+
+                conn_worker_info_t *cw_info = &conn_worker_infos[j];
+                int temp_pipe_fds[2];
+
+                // conn_worker -> storage_worker
+                if (pipe(temp_pipe_fds) == -1) {
+                    perror("pipe");
+                    exit(EXIT_FAILURE);
+                }
+                sw_info->storefd[j] = temp_pipe_fds[0]; // read
+                cw_info->storefd[i] = temp_pipe_fds[1]; // write
+
+                // storage_worker -> conn_worker
+                if (pipe(temp_pipe_fds) == -1) {
+                    perror("pipe");
+                    exit(EXIT_FAILURE);
+                }
+                sw_info->store_replyfd[j] = temp_pipe_fds[1]; // write
+                cw_info->store_replyfd[i] = temp_pipe_fds[0]; // read
+            }
+
         } else {
-            storage_worker_info.store_buf = calloc(1, BUF_SIZE);
-        }
-        for (int i = 0; i < input_args.num_threads; i++) {
-            // conn_worker -> storage_worker
-            if (pipe(fds[i]) == -1) {
-               perror("pipe");
-               exit(EXIT_FAILURE);
+            for (int j = 0; j < conn_threads; j++) {
+                conn_worker_info_t *cw_info = &conn_worker_infos[j];
+                cw_info->storefd[i] = -1;
+                cw_info->store_replyfd[i] = -1;
             }
-
-            storage_worker_info.storefd[i] = fds[i][0]; // read
-            conn_worker_infos[i].storefd = fds[i][1]; // write
-
-            // storage_worker -> conn_worker
-            if (pipe(fds2[i]) == -1) {
-               perror("pipe");
-               exit(EXIT_FAILURE);
-            }
-
-            storage_worker_info.store_replyfd[i] = fds2[i][1]; // write 
-            conn_worker_infos[i].store_replyfd = fds2[i][0]; // read
-            conn_worker_infos[i].storage_fd = storage_worker_info.storage_info.storage_fd;
-        }
-    } else {
-        for (int i = 0; i < input_args.num_threads; i++) {
-            conn_worker_infos[i].storefd = -1;
-            conn_worker_infos[i].store_replyfd = -1;
         }
     }
 
@@ -1910,15 +2011,19 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Init storage thread
-    if (storage_worker_info.storage_info.storage_path[0] != '\0') {
-        if (input_args.use_thread_affinity) {
-            storage_worker_info.core_id = core_it;
-            aff_it_next(&core_it, &mask, nproc);
-        } else {
-            storage_worker_info.core_id = -1;
+    // Run storage threads
+    for (int i = 0; i < storage_devices; i++) {
+        storage_worker_info_t *sw_info = &storage_worker_infos[i];
+
+        if (sw_info->storage_info.storage_path[0] != '\0') {
+            if (input_args.use_thread_affinity) {
+                sw_info->core_id = core_it;
+                aff_it_next(&core_it, &mask, nproc);
+            } else {
+                sw_info->core_id = -1;
+            }
+            sys_check(pthread_create(&storers[i], NULL, storage_worker, (void *)sw_info));
         }
-        sys_check(pthread_create(&storer, NULL, storage_worker, (void *)&storage_worker_info));
     }
 
     // Run
@@ -1930,7 +2035,7 @@ int main(int argc, char *argv[]) {
             sys_check(pthread_create(&workers[i], NULL, conn_worker, (void *)&conn_worker_infos[i]));
         }
     }
-    
+
     // Clean-ups
     if (input_args.num_threads > 1) {
         // Join worker threads
@@ -1944,28 +2049,36 @@ int main(int argc, char *argv[]) {
         pqueue_free(conn_worker_infos[0].timeout_queue);
     }
 
-    if (storage_worker_info.storage_info.storage_path[0] != '\0') {
-        sys_check(pthread_join(storer, NULL));
-        pqueue_free(storage_worker_info.sync_waiting_queue);
-        free(storage_worker_info.store_buf);
+    for (int i = 0; i < storage_devices; i++) {
+        storage_worker_info_t *sw_info = &storage_worker_infos[i];
+
+        if (sw_info->storage_info.storage_path[0] != '\0') {
+            sys_check(pthread_join(storers[i], NULL));
+            pqueue_free(sw_info->sync_waiting_queue);
+            free(sw_info->store_buf);
+        }
     }
 
     // close terminationfd
     close(terminationfd);
 
     // termination clean-ups
-    if (storage_worker_info.storage_info.storage_fd >= 0) {
-        close(storage_worker_info.storage_info.storage_fd);
+    for (int i = 0; i < storage_devices; i++) {
+        storage_worker_info_t *sw_info = &storage_worker_infos[i];
 
-        for (int i = 0; i < input_args.num_threads; i++) {
-            close(conn_worker_infos[i].storefd);
-            close(storage_worker_info.storefd[i]);
+        if (sw_info->storage_info.storage_fd >= 0) {
+            close(sw_info->storage_info.storage_fd);
 
-            close(conn_worker_infos[i].store_replyfd);
-            close(storage_worker_info.store_replyfd[i]);
+            for (int j = 0; j < input_args.num_threads; j++) {
+                close(conn_worker_infos[j].storefd[i]);
+                close(sw_info->storefd[j]);
 
-            close(conn_worker_infos[i].dispatchfd[0]);
-            close(conn_worker_infos[i].dispatchfd[1]);
+                close(conn_worker_infos[j].store_replyfd[i]);
+                close(sw_info->store_replyfd[j]);
+
+                close(conn_worker_infos[j].dispatchfd[0]);
+                close(conn_worker_infos[j].dispatchfd[1]);
+            }
         }
     }
 

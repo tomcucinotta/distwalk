@@ -31,12 +31,14 @@ typedef struct {
 typedef struct {
     uint64_t offset;
     uint64_t load_nbytes;
+    uint8_t dev_id; // device id, 0 by default
 } load_opts_t;
 
 typedef struct {
     uint64_t offset;
     uint64_t store_nbytes;
     uint8_t wait_sync;
+    uint8_t dev_id; // device id, 0 by default
 } store_opts_t;
 
 typedef struct {
@@ -52,6 +54,7 @@ typedef enum {
 typedef struct {
     uint32_t resp_size;   // REPLY pkt size
     reply_mode_t mode;   // NORMAL | SENDFILE
+    uint8_t dev_id; // device id, 0 by default
 } reply_opts_t;
 
 // TODO: Here we need all quantities to be network-ordered
