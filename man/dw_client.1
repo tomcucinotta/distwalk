@@ -16,19 +16,39 @@ server. It supports multiple connection modes, protocol types, request compositi
 .SH OPTIONS
 
 .TP
-.BR --to "=[" \fIproto\fR: "[" // "]][" \fIhost\fR "][" :\fIport\fR "]"
-Set the target node host (hostname or IP), port and protocol (one of \fBtcp\fR, \fBudp\fR or \fBssl\fR). All elements can be specified or not: \fIproto\fR defaults to \fBtcp\fR, \fIhost\fR defaults to \fBlocalhost\fR, and \fIport\fR defaults to \fB7891\fR.
+.BR --to "=[" \fIproto\fR: "[" // "]][" \fIhost\fR "][" :\fIport\fR "]  |  dpdk://" \fIMAC\fR
+Set the target node host (hostname or IP), port and protocol (one of \fBtcp\fR, \fBudp\fR, \fBssl\fR or \fBdpdk\fR). All elements can be specified or not: \fIproto\fR defaults to \fBtcp\fR, \fIhost\fR defaults to \fBlocalhost\fR, and \fIport\fR defaults to \fB7891\fR.
 Note: if the specified protocol is
 .B ssl,
 then the
 .B --non-block
 option is forced.
 
+When the protocol is
+.B dpdk
+(requires a binary built with
+.B USE_DPDK=1\fR),
+the argument must be the 6-byte MAC address of the target node, written in the canonical colon-separated form (e.g., \fBdpdk://aa:bb:cc:dd:ee:ff\fR). In this mode the client exchanges raw Ethernet frames (EtherType
+.B 0x88B5\fR)
+with the target, bypassing the kernel network stack; the DPDK port used for TX/RX is the one selected by
+.B --bind-addr\fR.
+
 .TP
 .BR -b,\ --bind-addr "=" \fIhost\fR "[" :\fIport\fR "]"
 .TQ
 .BR -b,\ --bind-addr "=" :\fIport\fR
+.TQ
+.BR -b,\ --bind-addr "=dpdk://[" \fIiface\fR | \fIpci\fR "]"
 Set explicitly the bind address or name, and the bind port, for the client.
+
+When the
+.B dpdk://
+prefix is used (requires a binary built with
+.B USE_DPDK=1\fR),
+the client attaches to a NIC via DPDK instead of opening a socket. The argument is either a kernel interface name (used with the
+.B af_packet
+PMD, no hugepages needed) or a PCI address (e.g., \fB0000:04:00.0\fR) to be bound to a DPDK-compatible user-space driver (\fBvfio-pci\fR or \fBigb_uio\fR). The target node must be reached with
+.B --to=dpdk://\fIMAC\fR\fR.
 
 .TP
 .BR -n,\ \--num-pkts = \fIn\fR|\fIauto\fR
@@ -39,6 +59,12 @@ Set the number of requests sent by each thread (across all sessions). The specia
 Set the number of sessions each client thread establishes with the (initial) distwalk node. The overall number of requests to be submitted, specified with
 .B -n,
 is evenly split across the various sessions. If this option is not used, each thread submits its overall number of requests within a single session.
+
+This option is implicitly forced to 1 when the client is bound to a
+.B dpdk://
+address: DPDK does not open a socket per session — it attaches once to the NIC and exchanges raw Ethernet frames identified by MAC, so the notion of multiple sequential sessions against the same peer does not apply. All
+.B -n
+requests are submitted within the single DPDK attachment.
 
 .TP
 .BR --pso,\ \--per-session-output
@@ -97,6 +123,12 @@ mode.
 .BR --ws,\ \--wait-spin
 Tell each client thread to perform a busy-wait loop instead of blocking, while waiting till the point in time in which the next request is to be sent.
 
+This option is implicitly forced on when the client is bound to a
+.B dpdk://
+address: DPDK Poll Mode Drivers expose the NIC as a user-space ring that must be drained by repeatedly calling
+.B rte_eth_rx_burst()\fR,
+with no interrupt or file-descriptor the thread could block on. 
+
 .TP
 .BR --nano
 Output response times in nanoseconds instead of the default microseconds.
@@ -144,14 +176,25 @@ Set the offset value, or its distribution, for the subsequent
 operations.
 
 .TP
-.BR -F,\ \--forward "=\fIip\fR:\fIport\fR[,\fIip2\fR:\fIport2\fR,...][,timeout=\fIusec\fR][,retry=\fIn\fR][,branch][,nack=\fIn\fR]"
+.BR -F,\ \--forward "=[" \fIproto\fR ://"]" \fIdest\fR "[," \fIdest2\fR ",...][,timeout=\fIusec\fR][,retry=\fIn\fR][,branch][,nack=\fIn\fR]"
 Add a
 .B FORWARD
-operation to the submitted per-request operations list, specifying the ip:port to forward to, the timeout to wait for, and the number of retries in case of failure to receive the
+operation to the submitted per-request operations list, specifying the destination(s) to forward to, the timeout to wait for, and the number of retries in case of failure to receive the
 .B REPLY
 to the
 .B FORWARD.
+Each destination is an
+.I ip:port
+pair for TCP/UDP forwards, or a
+.I MAC
+address (colon-separated, 6 bytes) when
+.I proto
+is
+.B dpdk.
 The host and port specification have defaults similarly to the \fB--to\fR option.
+Note: DPDK forwards are only supported when the forwarding
+.B dw_node
+is launched with a single worker thread (\fB--nt 1\fR), because RSS on the source MAC can route the reply to a worker that does not own the originating request's context.
 This option allows also to specify multiple ip:port receivers. In this case, the
 .B FORWARD
 is performed in parallel to all the specified receivers, and by default all of their
@@ -176,7 +219,30 @@ option is used, then different messages can be forwarded to the different peers,
 .BR -R,\ \--rs [ = \fI[sendfile,]nbytes_spec]\fR
 Add to the list of per-request operations to be submitted a
 .B REPLY
-command, optionally specifying the payload size, in bytes (see below for details on how to specify distributions), or enabling the use of sendfile to perform a joined LOAD+REPLY operation.
+command, optionally specifying the payload size, in bytes (see below for details on how to specify distributions), or enabling the use of sendfile to perform a joined LOAD+REPLY operation. The
+.B sendfile
+sub-option is not compatible with the
+.B dpdk
+protocol.
+
+.TP
+.BR --dpdk-rx-cpu = \fIN\fR
+Pin the client's DPDK receiver loop to CPU core
+.I N
+(used as an EAL lcore). Only meaningful with
+.B --bind-addr=dpdk://\fR.
+Requires a binary built with
+.B USE_DPDK=1\fR.
+If unset, the receiver runs on core 0.
+
+.TP
+.BR --dpdk-tx-cpu = \fIN\fR
+Pin the client's DPDK sender loop to a dedicated CPU core
+.I N
+(used as an EAL lcore). If unset, the sender shares the receiver's core. Requires
+.B --bind-addr=dpdk://
+and a binary built with
+.B USE_DPDK=1\fR.
 
 .TP
 .BR --retry-num = \fIn\fR
@@ -355,6 +421,24 @@ Example:
 .fi
 .RE
 
+
+.SH DPDK MODE
+When
+.B dw_client
+is built with
+.B USE_DPDK=1
+and launched with
+.B --bind-addr=dpdk://\fR,
+the client exchanges raw Ethernet frames (EtherType
+.B 0x88B5\fR)
+directly with the target node, bypassing the kernel network stack. In this mode the target and any FORWARD destinations are identified by their 6-byte MAC addresses. The sender and receiver run as DPDK lcores (see
+.B --dpdk-tx-cpu
+and
+.B --dpdk-rx-cpu\fR);
+the receiver busy-polls the RX queue, so
+.B --ws / --wait-spin
+has no additional effect under DPDK. A single RX/TX queue pair is configured on the port regardless of
+.B --nt\fR.
 
 .SH SEE ALSO
 .BR dw_node (1)
