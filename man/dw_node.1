@@ -14,7 +14,7 @@ and optimized disk/storage access for latency-sensitive workloads.
 .SH OPTIONS
 
 .TP
-.BR -b,\ -\-bind-addr "=[ tcp | udp | ssl:[//] ] [ host ] [ :port ]"
+.BR -b,\ -\-bind-addr "=[ tcp | udp | ssl:[//] ] [ host ] [ :port ]  |  dpdk://[\fIiface\fR|\fIpci\fR]"
 Set the bind name or IP address, port, and communication protocol. All three parts of the argument are optional:
 .nf
   - if the protocol is not specified, then TCP is assumed by default
@@ -26,6 +26,19 @@ This option can be used multiple times, to let the same `dw_node` instance bind 
 
 Not using this option, is equivalent to calling dw_node with `-b tcp://localhost:7891`.
 
+When the
+.B dpdk://
+prefix is used (requires a binary built with
+.B USE_DPDK=1\fR),
+the node exchanges raw Ethernet frames (EtherType 0x88B5) via DPDK rather than using the kernel network stack. The argument is either a kernel interface name (used with the
+.B af_packet
+PMD, no hugepages needed) or a PCI address (e.g., \fB0000:04:00.0\fR) to be bound to a DPDK-compatible user-space driver (\fBvfio-pci\fR or \fBigb_uio\fR). In this mode:
+.nf
+  - each worker thread (see --nt) owns one RX/TX queue pair; the NIC distributes traffic across queues using RSS hashing on the source MAC (requires an i40e PF)
+  - the DPDK lcore list used by EAL is built from the CPU set specified with -c/--thread-affinity (one lcore per worker)
+  - at most one dpdk:// bind can be specified per instance (a single DPDK port is attached); it can, however, coexist with additional tcp://, udp:// or ssl:// binds on the same dw_node, which worker threads poll alongside the DPDK RX queue
+.ni
+
 .TP
 .BR --backlog-length = \fIn\fR ", " --bl = \fIn\fR
 Set the maximum number of pending incoming connections, for each bound socket, i.e., the argument used when calling listen(). See also the accept mode option described above.
@@ -36,11 +49,17 @@ Enable or disable the TCP_NODELAY socket option (enabled by default).
 
 .TP
 .BR --nt = \fIn\fR ", " --num-threads = \fIn\fR
-Set the number of worker threads (defaults to one worker thread).
+Set the number of worker threads (defaults to one worker thread). When the node is bound to a
+.B dpdk://
+address, this value also determines the number of RX/TX queue pairs configured on the port and the number of DPDK lcores launched (one worker per queue, pinned via the affinity list).
 
 .TP
 .BR -c,\ \--thread-affinity "=auto|cX,cZ[,cA-cD[:step]]"
 Enable thread-to-core pinning through affinity masks. The mask is specified with the usual core-list syntax, as a comma-separated list of core ranges, with the optional use of a colon followed by a core step in a specified range, if desired. If the number of worker threads (see --nt) is higher than the cores in the affinity list, then the list is reused circularly from the beginning (this allows for pinning 2, 3 or as many threads as desired to a single physical core). The special value "auto" sets and affinity of 0-n, where n is equal to the number of specified threads minus one. By default, no affinity is set for worker threads.
+
+When the node is bound to a
+.B dpdk://
+address, the cores listed here are also passed to DPDK as the EAL lcore list (\fB-l\fR), and each worker thread is launched as a dedicated lcore pinned to its assigned core.
 
 .TP
 .BR --sched-policy "=other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us"
@@ -60,6 +79,12 @@ Run the node in privileged mode if you wish to use `rr`, `fifo`, `dl` or `other`
 .TP
 .BR --wait-spin,\ \--ws
 Tell each worker thread to perform a busy-wait loop, till the next incoming request on any of the monitored sockets, instead of sleeping. This allows the worker threads to be always ready, so to save wake-up from idle, and context switch overheads, thus it is useful in scenarios seeking extremely low latency. However, it causes each worker thread to take 100% of a CPU, regardless on the amount of traffic hitting it.
+
+This option is implicitly forced on when the node is bound to a
+.B dpdk://
+address: DPDK Poll Mode Drivers expose the NIC as a user-space ring that must be drained by repeatedly calling
+.B rte_eth_rx_burst()\fR,
+with no interrupt or file-descriptor to block on. Letting a worker sleep would therefore stall packet reception on its RX queue, so each conn_worker lcore busy-polls the DPDK queue (and, if present, any coexisting socket fd) on every iteration.
 
 .TP
 .BR --wait-spin-storage,\ \--wss
@@ -104,6 +129,24 @@ Enable direct disk access for LOAD and STORE operations (bypass read/write OS ca
 .BR --sync = \fImsec\fR
 Periodically sync the written data on disk, issueing a fsync() system call on the
 storage file.
+
+.SH DPDK MODE
+When
+.B dw_node
+is built with
+.B USE_DPDK=1
+and launched with a
+.B dpdk://
+bind address, the server uses raw Ethernet frames (EtherType
+.B 0x88B5\fR)
+instead of UDP/TCP/SSL. Clients and peer nodes are identified by their 6-byte MAC address rather than by an IP and port. Under this mode:
+.nf
+  - peers are addressed by MAC, so FORWARD operations issued toward this node must also use the dpdk:// protocol with a MAC destination (see dw_client(1))
+  - in PCI mode, the device must be first bound to vfio-pci (or igb_uio) via dpdk-devbind.py; sufficient hugepages must be available
+  - in af_packet mode, the NIC stays attached to its kernel driver and no hugepages are required
+  - multi-queue RSS on the source MAC is only enabled when --nt > 1 and is currently only supported on Intel i40e Physical Functions (via the rte_pmd_i40e input-set API); on any other PMD/NIC all traffic falls back to queue 0
+  - FORWARD chains between DPDK nodes are not supported when the forwarding node runs with --nt > 1: the reply arrives with the peer's source MAC, which RSS may hash to a different queue than the one that issued the FORWARD, and that worker has no access to the originating request context. Use --nt 1 on any DPDK node that issues DPDK forwards
+.ni
 
 .SH FILES
 .TP
