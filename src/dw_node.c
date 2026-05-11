@@ -1069,8 +1069,6 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
             // finished
             dw_log("conn_id=%d, flush finished, adding EPOLLIN\n", conn_id);
             sys_check(dw_poll_mod(p_poll, conn->sock, DW_POLLIN | DW_POLLONESHOT, i2l(SOCKET, conn_id)));
-            conn_set_status(conn, READY);
-            infos->active_conns++;
         }
     }
 
