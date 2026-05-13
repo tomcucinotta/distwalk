@@ -993,7 +993,7 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
 
             } while (arg != NULL && *arg != '\0');
         } else {
-            val = pd_build_none(default_resp_size);
+            val = pd_build_none();
         }
 
         if (pd_is_none(&val)) {
