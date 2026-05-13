@@ -43,7 +43,7 @@ cat $TMP_CLIENT
 grep -q "success: 100" $TMP_CLIENT
 
 echo "--- random distributions ---"
-run dw_client_debug $CLIENT_OPT -n 50 -C unif:min=50,max=200 -p 1000 > $TMP_CLIENT
+run dw_client_debug $CLIENT_OPT -n 50 -C unif:min=50:max=200 -p 1000 > $TMP_CLIENT
 cat $TMP_CLIENT
 grep -q "success: 50" $TMP_CLIENT
 
@@ -51,16 +51,16 @@ run dw_client_debug $CLIENT_OPT -n 50 -C exp:100 -p 1000 > $TMP_CLIENT
 cat $TMP_CLIENT
 grep -q "success: 50" $TMP_CLIENT
 
-run dw_client_debug $CLIENT_OPT -n 50 -C norm:100,std=20 -p 1000 > $TMP_CLIENT
+run dw_client_debug $CLIENT_OPT -n 50 -C norm:100:std=20 -p 1000 > $TMP_CLIENT
 cat $TMP_CLIENT
 grep -q "success: 50" $TMP_CLIENT
 
 echo "--- mixed distributions ---"
-run dw_client_debug $CLIENT_OPT -n 50 -C unif:min=15,max=20 -p 18 > $TMP_CLIENT
+run dw_client_debug $CLIENT_OPT -n 50 -C unif:min=15:max=20 -p 18 > $TMP_CLIENT
 cat $TMP_CLIENT
 grep -q "success: 50" $TMP_CLIENT
 
-run dw_client_debug $CLIENT_OPT -n 50 -C exp:100 -p unif:min=10,max=15 > $TMP_CLIENT
+run dw_client_debug $CLIENT_OPT -n 50 -C exp:100 -p unif:min=10:max=15 > $TMP_CLIENT
 cat $TMP_CLIENT
 grep -q "success: 50" $TMP_CLIENT
 
