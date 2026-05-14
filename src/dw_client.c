@@ -17,6 +17,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/crypto.h>
+#include <stdbool.h>
 
 #include "dw_debug.h"
 #include "distrib.h"
@@ -26,6 +27,7 @@
 #include "ccmd.h"
 #include "address_utils.h"
 #include "queue.h"
+
 
 #ifdef DPDK_ENABLED
 #include "dw_dpdk.h"
@@ -44,6 +46,15 @@ int use_nano = 0;
 queue_t* ccmd = NULL; // chain of commands
 
 SSL_CTX *client_ssl_ctx = NULL;
+
+FILE *output_fp = NULL; // output file 
+// TODO : adding a header option for the output file (in case of csv ?)
+
+// enumerate the types of file output, other formats can be added later
+typedef enum {
+    OUTPUT_FORMAT_TXT,
+    OUTPUT_FORMAT_CSV
+} output_format_t;
 
 unsigned int default_compute_us = 1000;
 
@@ -93,6 +104,13 @@ struct argp_client_arguments {
     int ssl_verify;    // --ssl-verify
     int dpdk_tx_cpu;   // CPU for sender thread
     int dpdk_rx_cpu;   // CPU for receiver thread
+
+    // output options
+    char* output_file; // --output / --output-file / -o
+    char output_sep; // separator for CSV output, default to comma
+    bool output_header; // whether to print header in the output file
+    output_format_t output_format; // file output format, deduced from file extension
+
 } input_args;
 
 #define MAX_THREADS 256
@@ -182,6 +200,10 @@ int process_reply(message_t *m, int thread_id) {
 }
 
 void *thread_sender(void *data);
+void output_result(long send_time, long elapsed_time, int pkt_id, int thread_id, int sess_id);
+void cli_output(FILE *out_f, long send_time, long elapsed_time, int req_id, int thread_id, int session_id);
+void txt_output(FILE *out_f, long send_time, long elapsed_time, int req_id, int thread_id, int session_id);
+void csv_output(FILE *out_f, long send_time, long elapsed_time, int req_id, int thread_id, int session_id);
 
 #ifdef DPDK_ENABLED
 static int thread_sender_lcore(void *arg) {
@@ -525,13 +547,7 @@ void *thread_receiver(void *data) {
                     // if we abruptly terminated the session, the send timestamp
                     // of packets never sent will stay at 0
                     if (usecs_send[thread_id][idx(pkt_id)] != 0) {
-                        printf(
-                            use_nano
-                            ? "t: %ld ns, elapsed: %ld ns, req_id: %d, thr_id: %d, sess_id: %d\n"
-                            : "t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n",
-                            usecs_send[thread_id][idx(pkt_id)],
-                            usecs_elapsed[thread_id][idx(pkt_id)], pkt_id,
-                            thread_id, sess_id);
+                        output_result(usecs_send[thread_id][idx(pkt_id)], usecs_elapsed[thread_id][idx(pkt_id)], pkt_id, thread_id, sess_id); // calls the output function 
                         if (use_interactive_pso) fflush(stdout);
                     }
                 }
@@ -564,12 +580,7 @@ void *thread_receiver(void *data) {
     if (!use_per_session_output) {
         for (int i = 0; i < num_pkts; i++) {
             int sess_id = i / pkts_per_session;
-            printf(
-                use_nano
-                ? "t: %ld ns, elapsed: %ld ns, req_id: %d, thr_id: %d, sess_id: %d\n"
-                : "t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n",
-                usecs_send[thread_id][i], usecs_elapsed[thread_id][idx(i)], i,
-                thread_id, sess_id);
+            output_result(usecs_send[thread_id][idx(i)], usecs_elapsed[thread_id][idx(i)], i, thread_id, sess_id); // calls the output function
         }
     }
 
@@ -597,6 +608,7 @@ enum argp_client_option_keys {
     SCRIPT_FILENAME = 'f',
     BIND_ADDR ='b',
     INTERACTIVE_PSO = 'i',
+    OUTPUT_FILE = 'o',
 
     WAIT_SPIN = 0x200,
     RATE_STEP_SECS,
@@ -672,6 +684,8 @@ static struct argp_option argp_client_options[] = {
     { "nano",               NANO_OUTPUT,             0,                                           0, "Output response times in nanoseconds (default: microseconds)" },
     { "dpdk-tx-cpu",        DPDK_TX_CPU,             "N",                                         0, "CPU core for DPDK sender thread" },
     { "dpdk-rx-cpu",        DPDK_RX_CPU,             "N",                                         0, "CPU core for DPDK receiver thread" },
+    { "output",             OUTPUT_FILE,             "[file,][sep=char,][header=bool,]",             0, "Output results to file; supported extensions are .csv and .txt" },
+    { "output-file",        OUTPUT_FILE,             "[file,][sep=char,][header=bool,]",             OPTION_ALIAS },
     { 0 }
 };
 
@@ -709,6 +723,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
         arguments->ssl_ca_path = NULL;
         arguments->ssl_verify = 0;
 
+        arguments->output_file = NULL;
+        arguments->output_sep = ',';
+        arguments->output_header = 0;
         break;
     case HELP:
         argp_state_help(state, state->out_stream, ARGP_HELP_STD_HELP);
@@ -1064,6 +1081,56 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     case INTERACTIVE_PSO:
         use_interactive_pso = 1;
         break;
+    case OUTPUT_FILE: {
+        char *token;
+        char *output_arg = arg;
+        char *ext; // extension of the file => to get the format
+        char *sep = ",";
+        bool header_set = false;
+
+        while ((token = strsep(&output_arg, ",")) != NULL) {
+            if (strncmp(token, "sep=", 4) == 0) {
+                sep = token + 4;
+                if (*sep == '\'' || *sep == '"')
+                    sep++;
+
+                check(*sep != '\0', "Missing separator char in sep= option of --output argument; verify that the separator is inside '' or \" \". ");
+                arguments->output_sep = *sep;
+            } 
+            else if (strncmp(token, "header=", 7) == 0) {
+                header_set = true;
+                char *header_val = token + 7;
+                if (strcmp(header_val, "true") == 0 || strcmp(header_val, "1") == 0)
+                    arguments->output_header = 1;
+                else if (strcmp(header_val, "false") == 0 || strcmp(header_val, "0") == 0)
+                    arguments->output_header = 0;
+                else
+                    check(0, "Wrong value for header= option in --output argument: %s. Use true/false or 1/0.", header_val);
+            }
+            else {
+                arguments->output_file = token;
+                check(arguments->output_file != NULL && arguments->output_file[0] != '\0', "Missing file name in --output argument");
+                // for now there are only csv and txt formats, but in the future, other format can be added
+                ext = strrchr(arguments->output_file, '.');
+                if (ext != NULL && strcmp(ext, ".csv") == 0)
+                    arguments->output_format = OUTPUT_FORMAT_CSV;
+                else if (ext != NULL && strcmp(ext, ".txt") == 0) 
+                    arguments->output_format = OUTPUT_FORMAT_TXT;
+                else
+                    check(0, "Unknown output file extension in --output argument: %s. Use .csv or .txt.", arguments->output_file);
+            }
+        }
+        if (arguments->output_format == OUTPUT_FORMAT_TXT) {
+                check(*sep != '_' && *sep != ':',"separators like _ or : can't be used for txt format");
+            }
+        if (arguments->output_format == OUTPUT_FORMAT_CSV) {
+                check(*sep != '_' , "separators like _ can't be used for csv format");
+            }
+        if (header_set && arguments->output_format != OUTPUT_FORMAT_CSV) {
+                check(0, "The header= option in --output argument is only available for csv output format");
+            }
+        break;
+    }
     case SCRIPT_FILENAME:
         check(script_parse(arg, state) == 0, "Wrong syntax in script %s\n", arg);
         break;
@@ -1197,6 +1264,59 @@ int script_parse(char *fname, struct argp_state *state) {
     return 0;
 }
 
+// csv output, there is just the values separated with a separator 
+void csv_output(FILE *out_f, long send_time, long elapsed_time, int req_id, int thread_id, int session_id) {
+    if (input_args.output_header == 1) {
+        fprintf(out_f, use_nano
+        ? "t(ns)%celapsed(ns)%creq_id%cthr_id%csess_id\n" 
+        : "t(us)%celapsed(us)%creq_id%cthr_id%csess_id\n", 
+            input_args.output_sep, input_args.output_sep, input_args.output_sep, input_args.output_sep);
+        input_args.output_header = 0; // only print header once
+    }
+    fprintf(out_f, "%ld%c%ld%c%d%c%d%c%d\n", 
+        send_time, input_args.output_sep, 
+        elapsed_time, input_args.output_sep, 
+        req_id, input_args.output_sep, 
+        thread_id, input_args.output_sep, 
+        session_id);
+}
+
+// output in the terminal, default output
+void cli_output(FILE *out_f, long send_time, long elapsed_time, int req_id, int thread_id, int session_id) {
+    fprintf(out_f, use_nano
+        ? "t: %ld ns, elapsed: %ld ns, req_id: %d, thr_id: %d, sess_id: %d\n" 
+        : "t: %ld us, elapsed: %ld us, req_id: %d, thr_id: %d, sess_id: %d\n", 
+        send_time, elapsed_time, req_id, thread_id, session_id);
+}
+//txt output, the same output as in the terminal but separated with a separator
+void txt_output(FILE *out_f, long send_time, long elapsed_time, int req_id, int thread_id, int session_id) {
+    fprintf(out_f, "t:%ld%celapsed:%ld%creq_id:%d%cthr_id:%d%csess_id:%d\n",
+            send_time, input_args.output_sep,
+            elapsed_time, input_args.output_sep,
+            req_id, input_args.output_sep,
+            thread_id, input_args.output_sep,
+            session_id);
+}
+
+// is called for every output and will call the correct output format (other output formats can be added later)
+void output_result(long send_time, long elapsed_time, int req_id, int thread_id, int session_id) {
+    if (output_fp == NULL) {
+        cli_output(stdout, send_time, elapsed_time, req_id, thread_id, session_id);
+        return;
+    }
+
+    switch (input_args.output_format) {
+        case OUTPUT_FORMAT_TXT:
+            txt_output(output_fp, send_time, elapsed_time, req_id, thread_id, session_id);
+            break;
+        case OUTPUT_FORMAT_CSV:
+            csv_output(output_fp, send_time, elapsed_time, req_id, thread_id, session_id);
+            break;
+        default:
+            check(0, "Unknown output format: %d", input_args.output_format);
+    }
+}
+
 int main(int argc, char *argv[]) {
     static struct argp argp = { argp_client_options, argp_client_parse_opt, 0, "Distwalk Client -- the client program"
         "\vThe *_spec syntax denotes values that can be specified as constant (value[k|m|M|G][s|b]), drawn from a probabilistic distribution with optional truncation (unif|exp|norm|lognorm|gamma:avg-val[,min=a][,max=b]), generated from a sequence (aseq|gseq:min=a,max=b[,step=s-val]) or read from a CSV file (file:file-name[,sep=sep-char][,col=col-val][,unit=]).\n"
@@ -1314,9 +1434,15 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    if (input_args.output_file != NULL) {
+        output_fp = fopen(input_args.output_file, "w");
+        check(output_fp != NULL, "Could not open output file %s: %s", input_args.output_file, strerror(errno));
+    }
+
     if (seed == -1)
         seed = time(NULL);
-
+    
+    // will be printed everytime in the terminal 
     printf("Configuration:\n");
     printf("  clienthost=%s\n", input_args.clienthostport);
     printf("  serverhost=%s\n", input_args.nodehostport);
@@ -1338,6 +1464,15 @@ int main(int argc, char *argv[]) {
     printf("  use_per_session_output: %d\n", use_per_session_output);
     printf("  num_conn_retries: %d (retry_period: %d ms)\n", conn_retry_num, conn_retry_period_ms);
     printf("  seed: %d\n", seed);
+    if (input_args.output_file != NULL) {
+        printf("  output_file: %s, format=%s, header=%d",
+               input_args.output_file,
+               input_args.output_format == OUTPUT_FORMAT_CSV ? "csv" : "txt",
+               input_args.output_header);
+
+        printf(", sep='%c'", input_args.output_sep);
+        printf("\n");
+    }
 
     printf("  request template: ");  ccmd_log(ccmd);
 
@@ -1398,6 +1533,11 @@ int main(int argc, char *argv[]) {
         dpdk_cleanup();
     }
 #endif
+
+    if(output_fp != NULL) {
+        fclose(output_fp);
+        output_fp = NULL;
+    }
 
     return 0;
 }
