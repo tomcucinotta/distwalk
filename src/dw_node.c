@@ -1136,7 +1136,7 @@ void* storage_worker(void* args) {
     storage_worker_info_t *infos = (storage_worker_info_t *)args;
     infos->sync_waiting_queue = pqueue_alloc(MAX_REQS);
 
-    sprintf(thread_name, "stor_work-%d", infos->worker_id);
+    sprintf(thread_name, "dwn_stor_%d", infos->worker_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
     if (infos->core_id >= 0) {
@@ -1281,7 +1281,7 @@ static int conn_worker_lcore(void *arg) {
 void* conn_worker(void* args) {
     conn_worker_info_t *infos = (conn_worker_info_t *)args;
 
-    sprintf(thread_name, "conn_work-%d", infos->worker_id);
+    sprintf(thread_name, "dwn_conn_%d", infos->worker_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
 #ifdef DPDK_ENABLED

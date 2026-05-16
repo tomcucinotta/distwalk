@@ -193,7 +193,7 @@ static int thread_sender_lcore(void *arg) {
 void *thread_sender(void *data) {
     thread_data_t *p = (thread_data_t *)data;
 
-    sprintf(thread_name, "sendw-%d", p->thread_id);
+    sprintf(thread_name, "dwc_send_%d", p->thread_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
 
     int thread_id = p->thread_id;
@@ -315,7 +315,7 @@ void *thread_sender(void *data) {
 void *thread_receiver(void *data) {
     const int thread_id = (int)(unsigned long)data;
 
-    sprintf(thread_name, "recvw-%d", thread_id);
+    sprintf(thread_name, "dwc_recv_%d", thread_id);
     sys_check(prctl(PR_SET_NAME, thread_name, NULL, NULL, NULL));
     message_t *m = NULL;
     int recv = 0;
