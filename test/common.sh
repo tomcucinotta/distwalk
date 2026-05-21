@@ -97,14 +97,14 @@ strace_node_bg() {
 }
 
 proxy() {
-    check_executable dw_proxy || { exit -1; }
-    run dw_proxy "$@"
+    check_executable dw_proxy_debug || { exit -1; }
+    run dw_proxy_debug "$@"
     id=$[$id+1]
 }
 
 proxy_bg() {
-    check_executable dw_proxy || { exit -1; }
-    run dw_proxy "$@" &
+    check_executable dw_proxy_debug || { exit -1; }
+    run dw_proxy_debug "$@" &
     id=$[$id+1]
 }
 

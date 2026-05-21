@@ -107,6 +107,10 @@ void *sender(void *arg) {
     return NULL;
 }
 
+void sig_handler(int sig) {
+  dw_log("sig_handler");
+}
+
 int main(int argc, char *argv[]) {
     char *addr = strdup(DEFAULT_ADDR ":" DEFAULT_PORT);
     addr_parse(addr, &bind_addr);
@@ -140,7 +144,7 @@ int main(int argc, char *argv[]) {
         argc--;  argv++;
     }
 
-    signal(SIGUSR1, SIG_IGN);
+    signal(SIGUSR1, sig_handler);
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == -1) {
