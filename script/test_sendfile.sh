@@ -19,10 +19,10 @@ run_test() {
     local mode=$2
 
     if [ "$mode" == "sendfile" ]; then
-        cmd="$CLIENT -R sendfile,$size"
+        cmd="$CLIENT -Rsendfile,$size"
         flag=1
     else
-        cmd="$CLIENT -L $size -R $size"
+        cmd="$CLIENT -L $size -R$size"
         flag=0
     fi
 
