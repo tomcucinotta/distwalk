@@ -62,7 +62,7 @@ doc:
 clean:
 	rm -rf $(HOME)/.local/share/man/man1/
 	mandb
-	rm -f *.o *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
+	rm -f *.o *.d *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
 	rm -rf html latex gcov $(ifneq $(BUILD_DIR),.,$(BUILD_DIR))
 
 dw_client: $(patsubst %.c,$(BUILD_DIR)/%.o,$(DW_CLIENT_SOURCES))
