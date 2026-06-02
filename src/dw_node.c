@@ -635,29 +635,38 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
 #ifdef DW_DEBUG
     msg_log(m_dst, "REPLY ");
 #endif
+    const int conn_id = req->conn_id;
+    const struct sockaddr_in target = req->target;
+
+    conns[conn_id].reply_mode = opts->mode;
+    int rv;
+
+    // added branching here for the two send-mode cases
+    switch (opts->mode) {
+        case REPLY_MODE_SENDFILE: {
+            // retrieve device id from reply options
+            int dev_id = opts->dev_id; 
+            // note! fd must be copied here since req will be freed after this function returns, 
+            //  but the sendfile operation may not be completed yet  
+            req->sendfile_fd = storage_worker_infos[dev_id].storage_info.storage_fd;
+            req->sendfile_offset = 0;
+            req->sendfile_size = opts->resp_size;
+            printf("Reply using sendfile.\n");
+            rv =  conn_start_sendfile(&conns[conn_id], target, req->sendfile_fd, req->sendfile_offset, req->sendfile_size);
+            break;
+        }
+        case REPLY_MODE_NORMAL:
+        default:{
+            rv = conn_start_send(&conns[conn_id], target); 
+            break;
+        }
+    }
+
     // cannot access req after conn_req_remove()
-    int conn_id = req->conn_id;
-    struct sockaddr_in target = req->target;
     conn_req_remove(conn, req);
     infos->active_reqs--;
 
-    // added branching here for the two cases
-    conns[conn_id].reply_mode = opts->mode;
-
-    switch (opts->mode) {
-
-    case REPLY_MODE_SENDFILE:
-        int dev_id = opts->dev_id; // retrieve device id from reply options
-        req->sendfile_fd = storage_worker_infos[dev_id].storage_info.storage_fd; // note! fd must be copied here since req will be freed after this function returns,but the sendfile operation may not be completed yet
-        req->sendfile_offset = 0;
-        req->sendfile_size = opts->resp_size;
-        printf("Reply using sendfile.\n");
-        return conn_start_sendfile(&conns[conn_id], target, req->sendfile_fd, req->sendfile_offset, req->sendfile_size);
-    
-    case REPLY_MODE_NORMAL:
-    default:
-        return conn_start_send(&conns[conn_id], target); // unchanged 
-    }
+    return rv;
 }
 
 void compute_for_freqinv(unsigned long usecs) {
