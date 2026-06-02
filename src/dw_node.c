@@ -635,14 +635,9 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
 #ifdef DW_DEBUG
     msg_log(m_dst, "REPLY ");
 #endif
-    // cannot access req after conn_req_remove()
-    int conn_id = req->conn_id;
-    struct sockaddr_in target = req->target;
-    conn_req_remove(conn, req);
-    infos->active_reqs--;
-
     // added branching here for the two cases
-    conns[conn_id].reply_mode = opts->mode;
+    conns[req->conn_id].reply_mode = opts->mode;
+    int rv;
 
     switch (opts->mode) {
 
@@ -652,12 +647,18 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
         req->sendfile_offset = 0;
         req->sendfile_size = opts->resp_size;
         dw_log("Reply using sendfile\n");
-        return conn_start_sendfile(&conns[conn_id], target, req->sendfile_fd, req->sendfile_offset, req->sendfile_size);
+        rv =  conn_start_sendfile(&conns[req->conn_id], req->target, req->sendfile_fd, req->sendfile_offset, req->sendfile_size);
+        break;
     
     case REPLY_MODE_NORMAL:
     default:
-        return conn_start_send(&conns[conn_id], target); // unchanged 
+        rv = conn_start_send(&conns[req->conn_id], req->target);
+        break;
     }
+    // cannot access req after conn_req_remove()
+    conn_req_remove(conn, req);
+    infos->active_reqs--;
+    return rv;
 }
 
 void compute_for_freqinv(unsigned long usecs) {
