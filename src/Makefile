@@ -4,7 +4,7 @@ MAKEFILE_DIR := $(dir $(firstword $(MAKEFILE_LIST)))
 TOPDIR       := $(abspath $(MAKEFILE_DIR)/..)
 
 CFLAGS=-Wall -O3
-CFLAGS_DEBUG=-g -DDW_DEBUG -Wall -fprofile-arcs -ftest-coverage -fprofile-update=atomic
+CFLAGS_DEBUG=-g -DDW_DEBUG -Wall -fprofile-arcs -ftest-coverage -fprofile-update=atomic -fsanitize=address -fsanitize=undefined
 CFLAGS_TSAN=-g -Wall -O2 -fsanitize=thread
 LDLIBS=-pthread -lm -lssl -lcrypto
 LDLIBS_DEBUG=-pthread -lm -lssl -lcrypto -lgcov
@@ -60,10 +60,10 @@ doc:
 	doxygen
 
 clean:
-	rm -rf $(HOME)/.local/share/man/man1/
-	mandb
-	rm -f *.o *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
-	rm -rf html latex gcov $(ifneq $(BUILD_DIR),.,$(BUILD_DIR))
+  rm -rf $(HOME)/.local/share/man/man1/
+  mandb
+  rm -f *.o *.d *.gcno *.gcda *.gcov *~ *.bak log_tests.txt *.log $(MAIN_PROGRAMS) $(DEBUG_PROGRAMS) $(TSAN_PROGRAMS) $(TEST_PROGRAMS)
+  rm -rf html latex gcov $(ifneq $(BUILD_DIR),.,$(BUILD_DIR))
 
 dw_client: $(patsubst %.c,$(BUILD_DIR)/%.o,$(DW_CLIENT_SOURCES))
 dw_client_debug: $(patsubst %.c,$(BUILD_DIR)/%_debug.o,$(DW_CLIENT_SOURCES))
