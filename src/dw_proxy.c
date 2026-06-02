@@ -144,6 +144,9 @@ int main(int argc, char *argv[]) {
         argc--;  argv++;
     }
 
+    check(memcmp(&bind_addr, &dest_addr, sizeof(bind_addr)) != 0,
+          "bind and dest addresses cannot be the same");
+
     signal(SIGUSR1, sig_handler);
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
