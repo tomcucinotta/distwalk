@@ -651,7 +651,7 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
         req->sendfile_fd = storage_worker_infos[dev_id].storage_info.storage_fd; // note! fd must be copied here since req will be freed after this function returns,but the sendfile operation may not be completed yet
         req->sendfile_offset = 0;
         req->sendfile_size = opts->resp_size;
-        printf("Reply using sendfile.\n");
+        dw_log("Reply using sendfile\n");
         return conn_start_sendfile(&conns[conn_id], target, req->sendfile_fd, req->sendfile_offset, req->sendfile_size);
     
     case REPLY_MODE_NORMAL:
