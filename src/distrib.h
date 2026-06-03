@@ -68,4 +68,7 @@ double pd_avg(pd_spec_t *p);
 // might be handy independently from pd_*() functions
 int sscanf_unit(const char *str, const char *fmt, double *p_val, int is_time);
 
+// free p->samples
+void pd_free(const pd_spec_t *p);
+
 #endif

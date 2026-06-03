@@ -17,6 +17,17 @@ void queue_free(queue_t *queue) {
 	free(queue);
 }
 
+void queue_free_data_ptr(queue_t *queue) {
+	int itr = queue_itr_begin(queue);
+	while (queue_itr_has_next(queue, itr)) {
+		const node_t *node = queue_itr_next(queue, &itr);
+		free(node->data.ptr);
+	}
+
+	free(queue->nodes);
+	free(queue);
+}
+
 void queue_log(queue_t *queue) {
 	int itr = queue_itr_begin(queue);
 
@@ -35,7 +46,7 @@ node_t* queue_enqueue(queue_t *queue, int key, data_t data) {
 	node_t *node = &(queue->nodes[queue->tail]);
 	node->data = data;
 	node->key = key;
-	
+
 	queue->size++;
 
 	return node;
@@ -49,6 +60,16 @@ void queue_dequeue_head(queue_t *queue) {
 	queue->head = (queue->head + 1) % queue->capacity;
 }
 
+void queue_dequeue_head_data_prt(queue_t *queue) {
+	if (queue->size == 0)
+		return;
+
+	free(queue->nodes[queue->head].data.ptr);
+
+	queue->size--;
+	queue->head = (queue->head + 1) % queue->capacity;
+}
+
 void queue_dequeue_tail(queue_t *queue) {
 	if (queue->size == 0)
 		return;
@@ -57,7 +78,31 @@ void queue_dequeue_tail(queue_t *queue) {
 	queue->tail = (queue->tail - 1) % queue->capacity;
 }
 
+void queue_dequeue_tail_data_prt(queue_t *queue) {
+	if (queue->size == 0)
+		return;
+
+	free(queue->nodes[queue->tail].data.ptr);
+
+	queue->size--;
+	queue->tail = (queue->tail - 1) % queue->capacity;
+}
+
+
 void queue_drop(queue_t* queue) {
+	queue->head = 0;
+	queue->tail = -1;
+
+	queue->size = 0;
+}
+
+void queue_drop_data_prt(queue_t* queue) {
+	int itr = queue_itr_begin(queue);
+	while (queue_itr_has_next(queue, itr)) {
+		const node_t *node = queue_itr_next(queue, &itr);
+		free(node->data.ptr);
+	}
+
 	queue->head = 0;
 	queue->tail = -1;
 
