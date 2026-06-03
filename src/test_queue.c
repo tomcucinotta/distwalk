@@ -40,7 +40,7 @@ bool test_queue_insert() {
 bool test_queue_insert_complex() {
 	queue_t *queue = queue_alloc(N);
 
-	ccmd_node_t* ccmd_node = calloc(1, sizeof(ccmd_node_t));
+	ccmd_node_t* ccmd_node = alloca(sizeof(ccmd_node_t));
 	pd_spec_t val = pd_build_fixed(1000);
 
 	ccmd_node->cmd = STORE;
@@ -107,7 +107,7 @@ bool test_queue_remove_complex() {
 	queue_t *queue = queue_alloc(N);
 
 	for (int i=0; i < 2; i ++) {
-		ccmd_node_t* ccmd_node = calloc(1, sizeof(ccmd_node_t));
+		ccmd_node_t* ccmd_node = alloca(sizeof(ccmd_node_t));
 		pd_spec_t val = pd_build_fixed(i * 10);
 
 		ccmd_node->cmd = STORE;

@@ -39,5 +39,8 @@ int main(int argc, char **argv) {
     for (int i = 0; i < num_samples; i++)
         printf("%g\n", pd_sample(&val));
 
+    // frees if we loaded from file
+    pd_cleanup(&val);
+
     return EXIT_SUCCESS;
 }
