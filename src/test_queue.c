@@ -55,11 +55,11 @@ bool test_queue_insert_complex() {
 	if (queue_node_key(top) != 0 || ccmd_data->cmd != STORE)
 		goto err;
 
-	queue_free(queue);
+	queue_free_data_ptr(queue);
 	return true;
 
  err:
-	queue_free(queue);
+	queue_free_data_ptr(queue);
 	return false;
 }
 
@@ -117,7 +117,7 @@ bool test_queue_remove_complex() {
 		queue_enqueue(queue, i, data);
 	}
 
-	queue_dequeue_head(queue);
+	queue_dequeue_head_data_prt(queue);
 	node_t *top = queue_head(queue);
 	node_t *bottom = queue_tail(queue);
 	ccmd_node_t* ccmd_data = queue_node_data(bottom).ptr;
@@ -129,11 +129,11 @@ bool test_queue_remove_complex() {
 		|| queue_size(queue) != 1)
 		goto err;
 
-	queue_free(queue);
+	queue_free_data_ptr(queue);
 	return true;
 
  err:
-	queue_free(queue);
+	queue_free_data_ptr(queue);
 	return false;
 }
 

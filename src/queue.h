@@ -15,11 +15,15 @@ typedef struct queue_t {
 
 queue_t* queue_alloc(uint32_t capacity);
 void queue_free(queue_t *queue);
+void queue_free_data_ptr(queue_t *queue);
 
 node_t* queue_enqueue(queue_t *queue, int key, data_t data);
 void queue_dequeue_head(queue_t *queue);
+void queue_dequeue_head_data_prt(queue_t* queue);
 void queue_dequeue_tail(queue_t *queue);
+void queue_dequeue_tail_data_prt(queue_t* queue);
 void queue_drop(queue_t* queue);
+void queue_drop_data_prt(queue_t* queue);
 void queue_log(queue_t* queue);
 
 static inline int queue_itr_begin(queue_t *queue) { return queue->head; }

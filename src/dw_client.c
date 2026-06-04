@@ -1258,6 +1258,9 @@ int script_parse(char *fname, struct argp_state *state) {
         }
     }
 
+    for (int i=0; i<argc; i++) {
+        free(argv[i]);
+    }
     free(argv);
     return 0;
 }
