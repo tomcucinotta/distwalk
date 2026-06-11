@@ -1,21 +1,34 @@
-dw_client
-dw_node
+# Whitelist inside src/
+# 0. Ignore all
+src/*
 
-dw_client_debug
-dw_client_tsan
-dw_node_debug
-dw_node_tsan
+# 1. Unignore useful extension-less files
+!src/Makefile
+!src/makefile
 
-test_distrib
-test_ccmd
-test_struct_tsan
+# 2. Unignore all files with extensions
+!src/*.*
 
+# 3. Unignore all dirs
+!src/*/
+
+
+
+# Blacklisting from root 
+
+# Ignore files with extensions `.d`, `.o`, `.data`, `.gcno`, `.gcda`, `.gcov`
+*.d
 *.o
 *.data
-
-.vscode
-.dir-locals.el
 
 *.gcno 
 *.gcda 
 *.gcov
+
+test/log_tests.txt
+
+.idea
+.vscode
+.dir-locals.el
+
+
