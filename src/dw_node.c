@@ -60,7 +60,7 @@ static inline uint64_t i2l(uint32_t ln, uint32_t rn) {
 static inline void l2i(uint64_t n, uint32_t* ln, uint32_t* rn) {
     if (ln)
         *ln = n >> 32;
-    
+
     if (rn)
         *rn = (uint32_t) n;
 }
@@ -352,9 +352,9 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
         dw_log("Found reply for fwd to: %s:%d\n", inet_ntoa((struct in_addr) {addr.sin_addr.s_addr}), ntohs(addr.sin_port));
         cmd = cmd_next_forward(cmd);
         if (cmd == NULL) {
-            cmd_log(cmd_skip(req->curr_cmd, 1));
+            cmd_log(cmd_skip(req->curr_cmd, 1), message_end(m));
         } else
-            cmd_log(cmd);
+            cmd_log(cmd, message_end(m));
         return cmd == NULL ? cmd_skip(req->curr_cmd, 1) : cmd;
     }
 #ifdef DPDK_ENABLED
@@ -493,7 +493,7 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
 
     if (conn_start_send(fwd_conn, addr) < 0)
         return NULL;
-        
+
     if (req->fwd_timeout) {
         insert_timeout(infos, req->req_id, p_poll, req->fwd_timeout);
     }
@@ -512,7 +512,7 @@ command_t *start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
 
         dw_log("Starting FORWARD context for req:%d with nack:%d, timeout:%d, retry:%d\n", req->req_id, req->fwd_replies_left, req->fwd_timeout, req->fwd_retries);
     }
-    
+
     command_t* itr = cmd;
     while (itr) {
         if (!single_start_forward(req, m, itr, p_poll, infos))
@@ -566,7 +566,7 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         dw_log("Got a REPLY to FORWARD from an unexpected endpoint: %s - Dropped\n", addr_str);
         return -1;
     }
-    
+
     if (req->fwd_replies_mask & (1 << reply_id))
         // already acknowledged, ignore
         return -1;
@@ -576,8 +576,8 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         message_t *m = req_get_message(req);
         m->status = fwd_m_status;
         req->curr_cmd = cmd_skip(req->curr_cmd, 1);
-        
-        // reply mask reset 
+
+        // reply mask reset
         req->fwd_replies_mask = 0;
         req->fwd_replies_left = -1;
         req->fwd_timeout = 0;
@@ -586,7 +586,7 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         dw_log("FORWARD for req_id:%d finished\n", req->req_id);
         return process_messages(req, p_poll, infos);
     }
-    
+
     dw_log("Replies_left: %d for req_id:%d\n", req->fwd_replies_left, req->req_id);
     return -1;
 }
@@ -649,7 +649,7 @@ int reply(req_info_t *req, message_t *m, command_t *cmd, conn_worker_info_t* inf
         dw_log("Reply using sendfile\n");
         rv =  conn_start_sendfile(&conns[req->conn_id], req->target, req->sendfile_fd, req->sendfile_offset, req->sendfile_size);
         break;
-    
+
     case REPLY_MODE_NORMAL:
     default:
         rv = conn_start_send(&conns[req->conn_id], req->target);
@@ -749,7 +749,7 @@ void store(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store
             lseek(storage_info->storage_fd, 0, SEEK_SET);
             storage_info->storage_offset = 0;
         }
-    }  
+    }
 
     dw_log("STORE: storing %lu bytes from %d offset\n", total_bytes, (int) storage_info->storage_offset);
 
@@ -764,7 +764,7 @@ void store(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store
     }
     storage_info->storage_offset += total_bytes;
 
-    if (wait_sync && infos->periodic_sync_msec <= 0) { 
+    if (wait_sync && infos->periodic_sync_msec <= 0) {
         fsync(storage_info->storage_fd);
     }
 }
@@ -811,8 +811,9 @@ void close_and_forget(dw_poll_t *p_poll, int sock) {
 int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t *infos) {
     message_t *m = req_get_message(req);
     int conn_id = req->conn_id;
+    void *msg_end = message_end(m);
 
-    for (command_t *cmd = req->curr_cmd; cmd->cmd != EOM; cmd = cmd_skip(cmd, 1)) {
+    for (command_t *cmd = req->curr_cmd; cmd_in_bounds(cmd, msg_end) && cmd->cmd != EOM; cmd = cmd_skip(cmd, 1)) {
         dw_log("PROCESS conn_id: %d, req_id: %d,  command: %s\n", req->conn_id, req->req_id, get_command_name(cmd->cmd));
         switch(cmd->cmd) {
         case COMPUTE:
@@ -832,7 +833,7 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             dw_log("Handling REPLY: req_id=%d\n", m->req_id);
             if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd, infos)) {
                 dw_log("reply() returned, conn_id: %d\n", conn_id);
-                
+
                 if (conn_get_status_by_id(req->conn_id) == SENDING) {
                     dw_log("Message req_id=%d is still sending after REPLY, conn_id: %d\n", m->req_id, conn_id);
                     sys_check(dw_poll_mod(p_poll, conns[req->conn_id].sock, DW_POLLOUT | DW_POLLONESHOT, i2l(SOCKET, conn_id)));
@@ -905,7 +906,7 @@ int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos) {
     for (message_t *m = conn_prepare_recv_message(conn); m != NULL; m = conn_prepare_recv_message(conn)) {
         // FORWARD finished
         if (message_first_cmd(m)->cmd == EOM) {
-            dw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}), 
+            dw_log("Handling response to FORWARD from %s:%d, req_id=%d\n", inet_ntoa((struct in_addr) {conns[conn_id].target.sin_addr.s_addr}),
                                                                            ntohs(conns[conn_id].target.sin_port), m->req_id);
             uint8_t fwd_match[6];
             memcpy(fwd_match, &conn->target.sin_addr.s_addr, 4);
@@ -984,7 +985,7 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
         dw_log("Request req_id: %d missing, timer disarmed.\n", req_id);
         return;
     }
-    
+
     message_t *m = req_get_message(req);
     conn_info_t *conn = conn_get_by_id(req->conn_id);
 
@@ -999,12 +1000,12 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
     dw_log("on_fail_skip=%d\n", req->fwd_on_fail_skip);
     if (req->fwd_retries > 0) {
         dw_log("TIMEOUT expired, req_id: %d, retry: %d\n", req->req_id, req->fwd_retries);
-        
+
         req->fwd_retries--;
         process_messages(req, p_poll, infos);
     } else if (req->fwd_on_fail_skip > 0) {
         dw_log("TIMEOUT expired, req_id: %d, failed, skipping: %d\n", req->req_id, req->fwd_on_fail_skip);
-        
+
         req->curr_cmd = cmd_skip(req->curr_cmd, req->fwd_on_fail_skip);
         m->status = TIMEOUT;
         process_messages(req, p_poll, infos);
@@ -1058,7 +1059,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
         infos->active_conns++;
         // we need the send_messages() below to still be tried afterwards
     }
-    
+
     if (pflags & DW_POLLOUT) {
         int r = conn_flush(conn);
 
@@ -1084,7 +1085,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     if (!obtain_messages(conn_id, p_poll, infos))
         goto err;
 
-    
+
     return;
 
  err:
@@ -1107,18 +1108,19 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
                 fwd_opts_t fwd = *cmd_get_opts(fwd_opts_t, tmp->curr_cmd);
                 if (fwd.fwd_host == conn->target.sin_addr.s_addr &&
                         fwd.fwd_port == conn->target.sin_port) {
-                    
+
                     if (fwd.retries > 0)
                         break;
                     else
                         remove_timeout(infos, m->req_id, p_poll);
-                        
+
                     // Go to last REPLY
                     command_t *itr = tmp->curr_cmd;
-                    while (itr->cmd != EOM && itr->cmd != REPLY)
-                        itr = cmd_skip(tmp->curr_cmd, 1);
+                    void *msg_end = message_end(m);
+                    while (cmd_in_bounds(itr, msg_end) && itr->cmd != EOM && itr->cmd != REPLY)
+                        itr = cmd_skip(itr, 1);
 
-                    if (itr->cmd == EOM) { // brutal
+                    if (!cmd_in_bounds(itr, msg_end) || itr->cmd == EOM) { // brutal
                         close_and_forget(p_poll, pending_conn->sock);
                     } else { // graceful
                         tmp->curr_cmd = itr;
@@ -1247,10 +1249,10 @@ void* storage_worker(void* args) {
                 req_id = w.req_id;
 
                 dw_log("STORAGE cmd from conn_id %d\n", req_id);
-                
+
                 if (w.cmd.cmd == STORE) {
                     store(infos, infos->store_buf, cmd_get_opts(store_opts_t, &w.cmd));
-                    if (cmd_get_opts(store_opts_t, &w.cmd)->wait_sync) { 
+                    if (cmd_get_opts(store_opts_t, &w.cmd)->wait_sync) {
                         if (infos->periodic_sync_msec <= 0) {
                             safe_write(infos->store_replyfd[worker_id], (unsigned char*) &req_id, sizeof(req_id));
                         } else {
@@ -1421,7 +1423,7 @@ void* conn_worker(void* args) {
             event_t event_type;
             l2i(aux, &event_type, (uint32_t*) &event_data);
             dw_log("event_type=%s, event_data=%d (conn_id if event_type==SOCKET, polled fd otherwise)\n", get_event_str(event_type), event_data);
-            
+
             if (event_type == LISTEN) { // New connection (TCP or TLS)
                 struct sockaddr_in addr;
                 socklen_t addr_size = sizeof(addr);
@@ -1468,7 +1470,7 @@ void* conn_worker(void* args) {
 
                 conn_get_by_id(conn_id)->enable_defrag = enable_defrag;
                 infos->active_conns++;
-                
+
                 int next_thread_id = accept_mode == AM_PARENT ? (atomic_fetch_add(&next_thread_cnt, 1) % conn_threads) : (infos - conn_worker_infos);
                 if (accept_mode == AM_PARENT && infos->dw_poll.poll_type != DW_EPOLL) { // NOTE: in AM_PARENT mode, only the parent worker thread will reach here
                     int rv = write(conn_worker_infos[next_thread_id].dispatchfd[0], (unsigned char*) &conn_id, sizeof(conn_id));
@@ -1534,11 +1536,11 @@ void* conn_worker(void* args) {
                 for (int i = 0; i < conn_threads; i++) {
                     total_active_conns += conn_worker_infos[i].active_conns;
                     total_active_reqs  += conn_worker_infos[i].active_reqs;
-                    printf("[%ld.%09ld][%s] STATS worker-id: %d, active-conns: %d, active-reqs: %d\n", ts.tv_sec, ts.tv_nsec, 
-                                                                                            thread_name, conn_worker_infos[i].worker_id, 
+                    printf("[%ld.%09ld][%s] STATS worker-id: %d, active-conns: %d, active-reqs: %d\n", ts.tv_sec, ts.tv_nsec,
+                                                                                            thread_name, conn_worker_infos[i].worker_id,
                                                                                             conn_worker_infos[i].active_conns, conn_worker_infos[i].active_reqs);
                 }
-                printf("[%ld.%09ld][%s] STATS total-active-conns: %d, total-active-reqs: %d\n", ts.tv_sec, ts.tv_nsec, thread_name, 
+                printf("[%ld.%09ld][%s] STATS total-active-conns: %d, total-active-reqs: %d\n", ts.tv_sec, ts.tv_nsec, thread_name,
                                                                                             total_active_conns, total_active_reqs);
 
                 break;
@@ -1855,14 +1857,14 @@ void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct so
 int main(int argc, char *argv[]) {
     static struct argp argp = { argp_node_options, argp_node_parse_opt, 0, "Distwalk Node -- the server program" };
     struct argp_node_arguments input_args;
-    
+
     // Default argp values
     input_args.periodic_sync_msec = -1;
     input_args.use_wait_spin_storage = 0;
     input_args.max_storage_size = 1024 * 1024 * 1024;
     input_args.use_odirect = 0;
     input_args.use_thread_affinity = 0;
-    input_args.thread_affinity_list = NULL;    
+    input_args.thread_affinity_list = NULL;
     input_args.num_threads = 1;
     input_args.sched_attrs = (struct sched_attr) { .size = sizeof(struct sched_attr), .sched_policy = SCHED_OTHER, .sched_flags = 0 };
     input_args.ssl_cert = NULL;
@@ -2174,14 +2176,14 @@ int main(int argc, char *argv[]) {
         conn_worker_infos[i].timerfd =  timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK);
         conn_worker_infos[i].timeout_queue = pqueue_alloc(MAX_REQS);
         conn_worker_infos[i].sched_attrs = input_args.sched_attrs;
-        
+
         // TODO: Consider using a dedicated thread for statistics to avoid the edge-case
         //       where a single-threaded node is executing a long COMPUTE, thus
         //       preventing signals to be processed on time
         if (i == 0) {
             conn_worker_infos[i].statfd = signalfd(-1, &stat_sigmask, 0);
         } else {
-            conn_worker_infos[i].statfd = -1;   
+            conn_worker_infos[i].statfd = -1;
         }
 
         // Round-robin thread-core pinning

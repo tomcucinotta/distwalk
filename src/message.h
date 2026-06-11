@@ -1,6 +1,7 @@
 #ifndef __MESSAGE_H__
 #define __MESSAGE_H__
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,10 +92,27 @@ command_t* cmd_next_forward(command_t *cmd);
 command_t* message_first_cmd(message_t *m);
 int cmd_type_size(command_type_t type);
 
+static inline void* message_end(message_t *m) {
+    return (char*)m + m->req_size;
+}
+
+// true if the command at cmd is in bounds of the message
+static inline bool cmd_in_bounds(command_t *cmd, void *msg_end) {
+    const char *start = (char*)cmd;
+    const char *end = msg_end;
+
+    // the header must be in bounds before we can read cmd->cmd
+    if (start + sizeof(command_t) >= end)
+        return false;
+
+    // then the opts need to be in bounds
+    return start + cmd_type_size(cmd->cmd) < end;
+}
+
 static inline int msg_num_cmd(message_t *m) {
     int n = 0;
     command_t *cmd = message_first_cmd(m);
-    while ((char*)cmd - (char*)m < m->req_size && cmd->cmd != EOM) {
+    while (cmd_in_bounds(cmd, message_end(m)) && cmd->cmd != EOM) {
         n++;
         cmd = cmd_next(cmd);
     }
@@ -102,5 +120,5 @@ static inline int msg_num_cmd(message_t *m) {
 }
 
 const void msg_log(message_t* m, char* padding);
-const void cmd_log(command_t* c);
+const void cmd_log(command_t* c, void* msg_end);
 #endif /* __MESSAGE_H__ */
