@@ -126,4 +126,13 @@ for d in gcov/*; do
     cp ../src/*.gcno $d
 done
 
-gcovr --object-directory ../src --root ../ --gcov-ignore-parse-errors
+# Set ownership on gcov folder and all subdirectories and files inside it
+if [ -n "$SUDO_USER" ]; then
+    [ -d gcov ] && chown -R "$SUDO_UID:$SUDO_GID" gcov
+fi
+
+if command -v gcovr &> /dev/null; then
+    gcovr --object-directory ../src --root ../ --gcov-ignore-parse-errors
+else
+    echo "gcovr is not installed"
+fi
