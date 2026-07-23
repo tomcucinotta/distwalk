@@ -1,6 +1,7 @@
 #!/bin/bash
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
 node_bg -b udp://:7891
 client --to=udp://127.0.0.1:7891

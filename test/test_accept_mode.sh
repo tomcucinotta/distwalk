@@ -1,6 +1,7 @@
 #!/bin/bash
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
 ## check syntax
 
@@ -39,7 +40,7 @@ node_bg -a shared --num-threads=2
 
 kill_all SIGINT
 
-tmp=/tmp/dw-log.txt
+tmp=/tmp/dw-log-test_accept_mode.txt
 
 ## check calls to listen() and bind() with strace
 

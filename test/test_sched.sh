@@ -1,6 +1,7 @@
 #!/bin/bash
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
 node_bg --sched-policy=other
 kill_all SIGINT

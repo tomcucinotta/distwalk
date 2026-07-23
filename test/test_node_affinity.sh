@@ -1,8 +1,9 @@
 #!/bin/bash
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
-tmp=$(mktemp /tmp/test_affinity-XXX.txt)
+tmp=$(mktemp /tmp/dw-test_node_affinity-XXX.txt)
 
 strace_node_bg --thread-affinity=auto &> $tmp
 kill_all SIGINT
