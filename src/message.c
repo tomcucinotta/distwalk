@@ -66,50 +66,87 @@ inline int cmd_type_size(command_type_t type) {
     return base;
 }
 
-// Move to the next command
-inline command_t* cmd_next(command_t *cmd) {
+
+// Move to the next command;
+// returns NULL if that would put you out of bounds
+inline command_t* cmd_bounded_next(command_t *cmd, void* msg_end) {
     unsigned char *ptr = (unsigned char*)cmd;
-    return (command_t*) (ptr + cmd_type_size(cmd->cmd));
+    command_t* would_be_next = (command_t*) (ptr + cmd_type_size(cmd->cmd));
+    return (cmd_in_bounds(would_be_next, msg_end)) ? would_be_next : NULL;
 }
 
 // Skip to_skip contextes (i.e., a simple operation, or a collection of operation within a forward scope)
-command_t* cmd_skip(command_t *cmd, int to_skip) {
+//  If skipping would push out of message bounds, return NULL
+command_t* cmd_bounded_skip(command_t *cmd, int to_skip, void* msg_end) {
+    if (!cmd || !cmd_in_bounds(cmd, msg_end)) {
+        return NULL;
+    }
+    
+    // Since all following values of <cmd> are set via <cmd_bounded_next> and it is checked, 
+    // now we can be sure that (cmd && cmd_in_bounds(cmd, msg_end)) is true, 
+    // and thus we don't need that condition in the <while> nor in the <do while>.
+    command_t* would_be_next = NULL;
     while (cmd->cmd != EOM && to_skip > 0) {
         int nested_fwd = 0;
         do {
+            would_be_next = cmd_bounded_next(cmd, msg_end);
+            if (!would_be_next) {
+                return NULL;
+            }
             if (cmd->cmd == FORWARD_BEGIN) {
                 nested_fwd++;
             } else if (cmd->cmd == FORWARD_CONTINUE) {
                 /* skip multiple (non-branching) FORWARD_CONTINUE following FORWARD_BEGIN */
             } else if (cmd->cmd == REPLY) {
-                if (cmd_next(cmd)->cmd != FORWARD_CONTINUE) // must have branched=1
+                if (would_be_next->cmd != FORWARD_CONTINUE) // must have branched=1
                     nested_fwd--;
             }
-            cmd = cmd_next(cmd);
+            cmd = would_be_next;
         } while (cmd->cmd != EOM && nested_fwd > 0);
         to_skip--;
     }
-
-    return cmd;
+    if (to_skip > 0) {
+        // this should never happen.
+        return NULL;
+    }else{
+        return cmd;
+    }
 }
 
 // return next FORWARD in the same multi-FORWARD context, or NULL if there are none
-command_t* cmd_next_forward(command_t *cmd) {
+//  returns NULL also if search leads out of message bounds.
+command_t* cmd_bounded_next_forward(command_t *cmd, void* msg_end) {
+    if (!cmd || !cmd_in_bounds(cmd, msg_end)) {
+        return NULL;
+    }
     check(cmd->cmd == FORWARD_CONTINUE || cmd->cmd == FORWARD_BEGIN);
 
     int branched = cmd_get_opts(fwd_opts_t, cmd)->branched;
-    cmd = cmd_next(cmd);
-    while (cmd->cmd != EOM && cmd->cmd != FORWARD_CONTINUE) {
+    cmd = cmd_bounded_next(cmd, msg_end);
+    command_t* would_be_next = NULL;
+    // cmd is updated via <cmd_bounded_skip> or <cmd_bounded_next>, hence we need to check (cmd!=NULL).
+    while (cmd && cmd->cmd != EOM && cmd->cmd != FORWARD_CONTINUE) {
         if (cmd->cmd == FORWARD_BEGIN)
-            cmd = cmd_skip(cmd, 1);
-        else if (cmd->cmd == REPLY && (!branched || cmd_next(cmd)->cmd != FORWARD_CONTINUE))
-            // when branched, a REPLY is followed by a CONTINUE, or the FORWARD context is over;
-            // when !branched, a REPLY terminates the FORWARD context
-            return NULL;
-        else
-            cmd = cmd_next(cmd);
+            cmd = cmd_bounded_skip(cmd, 1, msg_end);
+        else {
+            would_be_next = cmd_bounded_next(cmd, msg_end);
+            if (!would_be_next) {
+                return NULL;
+            }
+            if (cmd->cmd == REPLY && (!branched || would_be_next->cmd != FORWARD_CONTINUE)) {
+                // when branched, a REPLY is followed by a CONTINUE, or the FORWARD context is over;
+                // when !branched, a REPLY terminates the FORWARD context
+                return NULL;
+            } else {
+                cmd = would_be_next;
+            }
+        }
     }
-    return cmd;
+    if (cmd && cmd_in_bounds(cmd, msg_end) && cmd->cmd == FORWARD_CONTINUE) {
+        return cmd;
+    }else{
+        return NULL;
+    }
 }
 
 inline command_t* message_first_cmd(message_t *m) {
@@ -124,11 +161,17 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     m_dst->req_id = m->req_id;
 
     // find matching reply
+    void *msg_end = message_end(m);
     command_t *itr = cmd;
-    while (itr->cmd != EOM && itr->cmd != REPLY)
-        itr = cmd_skip(itr, 1);
-    //assert(itr->cmd != EOM);
-    int cmds_len = ((unsigned char*)cmd_next(itr) - (unsigned char*)cmd);
+    while (itr && itr->cmd != EOM && itr->cmd != REPLY) {
+        itr = cmd_bounded_skip(itr, 1, msg_end);
+    }
+    
+    if (!itr || !cmd_in_bounds(itr, msg_end)) {
+        return NULL;
+    }
+
+    int cmds_len = ((unsigned char*)itr + cmd_type_size(itr->cmd)) - (unsigned char*)cmd;
 
     command_t * dst_itr = message_first_cmd(m_dst);
     if (m_dst->req_size < cmds_len + cmd_type_size(EOM)) // Check if enough space for EOM delimiter
@@ -138,15 +181,15 @@ command_t* message_copy_tail(message_t *m, message_t *m_dst, command_t *cmd) {
     command_t* end_command = (command_t*)((unsigned char*)dst_itr + cmds_len);
     end_command->cmd = EOM;
     
-    m_dst->req_size = (unsigned char*)cmd_next(end_command) - (unsigned char*)m_dst;
+    m_dst->req_size = ((unsigned char*)end_command + cmd_type_size(end_command->cmd)) - (unsigned char*)m_dst;
     //int skipped_len = ((unsigned char*)cmd - (unsigned char*)message_first_cmd(m));
     //m_dst->req_size = min(m_dst->req_size, m->req_size - skipped_len);
     return itr;
 }
 
-inline const void cmd_log(command_t* cmd) {
+inline const void cmd_log(command_t* cmd, void* msg_end) {
     command_t *c = cmd, *pre_c;
-    while (c->cmd != EOM) {
+    while (c && cmd_in_bounds(c, msg_end) && c->cmd != EOM) {
         char opts[256] = "";
 
         switch (c->cmd) {
@@ -182,7 +225,7 @@ inline const void cmd_log(command_t* cmd) {
             exit(EXIT_FAILURE);
         }
         pre_c = c;
-        c = cmd_next(c);
+        c = cmd_bounded_next(c, msg_end);
         printf("%s(%s)%s", get_command_name(pre_c->cmd), opts, "->");
     }
     printf("EOM");
@@ -192,5 +235,5 @@ inline const void cmd_log(command_t* cmd) {
 inline const void msg_log(message_t* m, char* padding) {
     printf("%s", padding);
     printf("message (req_id: %u, req_size: %u, num: %u, status: %s): ", m->req_id, m->req_size, msg_num_cmd(m), msg_status_str(m->status));
-    cmd_log(message_first_cmd(m));
+    cmd_log(message_first_cmd(m), message_end(m));
 }

@@ -366,27 +366,28 @@ bool test_ccmd_dump_1() {
     ccmd_dump(ccmd, m);
 
     bool res = false;
+    void *msg_end = message_end(m);
 
     command_t *c = message_first_cmd(m);
-    if (c->cmd != STORE) {
+    if (!c || c->cmd != STORE) {
         res = false;
         goto err;
     }
 
-    c = cmd_next(c);
-    if (c->cmd != COMPUTE) {
+    c = cmd_bounded_next(c, msg_end);
+    if (!c || c->cmd != COMPUTE) {
         res = false;
         goto err;
     }
 
-    c = cmd_next(c);
-    if (c->cmd != REPLY && cmd_get_opts(reply_opts_t, c)->resp_size == 900) {
+    c = cmd_bounded_next(c, msg_end);
+    if (!c || (c->cmd != REPLY && cmd_get_opts(reply_opts_t, c)->resp_size == 900)) {
         res = false;
         goto err;
     }
 
-    c = cmd_next(c);
-    if (c->cmd != EOM) {
+    c = cmd_bounded_next(c, msg_end);
+    if (!c || c->cmd != EOM) {
         res = false;
         goto err;
     }

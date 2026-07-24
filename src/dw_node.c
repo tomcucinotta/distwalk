@@ -327,7 +327,7 @@ void setnonblocking(int fd);
 
 // match_addr is 6 bytes: either fwd_host(4)+fwd_port(2) or fwd_addr[6],
 // same union in fwd_opts_t, so memcmp on fwd_addr covers both cases
-int find_forward_reply_id(command_t *cmd, const uint8_t match_addr[6]);
+int find_forward_reply_id(command_t *cmd, const uint8_t match_addr[6], void* msg_end);
 
 // cmd_id is the index of the FORWARD item within m->cmds[] here, we
 // remove the first (cmd_id+1) commands from cmds[], and forward the
@@ -343,19 +343,22 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     addr.sin_addr.s_addr = fwd.fwd_host;
     addr.sin_port = fwd.fwd_port;
 
-    int fwd_reply_id = find_forward_reply_id(req->curr_cmd, fwd.fwd_addr);
+    void* msg_end = message_end(m);
+    int fwd_reply_id = find_forward_reply_id(req->curr_cmd, fwd.fwd_addr, msg_end);
     if (fwd_reply_id == -1)
         return NULL;
 
     if (req->fwd_replies_left != -1 && (req->fwd_replies_mask & (1 << fwd_reply_id))) {
         // avoid retransmissions of already acknowledged FORWARD branches
         dw_log("Found reply for fwd to: %s:%d\n", inet_ntoa((struct in_addr) {addr.sin_addr.s_addr}), ntohs(addr.sin_port));
-        cmd = cmd_next_forward(cmd);
+        void* msg_end = message_end(m);
+        cmd = cmd_bounded_next_forward(cmd, msg_end);
         if (cmd == NULL) {
-            cmd_log(cmd_skip(req->curr_cmd, 1));
+            //TODO: check what to do in this log tbh
+            cmd_log(cmd_bounded_skip(req->curr_cmd, 1, msg_end), msg_end);
         } else
-            cmd_log(cmd);
-        return cmd == NULL ? cmd_skip(req->curr_cmd, 1) : cmd;
+            cmd_log(cmd, msg_end);
+        return cmd == NULL ? cmd_bounded_skip(req->curr_cmd, 1, msg_end) : cmd;
     }
 #ifdef DPDK_ENABLED
     if (fwd.proto == DPDK) {
@@ -373,9 +376,10 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
         m_dst->req_size = fwd.pkt_size;
 
         // skip possible FORWARD_CONTINUE cmds in non-branched multi-fwd
-        command_t *c = cmd_next(cmd);
-        while (c->cmd == FORWARD_CONTINUE)
-            c = cmd_next(c);
+        void* dpdk_msg_end = message_end(m);
+        command_t *c = cmd_bounded_next(cmd, dpdk_msg_end);
+        while (c && c->cmd == FORWARD_CONTINUE)
+            c = cmd_bounded_next(c, dpdk_msg_end);
 
         command_t *reply_cmd = message_copy_tail(m, m_dst, c);
         if (!reply_cmd) {
@@ -471,9 +475,9 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
     assert(m_dst->req_size >= fwd.pkt_size);
 
     // skip possible FORWARD_CONTINUE cmds in non-branched multi-fwd
-    command_t *c = cmd_next(cmd);
-    while (c->cmd == FORWARD_CONTINUE)
-        c = cmd_next(c);
+    command_t *c = cmd_bounded_next(cmd, msg_end);
+    while (c && c->cmd == FORWARD_CONTINUE)
+        c = cmd_bounded_next(c, msg_end);
 
     command_t* reply_cmd = message_copy_tail(m, m_dst, c);
     if (!reply_cmd) {
@@ -514,10 +518,11 @@ command_t *start_forward(req_info_t *req, message_t *m, command_t *cmd, dw_poll_
     }
     
     command_t* itr = cmd;
+    void* msg_end = message_end(m);
     while (itr) {
         if (!single_start_forward(req, m, itr, p_poll, infos))
             return NULL;
-        itr = cmd_next_forward(itr);
+        itr = cmd_bounded_next_forward(itr, msg_end);
     }
     return cmd;
 }
@@ -528,9 +533,9 @@ int obtain_messages(int conn_id, dw_poll_t *p_poll, conn_worker_info_t* infos);
 // return 0-based id if found, or -1 if not found
 // match_addr is 6 bytes: either fwd_host(4)+fwd_port(2) or fwd_addr[6],
 // same union in fwd_opts_t, so memcmp on fwd_addr covers both cases
-int find_forward_reply_id(command_t *cmd, const uint8_t match_addr[6]) {
+int find_forward_reply_id(command_t *cmd, const uint8_t match_addr[6], void* msg_end) {
     int id = 0;
-    for (; cmd != NULL; cmd = cmd_next_forward(cmd), id++) {
+    for (; cmd != NULL; cmd = cmd_bounded_next_forward(cmd, msg_end), id++) {
         if (memcmp(cmd_get_opts(fwd_opts_t, cmd)->fwd_addr, match_addr, 6) == 0)
             return id;
     }
@@ -560,7 +565,9 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
         snprintf(addr_str, sizeof(addr_str), "%s:%d", inet_ntoa(addr), ntohs(port));
     }
 
-    int reply_id = find_forward_reply_id(req->curr_cmd, match_addr);
+    message_t *req_m = req_get_message(req);
+    void *req_msg_end = message_end(req_m);
+    int reply_id = find_forward_reply_id(req->curr_cmd, match_addr, req_msg_end);
     dw_log("Found reply_id %d from: %s (conn_id: %d)\n", reply_id, addr_str, req->conn_id);
     if (reply_id == -1) {
         dw_log("Got a REPLY to FORWARD from an unexpected endpoint: %s - Dropped\n", addr_str);
@@ -574,8 +581,11 @@ int handle_forward_reply(int req_id, dw_poll_t *p_poll, conn_worker_info_t* info
 
     if (--(req->fwd_replies_left) <= 0) {
         message_t *m = req_get_message(req);
+        void *msg_end = message_end(req_m);
         m->status = fwd_m_status;
-        req->curr_cmd = cmd_skip(req->curr_cmd, 1);
+        req->curr_cmd = cmd_bounded_skip(req->curr_cmd, 1, msg_end);
+        if (req->curr_cmd == NULL)
+            dw_log("handle_forward_reply went out of bounds somewhere, on req_id:%d\n", req->req_id);
         
         // reply mask reset 
         req->fwd_replies_mask = 0;
@@ -811,8 +821,9 @@ void close_and_forget(dw_poll_t *p_poll, int sock) {
 int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_t *infos) {
     message_t *m = req_get_message(req);
     int conn_id = req->conn_id;
+    void *msg_end = message_end(m);
 
-    for (command_t *cmd = req->curr_cmd; cmd->cmd != EOM; cmd = cmd_skip(cmd, 1)) {
+    for (command_t *cmd = req->curr_cmd; cmd && cmd->cmd != EOM; cmd = cmd_bounded_skip(cmd, 1, msg_end)) {
         dw_log("PROCESS conn_id: %d, req_id: %d,  command: %s\n", req->conn_id, req->req_id, get_command_name(cmd->cmd));
         switch(cmd->cmd) {
         case COMPUTE:
@@ -829,31 +840,33 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             }
             return 0;
         case REPLY:
-            dw_log("Handling REPLY: req_id=%d\n", m->req_id);
-            if (conn_get_status_by_id(req->conn_id) != CLOSE && !reply(req, m, cmd, infos)) {
-                dw_log("reply() returned, conn_id: %d\n", conn_id);
-                
+            dw_log("process_single_message: Handling REPLY: req_id=%d\n", m->req_id);
+            int reply_result = reply(req, m, cmd, infos);
+            dw_log("process_single_message: Handling REPLY: req_id=%d, we got reply_result:%d\n", m->req_id, reply_result);
+            if (conn_get_status_by_id(req->conn_id) != CLOSED && !reply_result) {
+                dw_log("process_single_message: reply() returned, conn_id: %d\n", conn_id);
+
                 if (conn_get_status_by_id(req->conn_id) == SENDING) {
-                    dw_log("Message req_id=%d is still sending after REPLY, conn_id: %d\n", m->req_id, conn_id);
+                    dw_log("process_single_message: Message req_id=%d is still sending after REPLY, conn_id: %d\n", m->req_id, conn_id);
                     sys_check(dw_poll_mod(p_poll, conns[req->conn_id].sock, DW_POLLOUT | DW_POLLONESHOT, i2l(SOCKET, conn_id)));
                     return 1;
                 } else {
-                    dw_log("Closing connection conn_id: %d after failed REPLY\n", conn_id);
+                    dw_log("process_single_message: Closing connection conn_id: %d after failed REPLY\n", conn_id);
                     close_and_forget(p_poll, conns[conn_id].sock);
                     return -1;
                 }
             }
             if (conn_get_status_by_id(req->conn_id) == SENDING) {
-
-                dw_log("Message req_id=%d is still sending after REPLY, conn_id: %d\n", m->req_id, conn_id);
+                dw_log("process_single_message:Message req_id=%d is still sending after REPLY, conn_id: %d\n", m->req_id, conn_id);
                 sys_check(dw_poll_mod(p_poll, conns[conn_id].sock, DW_POLLOUT | DW_POLLONESHOT, i2l(SOCKET, conn_id)));
             }
             // any further cmds[] for replied-to hop, not me
+            dw_log("process_single_message: case REPLY completed, with reply result: %d, will now return 1\n", reply_result);
             return 1;
         case STORE:
         case LOAD: {
             storage_req_t w = { .worker_id = infos->worker_id, .req_id = req->req_id };
-            int cmds_len = ((unsigned char*)cmd_next(cmd) - (unsigned char*)cmd);
+            int cmds_len = cmd_type_size(cmd->cmd);
             memcpy(&w.cmd, cmd, cmds_len);
 
             // determine which storage worker to use based on store/load option device id, and send the request to it
@@ -874,7 +887,7 @@ int process_single_message(req_info_t *req, dw_poll_t *p_poll, conn_worker_info_
             if (cmd->cmd == STORE && !cmd_get_opts(store_opts_t, cmd)->wait_sync)
                 break;
 
-            req->curr_cmd = cmd_next(cmd);
+            req->curr_cmd = cmd_bounded_next(cmd, msg_end);
             return 0;
         }
         default:
@@ -1005,7 +1018,7 @@ void handle_timeout(dw_poll_t *p_poll, conn_worker_info_t *infos) {
     } else if (req->fwd_on_fail_skip > 0) {
         dw_log("TIMEOUT expired, req_id: %d, failed, skipping: %d\n", req->req_id, req->fwd_on_fail_skip);
         
-        req->curr_cmd = cmd_skip(req->curr_cmd, req->fwd_on_fail_skip);
+        req->curr_cmd = cmd_bounded_skip(req->curr_cmd, req->fwd_on_fail_skip, message_end(m));
         m->status = TIMEOUT;
         process_messages(req, p_poll, infos);
     } else {
@@ -1088,7 +1101,8 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     return;
 
  err:
-    if (conns->proto == TCP && conn_get_status(conn) == READY) {
+     dw_log("exec_request: entering goto err from conn_id=%d\n", conn_id);
+    if (conn->proto == TCP && conn_get_status(conn) == READY) {
         infos->active_conns--;
     }
     close_and_forget(p_poll, conn->sock);
@@ -1115,10 +1129,11 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
                         
                     // Go to last REPLY
                     command_t *itr = tmp->curr_cmd;
-                    while (itr->cmd != EOM && itr->cmd != REPLY)
-                        itr = cmd_skip(tmp->curr_cmd, 1);
+                    void *msg_end = message_end(m);
+                    while (itr && itr->cmd != EOM && itr->cmd != REPLY)
+                        itr = cmd_bounded_skip(itr, 1, msg_end);
 
-                    if (itr->cmd == EOM) { // brutal
+                    if (!itr || !cmd_in_bounds(itr, msg_end) || itr->cmd == EOM) { // brutal
                         close_and_forget(p_poll, pending_conn->sock);
                     } else { // graceful
                         tmp->curr_cmd = itr;
@@ -1315,9 +1330,11 @@ void* conn_worker(void* args) {
             int s = infos->listen_socks[i];
             if (s < 0) continue;
             int conn_id = conn_find_sock(s);
+            conn_info_t *conn = conn_get_by_id(conn_id);
+            assert(conn);
 
             uint64_t aux;
-            if(conn_id == -1) // TCP/TLS
+            if (conn->proto == TCP || conn->proto == TLS)
                 aux = i2l(LISTEN, s);
             else // UDP
                 aux = i2l(SOCKET, conn_id);
@@ -1818,11 +1835,15 @@ void init_listen_sock(int i, accept_mode_t accept_mode, proto_t proto, struct so
             sys_check(lsock = socket(AF_INET, SOCK_STREAM, 0));
         } else {
             sys_check(lsock = socket(AF_INET, SOCK_DGRAM, 0));
-            int conn_id = conn_alloc(lsock, serverAddr, UDP);
-            check(conn_id != -1, "conn_alloc() failed, terminating!");
-            conn_set_status_by_id(conn_id, READY);
-            conn_get_by_id(conn_id)->enable_defrag = enable_defrag;
         }
+        int conn_id = conn_alloc(lsock, serverAddr, proto);
+        check(conn_id != -1, "conn_alloc() failed, terminating!");
+        conn_set_status_by_id(conn_id, READY);
+        conn_get_by_id(conn_id)->enable_defrag = enable_defrag;
+        // TCP/TLS listen sockets must be excluded from conn_find_existing(), a UDP socket is shared
+        if (proto == TCP || proto == TLS)
+            conn_get_by_id(conn_id)->is_listen = 1;
+
         int val = 1;
         sys_check(setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, (void *)&val, sizeof(val)));
         if (accept_mode == AM_CHILD)
