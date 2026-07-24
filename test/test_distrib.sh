@@ -1,6 +1,7 @@
 #!/bin/bash
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
 run test_distrib_debug -h
 run test_distrib_debug --help

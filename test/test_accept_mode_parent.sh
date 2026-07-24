@@ -2,9 +2,10 @@
 
 # ASSUMPTION: round-robin load balacing
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
-tmp=$(mktemp /tmp/test_accept_mode_parent-XXX.txt)
+tmp=$(mktemp /tmp/dw-test_accept_mode_parent-0-XXX.txt)
 
 node_bg -a parent --nt 3 &> $tmp
 
@@ -17,6 +18,8 @@ cat $tmp | grep assigned | head -3 | tail -1 | grep -q "assigned to dwn_conn_2"
 kill_all SIGINT
 cat $tmp
 rm $tmp
+
+tmp=$(mktemp /tmp/dw-test_accept_mode_parent-1-XXX.txt)
 
 node_bg -a parent --nt 2
 

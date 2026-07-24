@@ -1,21 +1,33 @@
-dw_client
-dw_node
+# avoid src/ build files 
+src/dw_client*
+src/dw_node*
+src/dw_proxy*
+src/test_ccmd*
+src/test_distrib*
+src/test_message*
+src/test_pqueue*
+src/test_queue*
+src/test_timespec*
 
-dw_client_debug
-dw_client_tsan
-dw_node_debug
-dw_node_tsan
+# unignore all sourcefiles
+!src/*.c
+!src/*.h
 
-test_distrib
-test_ccmd
-test_struct_tsan
 
+# Ignore all build and gcovr files
+*.d
 *.o
 *.data
-
-.vscode
-.dir-locals.el
 
 *.gcno 
 *.gcda 
 *.gcov
+
+
+# Other files to ignore
+
+test/log_tests.txt
+
+.idea
+.vscode
+.dir-locals.el

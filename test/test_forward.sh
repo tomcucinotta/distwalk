@@ -1,10 +1,11 @@
 #!/bin/bash
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
-TMP_N0=$(mktemp /tmp/dw-node-fwd-1-XXX.txt)
-TMP_N1=$(mktemp /tmp/dw-node-fwd-2-XXX.txt)
-TMP_C0=$(mktemp /tmp/dw-client-fwd-XXX.txt)
+TMP_N0=$(mktemp /tmp/dw-test_forward-10-node-XXX.txt)
+TMP_N1=$(mktemp /tmp/dw-test_forward-11-node-XXX.txt)
+TMP_C0=$(mktemp /tmp/dw-test_forward-1c0-client-XXX.txt)
 
 node_bg -b :7891 &> $TMP_N0
 node_bg -b :7892 &> $TMP_N1
@@ -23,20 +24,32 @@ cat $TMP_N1 | grep -q "Handling REPLY:"
 
 cat $TMP_C0 | grep -q "is over (after receive/skip of pkt 0), closing socket"
 
+rm $TMP_N0
+rm $TMP_N1
+rm $TMP_C0
+
+# ---
+
+TMP_N0=$(mktemp /tmp/dw-test_forward-20-node-XXX.txt)
+TMP_C0=$(mktemp /tmp/dw-test_forward-2c0-client-XXX.txt)
+
 node_bg &> $TMP_N0
 
+# test forwarding to a non-existing client
 client -C 1000 -F localhost:7895 -C 2000 &> $TMP_C0 &
 sleep 1
 
 kill_all SIGINT
-cat $TMP_N0 | grep -q "Connection to remote peer refused, conn_id=1"
+cat $TMP_N0 | grep -q "Connection to remote peer refused, conn_id=2"
 
-#
-TMP_N0=$(mktemp /tmp/dw-node-fwd-1-XXX.txt)
-TMP_N1=$(mktemp /tmp/dw-node-fwd-2-XXX.txt)
-TMP_N2=$(mktemp /tmp/dw-node-fwd-3-XXX.txt)
+rm $TMP_N0
+rm $TMP_C0
 
-TMP_C0=$(mktemp /tmp/dw-client-fwd-XXX.txt)
+# ---
+
+TMP_N0=$(mktemp /tmp/dw-test_forward-30-node-XXX.txt)
+TMP_N1=$(mktemp /tmp/dw-test_forward-31-node-XXX.txt)
+TMP_N2=$(mktemp /tmp/dw-test_forward-32-node-XXX.txt)
 
 node_bg -b :7891 &> $TMP_N0
 node_bg -b :7892 &> $TMP_N1
@@ -51,6 +64,16 @@ cat $TMP_N0 | grep -q "Forwarding req 0 to 127.0.0.1:7893"
 cat $TMP_N1 | grep -q "COMPUTE(1000us)->REPLY(512b)->EOM"
 cat $TMP_N2 | grep -q "COMPUTE(2000us)->REPLY(512b)->EOM"
 kill_all SIGINT
+
+rm $TMP_N0
+rm $TMP_N1
+rm $TMP_N2
+
+# ---
+
+TMP_N0=$(mktemp /tmp/dw-test_forward-40-XXX.txt)
+TMP_N1=$(mktemp /tmp/dw-test_forward-41-XXX.txt)
+TMP_N2=$(mktemp /tmp/dw-test_forward-42-XXX.txt)
 
 node_bg -b :7891 &> $TMP_N0
 node_bg -b :7892 &> $TMP_N1
@@ -70,4 +93,3 @@ rm $TMP_N0
 rm $TMP_N1
 rm $TMP_N2
 
-rm $TMP_C0

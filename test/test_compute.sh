@@ -1,9 +1,10 @@
 #!/bin/bash
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
-tmp_node=$(mktemp /tmp/log-node-XXX.txt)
-tmp_client=$(mktemp /tmp/log-client-XXX.txt)
+tmp_node=$(mktemp /tmp/dw-log-test_compute-node-XXX.txt)
+tmp_client=$(mktemp /tmp/dw-log-test_compute-client-XXX.txt)
 
 node_bg > $tmp_node
 

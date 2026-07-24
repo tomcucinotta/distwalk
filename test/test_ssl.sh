@@ -15,7 +15,7 @@
 
 kill_all SIGKILL
 
-TESTDIR=$(mktemp -d /tmp/test_ssl_edge.XXXX)
+TESTDIR=$(mktemp -d /tmp/dw-test_ssl_edge.XXXX)
 echo "Using temporary directory: $TESTDIR"
 
 # ---------------------------------------------------------------------

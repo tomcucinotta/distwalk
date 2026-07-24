@@ -1,8 +1,9 @@
 #!/bin/bash
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
-tmp=$(mktemp /tmp/test_retry_failure-XXX.txt)
+tmp=$(mktemp /tmp/dw-test_retry_failure-XXX.txt)
 
 client_bg --to=tcp://127.0.0.1:7894 --retry-num 2 --retry-period 200 &> $tmp
 
@@ -11,3 +12,5 @@ node_bg -b :7894
 
 cat $tmp
 cat $tmp | grep -q "Connection to 127.0.0.1:7894 failed:"
+
+rm $tmp
