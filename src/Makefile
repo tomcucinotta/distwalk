@@ -4,7 +4,7 @@ MAKEFILE_DIR := $(dir $(firstword $(MAKEFILE_LIST)))
 TOPDIR       := $(abspath $(MAKEFILE_DIR)/..)
 
 CFLAGS=-Wall -O3
-CFLAGS_DEBUG=-g -DDW_DEBUG -Wall -fprofile-arcs -ftest-coverage -fprofile-update=atomic
+CFLAGS_DEBUG=-g -DDW_DEBUG -Wall -fprofile-arcs -ftest-coverage -fprofile-update=atomic -fsanitize=address -fsanitize=undefined
 CFLAGS_TSAN=-g -Wall -O2 -fsanitize=thread
 LDLIBS=-pthread -lm -lssl -lcrypto
 LDLIBS_DEBUG=-pthread -lm -lssl -lcrypto -lgcov

@@ -1212,6 +1212,9 @@ static error_t argp_client_parse_opt(int key, char *arg, struct argp_state *stat
     return 0;
 }
 
+static char** script_parse_argv = NULL;
+static int script_parse_argc = 0;
+
 int script_parse(char *fname, struct argp_state *state) {
     FILE *f = fopen(fname, "r");
     check(f != NULL, "Could not open script file: %s\n", fname);
@@ -1258,8 +1261,18 @@ int script_parse(char *fname, struct argp_state *state) {
         }
     }
 
-    free(argv);
+    script_parse_argv = argv;
+    script_parse_argc = argc;
     return 0;
+}
+
+void script_parse_cleanup() {
+    if (script_parse_argv != NULL) {
+        for (int i=0; i<script_parse_argc; i++) {
+            free(script_parse_argv[i]);
+        }
+        free(script_parse_argv);
+    }
 }
 
 // csv output, there is just the values separated with a separator 
@@ -1536,6 +1549,9 @@ int main(int argc, char *argv[]) {
         fclose(output_fp);
         output_fp = NULL;
     }
+
+    // if the argp_parse read from a file, cleanup the allocated strings
+    script_parse_cleanup();
 
     return 0;
 }

@@ -425,3 +425,7 @@ double pd_avg(pd_spec_t *p) {
     }
     return rv;
 }
+
+void pd_cleanup(const pd_spec_t *p) {
+    if (p->prob == SFILE) free(p->samples);
+}
