@@ -105,7 +105,7 @@ strace_node_bg() {
     run strace -f dw_node_debug "${DW_NODE_ARGS[@]}" &
     id=$[$id+1]
     for ((i=0; i<5; i++)); do
-        n=$(netstat -anp --inet 2> /dev/null | grep -c dw_node || true)
+        n=$(netstat -anp --inet 2> /dev/null | grep -c dw_node_debug || true)
         if [ $n -eq $n_exp ]; then
             break;
         fi
