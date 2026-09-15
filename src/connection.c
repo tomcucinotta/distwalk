@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <sys/sendfile.h>
+#include <linux/errqueue.h>
 
 
 
@@ -62,6 +63,10 @@ void conn_init() {
         conns[i].ssl = NULL;
         conns[i].ssl_handshake_done = 0;
         conns[i].ssl_is_server = 0;
+        conns[i].use_zc = 0;
+        conns[i].zc_tracking_count = 0;
+        conns[i].zc_release_index = 0;
+        conns[i].zc_next_id = 0;
         pthread_mutex_init(&conns[i].ssl_mtx, NULL);
     }
 }
@@ -238,6 +243,29 @@ int conn_del_sock(int sock) {
     return id;
 }
 
+int conn_enable_zc(conn_info_t *conn) {
+    if (conn == NULL || conn->sock < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (conn->use_ssl) {
+        errno = EOPNOTSUPP;
+        return -1;
+    }
+    int enable = 1;
+
+    if (setsockopt(conn->sock, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof(enable)) < 0) {
+        fprintf(stderr, "setsockopt(SO_ZEROCOPY) failed on conn_id=%d: %s\n",
+                conn_get_id_by_ptr(conn), strerror(errno));
+        return -1;
+    }
+    conn->use_zc = 1;
+    dw_log("ZEROCOPY enabled on conn_id=%d\n", conn_get_id_by_ptr(conn));
+    fprintf(stderr, "ZEROCOPY enabled on conn_id=%d\n", conn_get_id_by_ptr(conn));
+    return 0;
+}
+
 void conn_free(int conn_id) {
     if (conn_id < 0)
         return;
@@ -295,6 +323,10 @@ int conn_alloc(int conn_sock, struct sockaddr_in target, proto_t proto) {
     conns[conn_id].ssl = NULL;
     conns[conn_id].ssl_handshake_done = 0;
     conns[conn_id].ssl_is_server = 0;
+    conns[conn_id].use_zc = 0;
+    conns[conn_id].zc_tracking_count = 0;
+    conns[conn_id].zc_release_index = 0;
+    conns[conn_id].zc_next_id = 0;
 
     dw_log("CONN allocated, conn_id: %d\n", conn_id);
     conns[conn_id].curr_recv_buf = conns[conn_id].recv_buf;
@@ -325,7 +357,7 @@ unsigned char *get_send_buf(conn_info_t *pc, size_t size) {
 }
 
 message_t* conn_prepare_send_message(conn_info_t *conn) {
-    message_t* m = (message_t*) (conn->send_buf + conn->curr_send_size);
+    message_t* m = (message_t*) (conn->curr_send_buf + conn->curr_send_size);
     m->req_size = BUF_SIZE - (conn->curr_send_buf - conn->send_buf + conn->curr_send_size);
     return m;
 }
@@ -391,10 +423,10 @@ int conn_start_sendfile(conn_info_t *conn, struct sockaddr_in target, int fd_sen
 // start sending a message, assume the head of the curr_send_buffer is a message_t type
 // returns the number of bytes sent, -1 if an error occured
 int conn_start_send(conn_info_t *conn, struct sockaddr_in target) {
-    message_t *m = (message_t*) (conn->send_buf + conn->curr_send_size);
+    message_t *m = (message_t*) (conn->curr_send_buf + conn->curr_send_size);
     conn->target = target;
     dw_log("SEND starting, conn_id: %d, status: %s, msg_size: %d\n", conn_get_id_by_ptr(conn), conn_status_str(conn->status), m->req_size);
-    if (conn->curr_send_size == 0)
+    if (conn->curr_send_size == 0 && !conn->use_zc)
         conn->curr_send_buf = conn->send_buf;
     // move end of send operation forward by size bytes
     conn->curr_send_size += m->req_size;
@@ -481,7 +513,19 @@ int conn_send(conn_info_t *conn) {
     if (conn->use_ssl)
         return conn_ssl_send(conn);
 
-    ssize_t sent = sendto(sock, conn->curr_send_buf, conn->curr_send_size, MSG_NOSIGNAL, (const struct sockaddr*)&conn->target, sizeof(conn->target));
+    int flags = MSG_NOSIGNAL;
+
+    if (conn->use_zc)
+        flags |= MSG_ZEROCOPY;
+
+    if (conn->use_zc && conn->zc_tracking_count >= ZC_TRACKING_SIZE) {
+
+        fprintf(stderr, "ZC tracking array is full\n");
+        errno = ENOBUFS;
+        return -1;
+    }
+
+    ssize_t sent = sendto(sock, conn->curr_send_buf, conn->curr_send_size, flags, (const struct sockaddr*)&conn->target, sizeof(conn->target));
     if (sent == 0) {
         // TODO: should not even be possible, ignoring
         dw_log("SEND returned 0\n");
@@ -505,9 +549,22 @@ int conn_send(conn_info_t *conn) {
     }
     dw_log("SEND returned: %d\n", (int)sent);
 
+    if (conn->use_zc) {
+
+        zc_send_tracking_t *tracking = &conn->zc_tracking[conn->zc_tracking_count];
+
+        tracking->send_id = conn->zc_next_id;
+        tracking->size = (size_t)sent;
+        tracking->confirmed = 0;
+
+        conn->zc_tracking_count++;
+        conn->zc_next_id++;
+    }
+
     conn->curr_send_buf += sent;
     conn->curr_send_size -= sent;
-    if (conn->curr_send_size == 0)
+
+    if (conn->curr_send_size == 0 && !conn->use_zc)
         conn->curr_send_buf = conn->send_buf;
 
     return (int)sent;
@@ -581,6 +638,117 @@ int conn_send_v2(conn_info_t *conn) {
     }
 
     return 1;
+}
+
+static void conn_zc_confirm_range(conn_info_t *conn, uint32_t first_send_id, uint32_t last_send_id) {
+
+    for (size_t i = conn->zc_release_index; i < conn->zc_tracking_count; i++) {
+
+        zc_send_tracking_t *tracking = &conn->zc_tracking[i];
+
+        if (tracking->send_id >= first_send_id && tracking->send_id <= last_send_id) {
+
+            tracking->confirmed = 1;
+        }
+    }
+}
+
+static size_t conn_zc_release_confirmed(conn_info_t *conn) {
+
+    size_t released_size = 0; // not used to update curr_send_buf, can be used for debugging and tests
+
+    while (conn->zc_release_index < conn->zc_tracking_count && conn->zc_tracking_count > 0) {
+
+        zc_send_tracking_t *tracking = &conn->zc_tracking[conn->zc_release_index];
+
+        if (!tracking->confirmed)
+            break;
+
+        released_size += tracking->size;
+        conn->zc_release_index++;
+    }
+
+    // Every stored ZC send has been confirmed, the tracking array can be reset.
+    if (conn->zc_release_index == conn->zc_tracking_count && conn->zc_tracking_count > 0) {
+        conn->zc_release_index = 0;
+        conn->zc_tracking_count = 0;
+
+        // reset the send buffer as every notif has been confirmed 
+        if (conn->curr_send_size == 0)
+        conn->curr_send_buf = conn->send_buf;
+    }
+    return released_size;
+}
+
+// read ZC notifications and return -1 for anything that is not a zc notification 
+// return the number of notifications read otherwise
+int conn_read_zc_notifications(conn_info_t *conn) {
+    int count = 0;
+
+    for (;;) {
+        char data = 0;
+        char control_buf[512] = {0};
+
+        struct iovec iov = {
+            .iov_base = &data,
+            .iov_len = sizeof(data),
+        };
+        struct msghdr msg = {
+            .msg_iov = &iov,
+            .msg_iovlen = 1,
+            .msg_control = control_buf,
+            .msg_controllen = sizeof(control_buf),
+        };
+        ssize_t ret = recvmsg(conn->sock, &msg, MSG_ERRQUEUE | MSG_DONTWAIT);
+
+        if (ret < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break;
+
+            fprintf(stderr, "recvmsg(MSG_ERRQUEUE) failed on conn_id=%d: %s\n",
+                    conn_get_id_by_ptr(conn), strerror(errno));
+            return -1;
+        }
+        for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+
+            if (cmsg->cmsg_level == SOL_IP && cmsg->cmsg_type == IP_RECVERR) {
+
+                struct sock_extended_err *serr = (struct sock_extended_err *)CMSG_DATA(cmsg);
+
+                if (serr->ee_origin == SO_EE_ORIGIN_ZEROCOPY) {
+
+                    // in case of ZEROCOPY fallback 
+                    if (serr->ee_code == SO_EE_CODE_ZEROCOPY_COPIED) {
+                        dw_log("ZEROCOPY fallback to copy on conn_id=%d\n",conn_get_id_by_ptr(conn));
+                        fprintf(stderr, "ZEROCOPY fallback to copy on conn_id=%d\n", conn_get_id_by_ptr(conn));
+                    }
+
+                    uint32_t first_send_id = serr->ee_info;
+                    uint32_t last_send_id = serr->ee_data;
+
+                    count++;
+
+                    dw_log("ZEROCOPY notification conn_id=%d, ids=[%u,%u]\n",
+                           conn_get_id_by_ptr(conn), first_send_id, last_send_id);
+                    fprintf(stderr, "ZEROCOPY notification conn_id=%d, ids=[%u,%u]\n",
+                           conn_get_id_by_ptr(conn), first_send_id, last_send_id);
+
+                    conn_zc_confirm_range(conn, first_send_id, last_send_id);
+                    size_t released = conn_zc_release_confirmed(conn);
+
+                    dw_log("ZEROCOPY released %zu bytes\n", released);
+                    fprintf(stderr, "ZEROCOPY released %zu bytes\n", released);
+                }
+                // in case of other errors, return -1 so that the caller can handle it and close the connection
+                else {
+                    dw_log("Error notification on conn_id=%d: origin=%u, code=%u, info=%u, data=%u\n",
+                           conn_get_id_by_ptr(conn), serr->ee_origin, serr->ee_code, serr->ee_info, serr->ee_data);
+                    return -1;
+                }
+            }
+        }
+    }
+    return count;
 }
 
 // return 1 if received succesfully, -1 on EAGAIN or EWOULDBLOCK, and 0 on other errors
