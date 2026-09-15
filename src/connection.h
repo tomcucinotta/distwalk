@@ -15,6 +15,16 @@
 
 #define MAX_CONNS 8192
 
+#ifndef SO_ZEROCOPY
+#define SO_ZEROCOPY 60
+#endif
+
+#ifndef MSG_ZEROCOPY
+#define MSG_ZEROCOPY 0x4000000
+#endif
+#define ZC_TRACKING_SIZE 256
+
+
 typedef enum {
     NOT_INIT,
     READY,
@@ -24,6 +34,12 @@ typedef enum {
     CLOSE,
     STATUS_NUMBER  // keep this as last
 } conn_status_t;
+
+typedef struct {
+    uint32_t send_id;   // ID associated with one successful MSG_ZEROCOPY send
+    size_t size;        // number of bytes sent with this ID
+    int confirmed;      // 1 when the kernel notification for this ID was received
+} zc_send_tracking_t;
 
 typedef struct {
     proto_t proto;                // transport protocol to use (TCP or UDP)
@@ -68,6 +84,15 @@ typedef struct {
     int ssl_handshake_done;       // 1 if handshake is complete
     int ssl_is_server;            // 1 if server side, 0 if client
     pthread_mutex_t ssl_mtx;      // protects non-blocking handshake
+
+    // Zero-copy support
+    int use_zc;                   // 1 if zero-copy is enabled for this connection
+
+    zc_send_tracking_t zc_tracking[ZC_TRACKING_SIZE]; // tracking for zero-copy sends
+    size_t zc_tracking_count;    // number of zero-copy sends stored in the tracking array
+    size_t zc_release_index;        // index of the next zero-copy send to release (not yet released)
+
+    uint32_t zc_next_id;          // ID for the next MSG_ZEROCOPY send
 } conn_info_t;
 
 extern conn_info_t conns[MAX_CONNS];
@@ -75,7 +100,7 @@ extern conn_info_t conns[MAX_CONNS];
 const char *conn_status_str(conn_status_t s);
 
 void conn_init();
-
+int conn_enable_zc(conn_info_t *conn);
 int conn_alloc(int sock, struct sockaddr_in target, proto_t proto);
 void conn_free(int conn_id);
 
@@ -109,7 +134,7 @@ int conn_send(conn_info_t *conn);
 int conn_send_v2(conn_info_t *conn);
 int conn_recv(conn_info_t *conn);
 int conn_flush(conn_info_t *conn);
-
+int conn_read_zc_notifications(conn_info_t *conn);
 
 int conn_enable_ssl(int conn_id, SSL_CTX *ctx, int is_server);
 int conn_do_ssl_handshake(int conn_id);

@@ -207,6 +207,8 @@ int listen_backlog = 5;
 
 int terminationfd; // special signalfd to handle termination
 
+int use_zc = 0; // zero-copy mode on 0 by default
+
 // -1: old frequency-invariant behavior
 //  0: automatically compute calibration value, store it to ~/.dw_loops_per_usec, and reload it from there
 // >0: set explicitly calibration value
@@ -420,6 +422,15 @@ command_t *single_start_forward(req_info_t *req, message_t *m, command_t *cmd, d
             return NULL;
         }
         fwd_conn = conn_get_by_id(fwd_conn_id);
+
+        if (use_zc && fwd.proto == TCP) {
+            if (conn_enable_zc(fwd_conn) < 0) {
+                fprintf(stderr, "Could not enable ZEROCOPY on forward conn_id=%d\n", fwd_conn_id);
+                close(clientSocket);
+                conn_free(fwd_conn_id);
+                return NULL;
+            }
+        }
 
         fwd_conn->enable_defrag = enable_defrag;
         if (fwd.proto == TCP || fwd.proto == TLS) {
@@ -1041,9 +1052,44 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     if ((type == SOCKET || type == CONNECT) && (conn->sock == -1 || conn->recv_buf == NULL))
         return;
 
-    if (pflags & DW_POLLERR || pflags & DW_POLLHUP) {
+    if (pflags & DW_POLLHUP) {
         dw_log("Connection to remote peer refused, conn_id=%d\n", conn_id);
         goto err;
+    }
+
+    /*
+    * ZEROCOPY completions are reported as POLLERR / EPOLLERR, and poll() and epoll() 
+    * can return these events directly.
+    *
+    * select() has no separate POLLERR event. Its exceptfds set is mainly associated with EPOLLPRI-like 
+    * exceptional events, but ZEROCOPY completions only report EPOLLERR, so exceptfds is not triggered here.
+    *
+    * With select(), the error condition wakes readfds/writefds instead, without saying if it comes 
+    * from normal I/O or from the error queue.
+    * Therefore, if ZEROCOPY sends are still pending, the error queue is checked directly with a non-blocking read.
+    */
+    if (p_poll->poll_type == DW_SELECT && conn->use_zc && conn->zc_tracking_count > 0) {
+
+        int zc_notif = conn_read_zc_notifications(conn);
+
+        if (zc_notif < 0) {
+            dw_log("Error while reading ZEROCOPY notifications, conn_id=%d\n", conn_id);
+            goto err;
+        }
+    }
+    if (pflags & DW_POLLERR) {
+        // zc notifications are read on the error queue 
+        if (conn->use_zc){
+            int zc_notif = conn_read_zc_notifications(conn);
+            if (zc_notif < 0) {
+                dw_log("Connection to remote peer refused, conn_id=%d\n", conn_id);
+                goto err;
+            } 
+        }
+        else {
+            dw_log("Connection to remote peer refused, conn_id=%d\n", conn_id);
+            goto err;
+        }
     }
 
     if (pflags & DW_POLLIN) {
@@ -1080,7 +1126,7 @@ void exec_request(dw_poll_t *p_poll, dw_poll_flags pflags, int conn_id, event_t 
     dw_log("conns[%d].status=%d (%s)\n", conn_id, conn_get_status(conn), conn_status_str(conn_get_status(conn)));
 
     // check whether we have new or leftover messages to process
-    dw_log("calling obtain_messages() from conn_id=%d's recv buffer\n", conn_id)
+    dw_log("calling obtain_messages() from conn_id=%d's recv buffer\n", conn_id);
     if (!obtain_messages(conn_id, p_poll, infos))
         goto err;
 
@@ -1463,8 +1509,18 @@ void* conn_worker(void* args) {
                         conn_free(conn_id);
                         continue;
                     }
-                } else
+                }
+                else {
+                    if (use_zc && p == TCP) {
+                        if (conn_enable_zc(conn_get_by_id(conn_id)) < 0) {
+                            fprintf(stderr, "Could not enable ZEROCOPY on conn_id = %d\n", conn_id);
+                            close_and_forget(&infos->dw_poll, conn_sock);
+                            conn_free(conn_id);
+                            continue;
+                        }
+                    } 
                     conn_set_status_by_id(conn_id, READY);
+                }
 
                 conn_get_by_id(conn_id)->enable_defrag = enable_defrag;
                 infos->active_conns++;
@@ -1576,7 +1632,8 @@ enum argp_node_option_keys {
     SSL_CA_FILE,
     SSL_CIPHERS,
     SSL_CA_PATH,
-    SSL_VERIFY
+    SSL_VERIFY,
+    ZEROCOPY
 };
 
 struct argp_node_arguments {
@@ -1628,6 +1685,7 @@ static struct argp_option argp_node_options[] = {
     {"ssl-ciphers",       SSL_CIPHERS,       "CIPHERS",                       0,  "Allowed SSL ciphers" },
     {"ssl-ca-path",       SSL_CA_PATH,       "DIR",                           0,  "Server SSL CA path" },
     {"ssl-verify",        SSL_VERIFY,        0,                               0,  "Enable peer certificate verification"},
+    {"zc",                ZEROCOPY,          0,                               0,   "Enable MSG_ZEROCOPY for TCP sends"},
     { 0 }
 };
 
@@ -1804,6 +1862,9 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case SSL_VERIFY:
         arguments->ssl_verify = 1;
+        break;
+    case ZEROCOPY:
+        use_zc = 1;
         break;
     default:
         return ARGP_ERR_UNKNOWN;
