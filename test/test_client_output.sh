@@ -22,13 +22,15 @@ check_fail_contains() {
 
     err="$TMPDIR/err.txt"
 
-    set +e
-    run dw_client_debug "$@" > /dev/null 2> "$err"
-    status=$?
+    # Simply running the client would return non-zero on expected failure, 
+    #   which would then fire the ERR trap and call kill_all, 
+    #   and then the set -e of common.sh would abort.
+    # However, both <ERR> trap and <set -e> are suppressed for a command if it is: 
+    #   - the condition of if/elif/while/until
+    #   - a non-last element of a && or || list
+    #   - inverted with !.
+    ! run dw_client_debug "$@" > /dev/null 2> "$err"
     id=$[$id+1]
-    set -e
-
-    [ $status -ne 0 ]
     grep -q "$expected" "$err"
 }
 

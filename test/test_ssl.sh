@@ -63,7 +63,7 @@ echo "Test 2: Server plain, client SSL"
 node_bg   # start server without --ssl
 sleep 1
 client --to ssl:// --ssl-cert "$TESTDIR/client.crt" --ssl-key "$TESTDIR/client.key" --ssl-ca "$TESTDIR/ca.crt" --ssl-ciphers "ECDHE-RSA-AES256-GCM-SHA384" -C 1000 -n 3 > $TESTDIR/test2.log 2>&1
-if greq -q "SSL handshake failed" $TESTDIR/test2.log; then
+if grep -q "SSL handshake failed" $TESTDIR/test2.log; then
     echo "Test 2 ERROR: Expected failure due to SSL mismatch (server plain, client SSL)."
     exit 1
 else
