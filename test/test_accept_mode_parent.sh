@@ -5,7 +5,7 @@
 mydir=$(dirname "$0")
 source "$mydir/common.sh"
 
-tmp=$(mktemp /tmp/dw-test_accept_mode_parent-0-XXX.txt)
+tmp=$(tmpfile dw-test_accept_mode_parent-0)
 
 node_bg -a parent --nt 3 &> $tmp
 
@@ -19,7 +19,7 @@ kill_all SIGINT
 cat $tmp
 rm $tmp
 
-tmp=$(mktemp /tmp/dw-test_accept_mode_parent-1-XXX.txt)
+tmp=$(tmpfile dw-test_accept_mode_parent-1)
 
 node_bg -a parent --nt 2
 

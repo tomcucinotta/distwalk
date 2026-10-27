@@ -1,8 +1,9 @@
 #!/bin/bash
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
-TMP=$(mktemp /tmp/dw-loadstore_odirect-XXX.txt)
+TMP=$(tmpfile dw-test_loadstore_odirect)
 
 node_bg -s $TMP --odirect
 client -S 33554432

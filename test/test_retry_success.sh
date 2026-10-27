@@ -3,7 +3,7 @@
 mydir=$(dirname "$0")
 source "$mydir/common.sh"
 
-tmp=$(mktemp /tmp/dw-test_retry_success-XXX.txt)
+tmp=$(tmpfile dw-test_retry_success)
 
 client_bg --to=tcp://127.0.0.1:7894 --retry-num 10 --retry-period 1000 &> $tmp
 client_pid=$!

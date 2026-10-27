@@ -3,9 +3,9 @@
 mydir=$(dirname "$0")
 source "$mydir/common.sh"
 
-TMP_N0=$(mktemp /tmp/dw-test_forward-10-node-XXX.txt)
-TMP_N1=$(mktemp /tmp/dw-test_forward-11-node-XXX.txt)
-TMP_C0=$(mktemp /tmp/dw-test_forward-1c0-client-XXX.txt)
+TMP_N0=$(tmpfile dw-test_forward-10-node)
+TMP_N1=$(tmpfile dw-test_forward-11-node)
+TMP_C0=$(tmpfile dw-test_forward-1c0-client)
 
 node_bg -b :7891 &> $TMP_N0
 node_bg -b :7892 &> $TMP_N1
@@ -30,8 +30,8 @@ rm $TMP_C0
 
 # ---
 
-TMP_N0=$(mktemp /tmp/dw-test_forward-20-node-XXX.txt)
-TMP_C0=$(mktemp /tmp/dw-test_forward-2c0-client-XXX.txt)
+TMP_N0=$(tmpfile dw-test_forward-20-node)
+TMP_C0=$(tmpfile dw-test_forward-2c0-client)
 
 node_bg &> $TMP_N0
 
@@ -47,9 +47,9 @@ rm $TMP_C0
 
 # ---
 
-TMP_N0=$(mktemp /tmp/dw-test_forward-30-node-XXX.txt)
-TMP_N1=$(mktemp /tmp/dw-test_forward-31-node-XXX.txt)
-TMP_N2=$(mktemp /tmp/dw-test_forward-32-node-XXX.txt)
+TMP_N0=$(tmpfile dw-test_forward-30-node)
+TMP_N1=$(tmpfile dw-test_forward-31-node)
+TMP_N2=$(tmpfile dw-test_forward-32-node)
 
 node_bg -b :7891 &> $TMP_N0
 node_bg -b :7892 &> $TMP_N1
@@ -71,9 +71,9 @@ rm $TMP_N2
 
 # ---
 
-TMP_N0=$(mktemp /tmp/dw-test_forward-40-XXX.txt)
-TMP_N1=$(mktemp /tmp/dw-test_forward-41-XXX.txt)
-TMP_N2=$(mktemp /tmp/dw-test_forward-42-XXX.txt)
+TMP_N0=$(tmpfile dw-test_forward-40)
+TMP_N1=$(tmpfile dw-test_forward-41)
+TMP_N2=$(tmpfile dw-test_forward-42)
 
 node_bg -b :7891 &> $TMP_N0
 node_bg -b :7892 &> $TMP_N1

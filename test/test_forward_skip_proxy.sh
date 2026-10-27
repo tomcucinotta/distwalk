@@ -3,9 +3,9 @@
 mydir=$(dirname "$0")
 source "$mydir/common.sh"
 
-TMP_N0=$(mktemp /tmp/dw-test_forward_skip_proxy-node-0-XXX.txt)
-TMP_N1=$(mktemp /tmp/dw-test_forward_skip_proxy-node-1-XXX.txt)
-TMP_C0=$(mktemp /tmp/dw-test_forward_skip_proxy-client-XXX.txt)
+TMP_N0=$(tmpfile dw-test_forward_skip_proxy-node-0)
+TMP_N1=$(tmpfile dw-test_forward_skip_proxy-node-1)
+TMP_C0=$(tmpfile dw-test_forward_skip_proxy-client)
 
 node_bg -b :7891 &> $TMP_N0
 proxy_bg -b :7892 --to :7893 -d 10

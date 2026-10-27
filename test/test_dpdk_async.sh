@@ -1,8 +1,9 @@
 #!/bin/bash
 # Test async DPDK operations: store, load, and DPDK-to-DPDK forward chains
 
-. common.sh
-. dpdk_common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
+source "$mydir/dpdk_common.sh"
 
 dpdk_check_root
 dpdk_check_binary
@@ -14,8 +15,8 @@ NODE2_OPT="-b dpdk://${DPDK_IFACE[2]} -c 3"
 NODE3_OPT="-b dpdk://${DPDK_IFACE[3]} -c 4"
 CLIENT_OPT="-b dpdk://${DPDK_IFACE[1]} --to dpdk://${DPDK_MAC[0]} --dpdk-rx-cpu 1 --dpdk-tx-cpu 2"
 
-TMP_STORE=$(mktemp /tmp/dw-dpdk-store-XXX.txt)
-TMP_CLIENT=$(mktemp /tmp/dw-dpdk-client-XXX.txt)
+TMP_STORE=$(tmpfile dw-test_dpdk_async-store)
+TMP_CLIENT=$(tmpfile dw-test_dpdk_async-client)
 
 echo "--- store/load over DPDK ---"
 

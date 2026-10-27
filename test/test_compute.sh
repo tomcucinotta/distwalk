@@ -3,8 +3,8 @@
 mydir=$(dirname "$0")
 source "$mydir/common.sh"
 
-tmp_node=$(mktemp /tmp/dw-log-test_compute-node-XXX.txt)
-tmp_client=$(mktemp /tmp/dw-log-test_compute-client-XXX.txt)
+tmp_node=$(tmpfile dw-test_compute-node)
+tmp_client=$(tmpfile dw-test_compute-client)
 
 node_bg > $tmp_node
 

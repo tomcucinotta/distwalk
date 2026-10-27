@@ -11,11 +11,13 @@
 # Temporary certificates and keys are generated on the fly.
 #
 
-. common.sh
+mydir=$(dirname "$0")
+source "$mydir/common.sh"
 
 kill_all SIGKILL
 
-TESTDIR=$(mktemp -d /tmp/dw-test_ssl_edge.XXXX)
+mkdir -p "$DW_TMPDIR"
+TESTDIR=$(mktemp -d "${DW_TMPDIR}/dw-test_ssl_edge-XXXXXX")
 echo "Using temporary directory: $TESTDIR"
 
 # ---------------------------------------------------------------------

@@ -17,6 +17,14 @@ shopt -s expand_aliases
 
 export GCOV_PREFIX_STRIP=$(pwd | sed -e 's#/##' | tr "/" "\n" | wc -l)
 
+DW_TMPDIR=${DW_TMPDIR:-/tmp/dw_test}
+
+# Example: tmp=$(tmpfile dw-test_file-0) -> /tmp/dw_test-Ymd-HMS/dw-test_file-0-abc123
+tmpfile() {
+    mkdir -p "$DW_TMPDIR"
+    mktemp "${DW_TMPDIR}/${1:-tmp}-XXXXXX"
+}
+
 id=0
 
 check_executable() {

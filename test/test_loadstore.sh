@@ -3,8 +3,8 @@
 mydir=$(dirname "$0")
 source "$mydir/common.sh"
 
-TMP=$(mktemp /tmp/dw-loadstore-XXX.txt)
-trace_log=/tmp/dw-loadstore-log.txt
+TMP=$(tmpfile dw-test_loadstore)
+trace_log=$(tmpfile dw-test_loadstore-log)
 
 node_bg -s ${TMP}
 client -S 32000000

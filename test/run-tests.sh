@@ -8,6 +8,10 @@ COL_DEF='\e[m'
 rm -rf *.gcda *.gcov log_tests.txt gcov/ ../src/*.gcda ../src/gcov/
 trap 'exit' SIGINT SIGTERM
 
+# create a different temp dir for each run; tmpfile() in common.sh creates inside this tmp dir
+export DW_TMPDIR=/tmp/dw_test-$(date +%Y%m%d-%H%M%S)
+mkdir -p "$DW_TMPDIR"
+
 #cp ../src/dw_client ../src/dw_client_debug ../src/dw_client_tsan ../src/dw_node ../src/dw_node_debug ../src/dw_node_tsan .
 
 TESTS=

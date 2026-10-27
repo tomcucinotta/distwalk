@@ -40,7 +40,7 @@ node_bg -a shared --num-threads=2
 
 kill_all SIGINT
 
-tmp=/tmp/dw-log-test_accept_mode.txt
+tmp=$(tmpfile dw-test_accept_mode-log)
 
 ## check calls to listen() and bind() with strace
 

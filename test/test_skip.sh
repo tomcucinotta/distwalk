@@ -6,7 +6,7 @@ source "$mydir/common.sh"
 
 echo "TEST SKIP 1"
 
-TMP=$(mktemp /tmp/dw-test_skip-1-node-XXX.txt)
+TMP=$(tmpfile dw-test_skip-1-node)
 
 node_bg &> $TMP
 
@@ -22,7 +22,7 @@ rm $TMP
 #
 echo "TEST SKIP 2"
 
-TMP=$(mktemp /tmp/dw-test_skip-2-node-XXX.txt)
+TMP=$(tmpfile dw-test_skip-2-node)
 node_bg &> $TMP
 
 client -C 50 --skip 2 -C 100 -C 150 -C 200
@@ -39,7 +39,7 @@ rm $TMP
 #
 echo "TEST SKIP EVERY"
 
-TMP=$(mktemp /tmp/dw-test_skip-skip-every-3-node-XXX.txt)
+TMP=$(tmpfile dw-test_skip-skip-every-3-node)
 
 node_bg &> $TMP
 
@@ -55,7 +55,7 @@ rm $TMP
 
 #
 echo "TEST SKIP PROB"
-TMP=$(mktemp /tmp/dw-test_skip-skip-prob-4-node-XXX.txt)
+TMP=$(tmpfile dw-test_skip-skip-prob-4-node)
 
 node_bg &> $TMP
 
@@ -76,8 +76,8 @@ rm $TMP
 #
 echo "TEST SKIP PROB FWD"
 
-TMP1=$(mktemp /tmp/dw-test_skip-fwd-skip-test_skip-5-node1-XXX.txt)
-TMP2=$(mktemp /tmp/dw-test_skip-fwd-skip-test_skip-6-node2-XXX.txt)
+TMP1=$(tmpfile dw-test_skip-fwd-skip-test_skip-5-node1)
+TMP2=$(tmpfile dw-test_skip-fwd-skip-test_skip-6-node2)
 
 node_bg -b :7891 &> $TMP1
 node_bg -b :7892 &> $TMP2
@@ -95,9 +95,9 @@ rm $TMP2
 #
 echo "TEST SKIP PROB FWD FWD"
 
-TMP1=$(mktemp /tmp/dw-test_skip-fwd-fwd-skip-test_skip-7-node1-XXX.txt)
-TMP2=$(mktemp /tmp/dw-test_skip-fwd-fwd-skip-test_skip-8-node2-XXX.txt)
-TMP3=$(mktemp /tmp/dw-test_skip-fwd-fwd-skip-test_skip-9-node3-XXX.txt)
+TMP1=$(tmpfile dw-test_skip-fwd-fwd-skip-test_skip-7-node1)
+TMP2=$(tmpfile dw-test_skip-fwd-fwd-skip-test_skip-8-node2)
+TMP3=$(tmpfile dw-test_skip-fwd-fwd-skip-test_skip-9-node3)
 
 node_bg -b :7891 &> $TMP1
 node_bg -b :7892 &> $TMP2

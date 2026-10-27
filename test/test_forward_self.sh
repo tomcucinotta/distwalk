@@ -3,8 +3,8 @@
 mydir=$(dirname "$0")
 source "$mydir/common.sh"
 
-TMP_N0=$(mktemp /tmp/dw-test_forward_self-node-XXX.txt)
-TMP_C0=$(mktemp /tmp/dw-test_forward_self-client-XXX.txt)
+TMP_N0=$(tmpfile dw-test_forward_self-node)
+TMP_C0=$(tmpfile dw-test_forward_self-client)
 
 node_bg -b :7891 &> $TMP_N0
 

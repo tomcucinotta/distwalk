@@ -3,7 +3,7 @@
 mydir=$(dirname "$0")
 source "$mydir/common.sh"
 
-TMP1=$(mktemp /tmp/dw-test_stats-11-node-XXX.txt)
+TMP1=$(tmpfile dw-test_stats-11-node)
 
 
 echo "Step 1"
@@ -35,7 +35,7 @@ rm $TMP1
 
 
 echo "Step 2"
-TMP1=$(mktemp /tmp/dw-test_stats-21-node-XXX.txt)
+TMP1=$(tmpfile dw-test_stats-21-node)
 node_bg -b :7891 &> $TMP1
 
 client_bg -C 1000 -n 200
@@ -53,8 +53,8 @@ rm $TMP1
 
 
 echo "Step 3"
-TMP1=$(mktemp /tmp/dw-test_stats-31-node1-XXX.txt)
-TMP2=$(mktemp /tmp/dw-test_stats-32-node2-XXX.txt)
+TMP1=$(tmpfile dw-test_stats-31-node1)
+TMP2=$(tmpfile dw-test_stats-32-node2)
 node_bg -b :7891 &> $TMP1
 node_bg -b :7892 &> $TMP2
 

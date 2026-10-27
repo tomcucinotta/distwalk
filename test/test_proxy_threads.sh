@@ -3,8 +3,8 @@
 mydir=$(dirname "$0")
 source "$mydir/common.sh"
 
-tmp_node=$(mktemp /tmp/dw-test_proxy_threads-node-XXX.txt)
-tmp_client=$(mktemp /tmp/dw-test_proxy_threads-client-XXX.txt)
+tmp_node=$(tmpfile dw-test_proxy_threads-node)
+tmp_client=$(tmpfile dw-test_proxy_threads-client)
 
 node_bg -b :7892 &> $tmp_node
 proxy_bg -b :7891 --to :7892

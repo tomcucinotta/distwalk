@@ -25,7 +25,7 @@ kill_all SIGINT
 ! node_bg -p select1
 ! node_bg --poll-mode poll1
 
-tmp=/tmp/dw-log.txt
+tmp=$(tmpfile dw-test_poll_mode-log)
 
 ## check calls to select(), poll() and epoll_ctl() with strace
 
