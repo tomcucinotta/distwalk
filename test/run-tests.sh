@@ -94,6 +94,9 @@ SKIP_EPOLL_RE='test_poll_mode\.sh$'
 SKIP_POLL_RE='test_poll_mode\.sh$'
 SKIP_SELECT_RE='test_poll_mode\.sh$'
 
+# DW_NODE_EXTRA_ARGS <override> any conflicting option in "$@",
+#   via dw_node.c's last-wins argp parsing.
+
 for test in "${TESTS[@]}"; do
     if [[ "$test" == *dpdk* ]]; then
         for mode in veth vf; do
@@ -108,15 +111,15 @@ for test in "${TESTS[@]}"; do
     fi
 
     if ! [[ "$test" =~ $SKIP_EPOLL_RE ]]; then
-        POLL_MODE=epoll run_test "$test" "$test (poll-mode=epoll)"
+        DW_NODE_EXTRA_ARGS="--poll-mode epoll"  run_test "$test" "$test (poll-mode=epoll)"
     fi
 
     if ! [[ "$test" =~ $SKIP_POLL_RE ]]; then
-        POLL_MODE=poll run_test "$test" "$test (poll-mode=poll)"
+        DW_NODE_EXTRA_ARGS="--poll-mode poll"   run_test "$test" "$test (poll-mode=poll)"
     fi
 
     if ! [[ "$test" =~ $SKIP_SELECT_RE ]]; then
-        POLL_MODE=select run_test "$test" "$test (poll-mode=select)"
+        DW_NODE_EXTRA_ARGS="--poll-mode select" run_test "$test" "$test (poll-mode=select)"
     fi
 done
 
