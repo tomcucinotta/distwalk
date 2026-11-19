@@ -111,7 +111,9 @@ int ccmd_dump(queue_t* q, message_t* m) {
                 fprintf(stderr, "ccmd_dump() - Unknown command type\n");
                 exit(EXIT_FAILURE);
         }
-        m_cmd_itr = cmd_next(m_cmd_itr);
+        m_cmd_itr = cmd_bounded_next(m_cmd_itr, message_end(m));
+        if (!m_cmd_itr)
+            return 0;
         ccmd_itr = ccmd_itr->next;
     }
     if (avail < cmd_type_size(EOM))

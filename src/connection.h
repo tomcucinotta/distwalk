@@ -21,7 +21,8 @@ typedef enum {
     SENDING,
     CONNECTING,    // used with TCP only
     SSL_HANDSHAKE, // used with SSL only
-    CLOSE,
+    CLOSING,
+    CLOSED,
     STATUS_NUMBER  // keep this as last
 } conn_status_t;
 
@@ -55,6 +56,8 @@ typedef struct {
     atomic_int busy;             // 1 if conn is allocated, 0 otherwise
     
     int enable_defrag;            // Defragment receive buffer to reduce memory usage
+
+    int is_listen;                // 1 if this conn wraps a listening socket: not usable as a forward conn
 
 #ifdef DPDK_ENABLED
     struct rte_mbuf *rx_mbufs[RX_BURST_SIZE];
