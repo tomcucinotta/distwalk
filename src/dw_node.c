@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sched.h>
 #include <sys/epoll.h>
+#include <sys/mman.h>
 #include <sys/timerfd.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
@@ -149,6 +150,13 @@ typedef struct {
     char storage_path[MAX_STORAGE_PATH_STR];
 
     int use_odirect;
+
+    // mmap()-based storage (-s path,mmap[,sync[=period]])
+    int use_mmap;
+    int mmap_sync;         // 1: msync(MS_SYNC) after each sync STORE, 0: msync(MS_ASYNC)
+    unsigned char *mmap_addr;
+    size_t dirty_beg;      // byte range written since last periodic msync()
+    size_t dirty_end;
 
     size_t max_storage_size;
     size_t storage_offset; //TODO: mutual exclusion here to avoid race conditions in per-client thread mode
@@ -725,8 +733,98 @@ void compute_for(unsigned long usecs) {
 // (Essential, since O_DIRECT bypasses the page caches)
 unsigned long blk_size = 0;
 
+size_t page_size;
+
+// msync() the [beg, end) byte range of the mmap()ed storage
+static void mmap_sync_range(storage_info_t *si, size_t beg, size_t end, int flags) {
+    if (end <= beg)
+        return;
+    size_t abeg = beg / page_size * page_size;
+    dw_log("MSYNC: %s [%lu, %lu)\n", flags == MS_SYNC ? "MS_SYNC" : "MS_ASYNC", abeg, end);
+    if (msync(si->mmap_addr + abeg, end - abeg, flags) < 0)
+        perror("msync() failed");
+}
+
+// msync(MS_SYNC) all data written since the last call (used by periodic sync)
+static void mmap_sync_dirty(storage_info_t *si) {
+    mmap_sync_range(si, si->dirty_beg, si->dirty_end, MS_SYNC);
+    si->dirty_beg = si->dirty_end = 0;
+}
+
+// Position storage_offset for a LOAD/STORE of nbytes on the mmap()ed storage,
+// returning the number of bytes that fit within the mapped region
+static size_t mmap_seek(storage_info_t *si, uint32_t offset, size_t nbytes) {
+    size_t size = si->max_storage_size;
+    if (offset != (uint32_t) -1)
+        si->storage_offset = offset;
+    else if (si->storage_offset + nbytes > size)
+        si->storage_offset = 0;
+    if (si->storage_offset >= size) {
+        fprintf(stderr, "mmap storage: offset %lu beyond storage size %lu, skipping\n", si->storage_offset, size);
+        return 0;
+    }
+    if (si->storage_offset + nbytes > size) {
+        fprintf(stderr, "mmap storage: truncating %lu bytes at offset %lu to storage size %lu\n", nbytes, si->storage_offset, size);
+        nbytes = size - si->storage_offset;
+    }
+    return nbytes;
+}
+
+static void store_mmap(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store_opts) {
+    storage_info_t* si = &(infos->storage_info);
+    size_t total_bytes = mmap_seek(si, store_opts->offset, store_opts->store_nbytes);
+    if (total_bytes == 0)
+        return;
+    size_t beg = si->storage_offset;
+
+    dw_log("STORE (mmap): storing %lu bytes from %lu offset\n", total_bytes, beg);
+
+    for (size_t done = 0; done < total_bytes; ) {
+        size_t bytes = (total_bytes - done > BUF_SIZE) ? BUF_SIZE : (total_bytes - done);
+        memcpy(si->mmap_addr + beg + done, buf, bytes);
+        done += bytes;
+    }
+    si->storage_offset += total_bytes;
+
+    if (infos->periodic_sync_msec > 0) {
+        // msync(MS_SYNC) deferred to the periodic timer
+        if (si->dirty_end <= si->dirty_beg) {
+            si->dirty_beg = beg;
+            si->dirty_end = beg + total_bytes;
+        } else {
+            if (beg < si->dirty_beg)
+                si->dirty_beg = beg;
+            if (beg + total_bytes > si->dirty_end)
+                si->dirty_end = beg + total_bytes;
+        }
+    } else {
+        int flags = (si->mmap_sync && store_opts->wait_sync) ? MS_SYNC : MS_ASYNC;
+        mmap_sync_range(si, beg, beg + total_bytes, flags);
+    }
+}
+
+static void load_mmap(storage_worker_info_t *infos, unsigned char* buf, load_opts_t *load_opts) {
+    storage_info_t* si = &(infos->storage_info);
+    size_t total_bytes = mmap_seek(si, load_opts->offset, load_opts->load_nbytes);
+    size_t beg = si->storage_offset;
+
+    dw_log("LOAD (mmap): loading %lu bytes from %lu offset\n", total_bytes, beg);
+
+    for (size_t done = 0; done < total_bytes; ) {
+        size_t bytes = (total_bytes - done > BUF_SIZE) ? BUF_SIZE : (total_bytes - done);
+        memcpy(buf, si->mmap_addr + beg + done, bytes);
+        done += bytes;
+    }
+    si->storage_offset += total_bytes;
+}
+
 void store(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store_opts) {
     storage_info_t* storage_info = &(infos->storage_info);
+
+    if (storage_info->use_mmap) {
+        store_mmap(infos, buf, store_opts);
+        return;
+    }
 
     size_t total_bytes = store_opts->store_nbytes;
     uint32_t offset = store_opts->offset;
@@ -764,13 +862,18 @@ void store(storage_worker_info_t *infos, unsigned char* buf, store_opts_t *store
     }
     storage_info->storage_offset += total_bytes;
 
-    if (wait_sync && infos->periodic_sync_msec <= 0) { 
+    if (wait_sync && infos->periodic_sync_msec <= 0) {
         fsync(storage_info->storage_fd);
     }
 }
 
 void load(storage_worker_info_t *infos, unsigned char* buf, load_opts_t *load_opts) {
     storage_info_t* storage_info = &(infos->storage_info);
+
+    if (storage_info->use_mmap) {
+        load_mmap(infos, buf, load_opts);
+        return;
+    }
 
     size_t total_bytes = load_opts->load_nbytes;
     uint32_t offset = load_opts->offset;
@@ -1220,7 +1323,10 @@ void* storage_worker(void* args) {
                     break;
                 }
 
-                fsync(infos->storage_info.storage_fd);
+                if (infos->storage_info.use_mmap)
+                    mmap_sync_dirty(&infos->storage_info);
+                else
+                    fsync(infos->storage_info.storage_fd);
 
                 while (pqueue_size(infos->sync_waiting_queue) > 0) {
                     int worker_id = pqueue_node_key(pqueue_top(infos->sync_waiting_queue));
@@ -1604,11 +1710,11 @@ static struct argp_option argp_node_options[] = {
     {"poll-mode",         POLL_MODE,        "epoll|poll|select",              0,  "Poll mode (defaults to epoll)"},
     {"backlog-length",    BACKLOG_LENGTH,   "n",                              0,  "Maximum pending connections queue length"},
     {"bl",                BACKLOG_LENGTH,   "n", OPTION_ALIAS},
-    {"storage",           STORAGE_OPT_ARG,  "[file=path/to/file][,size=nbytes][,sync=msecs][,odirect][,wait-spin][,count=n]",           0,  "Path to the file used for storage"},
+    {"storage",           STORAGE_OPT_ARG,  "[file=path/to/file][,size=nbytes][,sync|sync=period][,odirect|mmap][,wait-spin][,count=n]",           0,  "Path to the file used for storage"},
     {"max-storage-size",  MAX_STORAGE_SIZE, "nbytes",                         0,  "Max size for the storage size"},
     {"nt",                NUM_THREADS,      "n",                              0,  "Number of threads dedicated to communication" },
     {"num-threads",       NUM_THREADS,      "n", OPTION_ALIAS },
-    {"sync",              SYNC,             "msec",                           0,  "Periodically sync the written data on disk" },
+    {"sync",              SYNC,             "period",                         0,  "Periodically sync the written data on disk (period in msecs)" },
     {"odirect",           ODIRECT,           0,                               0,  "Enable direct disk access (bypass read/write OS caches)"},
     {"thread-affinity",   THREAD_AFFINITY,  "auto|cX,cZ[,cA-cD[:step]]",      0,  "Thread-to-core pinning (automatic or user-defined list using taskset syntax)"},
     {"sched-policy",      SCHED_POLICY,     "other[:nice]|rr:rtprio|fifo:rtprio|dl:runtime_us,dline_us", 0,  "Scheduling policy (defaults to other)"},
@@ -1730,6 +1836,12 @@ static error_t argp_node_parse_opt(int key, char *arg, struct argp_state *state)
             }
             else if (strncmp(tok, "sync=", 5) == 0) {
                 sw_info->periodic_sync_msec = atoi(tok + 5);
+            }
+            else if (strcmp(tok, "sync") == 0) {
+                sw_info->storage_info.mmap_sync = 1;
+            }
+            else if (strncmp(tok, "mmap", 4) == 0) {
+                sw_info->storage_info.use_mmap = 1;
             }
             else if (strncmp(tok, "odirect", 7) == 0) {
                 sw_info->storage_info.use_odirect = 1;
@@ -1881,6 +1993,11 @@ int main(int argc, char *argv[]) {
         storage_worker_infos[i].storage_info.storage_fd = -1;
         storage_worker_infos[i].storage_info.storage_path[0] = '\0';
         storage_worker_infos[i].storage_info.use_odirect = -1;
+        storage_worker_infos[i].storage_info.use_mmap = 0;
+        storage_worker_infos[i].storage_info.mmap_sync = 0;
+        storage_worker_infos[i].storage_info.mmap_addr = NULL;
+        storage_worker_infos[i].storage_info.dirty_beg = 0;
+        storage_worker_infos[i].storage_info.dirty_end = 0;
         storage_worker_infos[i].storage_info.max_storage_size = -1;
     }
 
@@ -1901,6 +2018,11 @@ int main(int argc, char *argv[]) {
         if (s_info->max_storage_size == -1) {s_info->max_storage_size = input_args.max_storage_size;}
         s_info->storage_offset = 0;
         s_info->storage_eof = 0;
+
+        if (s_info->use_mmap) {
+            check(!s_info->use_odirect, "mmap and odirect storage options are mutually exclusive\n");
+            check(s_info->max_storage_size > 0, "mmap storage needs a non-zero size\n");
+        }
 
         char path_template[1024];
 
@@ -1929,6 +2051,8 @@ int main(int argc, char *argv[]) {
 
             storage_info_t *s_info2 = &sw_info2->storage_info;
             s_info2->use_odirect = s_info->use_odirect;
+            s_info2->use_mmap = s_info->use_mmap;
+            s_info2->mmap_sync = s_info->mmap_sync;
             s_info2->max_storage_size = s_info->max_storage_size;
             s_info2->storage_offset = 0;
             s_info2->storage_eof = 0;
@@ -2090,12 +2214,27 @@ int main(int argc, char *argv[]) {
             if (sw_info->storage_info.use_odirect)
                 flags |= O_DIRECT;
             sys_check(sw_info->storage_info.storage_fd = open(sw_info->storage_info.storage_path, flags, S_IRUSR | S_IWUSR));
-            sys_check(fallocate(sw_info->storage_info.storage_fd, 0, 0, BUF_SIZE));
+            if (sw_info->storage_info.use_mmap) {
+                // size the file to the whole storage size (sparse), then map it entirely
+                storage_info_t *s_info = &sw_info->storage_info;
+                sys_check(ftruncate(s_info->storage_fd, s_info->max_storage_size));
+                s_info->mmap_addr = mmap(NULL, s_info->max_storage_size, PROT_READ | PROT_WRITE, MAP_SHARED, s_info->storage_fd, 0);
+                if (s_info->mmap_addr == MAP_FAILED) {
+                    perror("mmap() of storage file failed");
+                    exit(EXIT_FAILURE);
+                }
+                dw_log("storage %s mmap()ed: %lu bytes at %p\n", s_info->storage_path, s_info->max_storage_size, s_info->mmap_addr);
+            } else {
+                sys_check(fallocate(sw_info->storage_info.storage_fd, 0, 0, BUF_SIZE));
+            }
 
             struct stat s;
             sys_check(fstat(sw_info->storage_info.storage_fd, &s));
             blk_size = s.st_blksize;
             dw_log("blk_size = %lu\n", blk_size);
+
+            page_size = sysconf(_SC_PAGESIZE);
+            dw_log("page_size = %lu\n", page_size);
 
             if (sw_info->storage_info.use_odirect) { // block-aligned buffer
                 sys_check(posix_memalign((void**) &sw_info->store_buf, blk_size, BUF_SIZE));
@@ -2316,6 +2455,11 @@ int main(int argc, char *argv[]) {
         storage_worker_info_t *sw_info = &storage_worker_infos[i];
 
         if (sw_info->storage_info.storage_fd >= 0) {
+            if (sw_info->storage_info.mmap_addr != NULL) {
+                msync(sw_info->storage_info.mmap_addr, sw_info->storage_info.max_storage_size, MS_SYNC);
+                munmap(sw_info->storage_info.mmap_addr, sw_info->storage_info.max_storage_size);
+                sw_info->storage_info.mmap_addr = NULL;
+            }
             close(sw_info->storage_info.storage_fd);
 
             for (int j = 0; j < input_args.num_threads; j++) {

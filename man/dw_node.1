@@ -115,6 +115,40 @@ Set the poll mode (defaults to epoll) used by worker threads for monitoring thei
 .TP
 .BR -s,\ \--storage = \fIpath/to/storage/file\fR
 Set the path to the file to be used for LOAD/STORE operations. On STORE, the file is automatically expanded in size, up to the maximum size specified with -m. Note that the file location allows for determining also the type of storage one wants to use, depending on whether the specified pathname is on a HDD or SSD drive, for example.
+The option can be given multiple times, to define multiple storage devices (selected with dev=id in the client LOAD/STORE options), and
+its full syntax is
+\fB[file=]\fIpath\fB[,size=\fInbytes\fB][,sync|sync=\fIperiod\fB][,odirect|mmap][,wait-spin][,count=\fIn\fB]\fR,
+where:
+.nf
+   `size=nbytes`: maximum storage size for this device (see -m)
+   `sync`: with mmap, msync(MS_SYNC) after each sync STORE
+   `sync=period`: periodically sync the written data (see --sync),
+                  period in msecs
+   `odirect`: use O_DIRECT for this device (see --odirect)
+   `mmap`: access the storage through a mmap()ed memory region
+              (requires a non-zero size)
+   `wait-spin`: spin-wait in the storage thread (see --wss)
+   `count=n`: define n devices with the same options (a %d in
+              the path is replaced by the device index)
+.fi
+.B mmap
+sub-option: the storage file is sized (ftruncate) to the maximum storage size at startup and mmap()ed entirely (MAP_SHARED). A LOAD copies data
+from the mmap()ed region, and a STORE copies data into it, followed by a msync() of the written range, with MS_ASYNC or, if the
+.B sync
+sub-option is given and the STORE requested sync (the default in dw_client), MS_SYNC. With
+.BR sync=\fIperiod\fR ,
+no msync() follows each STORE; instead, a msync() with MS_SYNC of the range written in the meantime is issued every period, and sync STOREs
+are acknowledged only after it. Offsets are handled as in the non-mmap case (rewinding to 0 when the end is reached), but a LOAD or STORE that
+exceeds the storage size is truncated to it, and one starting beyond it is skipped. Any remaining data is msync()ed and the file unmapped at exit. The
+.B mmap
+and
+.B odirect
+sub-options are mutually exclusive. Examples:
+.nf
+   dw_node -s /path/to/storage,size=1048576,mmap              # msync(MS_ASYNC) after each STORE
+   dw_node -s /path/to/storage,size=1048576,mmap,sync         # msync(MS_SYNC) after each sync STORE
+   dw_node -s /path/to/storage,size=1048576,mmap,sync=10     # msync(MS_SYNC) every 10 msecs
+.fi
 
 .TP
 .BR -m,\ \--max-storage-size = \fInbytes\fR
@@ -126,9 +160,9 @@ it undergoes a rewind to 0. See also the -s option.
 Enable direct disk access for LOAD and STORE operations (bypass read/write OS caches).
 
 .TP
-.BR --sync = \fImsec\fR
-Periodically sync the written data on disk, issueing a fsync() system call on the
-storage file.
+.BR --sync = \fIperiod\fR
+Periodically sync the written data on disk, issuing a fsync() system call on the
+storage file (or a msync() with MS_SYNC, for mmap storage). The period is in msecs.
 
 .SH DPDK MODE
 When
